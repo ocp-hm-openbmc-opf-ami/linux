@@ -533,6 +533,15 @@
 					clocks = <&syscon ASPEED_CLK_GATE_LCLK>;
 					status = "disabled";
 				};
+
+				mbox: mbox@200 {
+					compatible = "aspeed,ast2500-mbox";
+					reg = <0x200 0x5c>;
+					interrupts = <46>;
+					#mbox-cells = <1>;
+					clocks = <&syscon ASPEED_CLK_GATE_LCLK>;
+					status = "disabled";
+				};
 			};
 
 			peci_legacy: bus@1e78b000 {

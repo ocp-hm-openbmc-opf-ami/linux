@@ -231,10 +231,16 @@ static const struct flash_info st_nor_parts[] = {
 		NO_SFDP_FLAGS(SECT_4K | SPI_NOR_QUAD_READ)
 		MFR_FLAGS(USE_FSR)
 	},
+	
+	/* Removed n25q00 Quad I/O support for the time being due to clock issue with chip 'Micron 8UA15 - rw182 (128MB)'
+	 * while enabling Quad I/O mode. As this chip is default shipped in platforms, marking it
+	 * as Not supported for the time being. Once all chips are replaced with the new model, this can be enabled
+	 * back(Note:- Certain other chips having same name(n25q00) but different part number has no issues).
+	 */
 	{ "n25q00",      INFO(0x20ba21, 0, 64 * 1024, 2048)
 		FLAGS(SPI_NOR_HAS_LOCK | SPI_NOR_HAS_TB | SPI_NOR_4BIT_BP |
 		      SPI_NOR_BP3_SR_BIT6 | NO_CHIP_ERASE)
-		NO_SFDP_FLAGS(SECT_4K | SPI_NOR_QUAD_READ)
+		NO_SFDP_FLAGS(SECT_4K) 
 		MFR_FLAGS(USE_FSR)
 	},
 	{ "n25q00a",     INFO(0x20bb21, 0, 64 * 1024, 2048)

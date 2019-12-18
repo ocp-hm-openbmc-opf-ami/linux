@@ -528,6 +528,13 @@
 				};
 			};
 
+			peci_legacy: bus@1e78b000 {
+				compatible = "simple-bus";
+				#address-cells = <1>;
+				#size-cells = <1>;
+				ranges = <0x0 0x1e78b000 0x60>;
+			};
+
 			peci0: peci-controller@1e78b000 {
 				compatible = "aspeed,ast2500-peci";
 				reg = <0x1e78b000 0x60>;
@@ -579,6 +586,24 @@
 				ranges = <0 0x1e78a000 0x1000>;
 			};
 		};
+	};
+};
+
+&peci_legacy {
+	peci_legacy0: peci-bus@0 {
+		compatible = "aspeed,ast2500-peci";
+		reg = <0x0 0x60>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		interrupts = <15>;
+		clocks = <&syscon ASPEED_CLK_GATE_REFCLK>;
+		resets = <&syscon ASPEED_RESET_PECI>;
+		clock-frequency = <24000000>;
+		msg-timing = <1>;
+		addr-timing = <1>;
+		rd-sampling-point = <8>;
+		cmd-timeout-ms = <1000>;
+		status = "disabled";
 	};
 };
 

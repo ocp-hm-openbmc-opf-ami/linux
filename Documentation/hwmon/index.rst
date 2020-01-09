@@ -165,6 +165,7 @@ Hardware Monitoring Kernel Drivers
    pcf8591
    peci-cputemp
    peci-dimmtemp
+   peci-cpupower
    pim4328
    pli1209bc
    pm6764tr

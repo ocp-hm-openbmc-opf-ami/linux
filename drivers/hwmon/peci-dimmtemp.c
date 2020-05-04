@@ -81,6 +81,7 @@ static int get_dimm_temp(struct peci_dimmtemp *priv, int dimm_no)
 	 * RST_CPL4 completion so filter the invalid readings out.
 	 */
 	switch (priv->gen_info->model) {
+	case INTEL_FAM6_SAPPHIRERAPIDS:
 	case INTEL_FAM6_ICELAKE_X:
 	case INTEL_FAM6_ICELAKE_XD:
 		re_msg.addr = priv->mgr->client->addr;

@@ -353,7 +353,7 @@ static umode_t cputemp_is_visible(const void *data,
 	    (priv->temp_config[channel] & BIT(attr)) &&
 	    (channel < DEFAULT_CHANNEL_NUMS ||
 	     (channel >= DEFAULT_CHANNEL_NUMS &&
-	      (priv->core_mask & BIT(channel - DEFAULT_CHANNEL_NUMS)))))
+	      (priv->core_mask & BIT_ULL(channel - DEFAULT_CHANNEL_NUMS)))))
 		return 0444;
 
 	return 0;
@@ -368,10 +368,44 @@ static const struct hwmon_ops cputemp_ops = {
 static int check_resolved_cores(struct peci_cputemp *priv)
 {
 	struct peci_rd_pci_cfg_local_msg msg;
+	struct peci_rd_end_pt_cfg_msg re_msg;
 	int ret;
 
 	/* Get the RESOLVED_CORES register value */
 	switch (priv->gen_info->model) {
+	case INTEL_FAM6_SAPPHIRERAPIDS:
+		re_msg.addr = priv->mgr->client->addr;
+		re_msg.msg_type = PECI_ENDPTCFG_TYPE_LOCAL_PCI;
+		re_msg.params.pci_cfg.seg = 0;
+		re_msg.params.pci_cfg.bus = 31;
+		re_msg.params.pci_cfg.device = 30;
+		re_msg.params.pci_cfg.function = 6;
+		re_msg.params.pci_cfg.reg = 0x84;
+		re_msg.rx_len = 4;
+
+		ret = peci_command(priv->mgr->client->adapter,
+				   PECI_CMD_RD_END_PT_CFG, sizeof(re_msg), &re_msg);
+		if (ret || re_msg.cc != PECI_DEV_CC_SUCCESS)
+			ret = -EAGAIN;
+		if (ret)
+			return ret;
+
+		priv->core_mask = le32_to_cpup((__le32 *)re_msg.data);
+		priv->core_mask <<= 32;
+
+		re_msg.params.pci_cfg.reg = 0x80;
+
+		ret = peci_command(priv->mgr->client->adapter,
+				   PECI_CMD_RD_END_PT_CFG, sizeof(re_msg), &re_msg);
+		if (ret || re_msg.cc != PECI_DEV_CC_SUCCESS)
+			ret = -EAGAIN;
+		if (ret) {
+			priv->core_mask = 0;
+			return ret;
+		}
+
+		priv->core_mask |= le32_to_cpup((__le32 *)re_msg.data);
+		break;
 	case INTEL_FAM6_ICELAKE_X:
 	case INTEL_FAM6_ICELAKE_XD:
 		msg.addr = priv->mgr->client->addr;
@@ -465,7 +499,8 @@ static int create_module_temp_info(struct peci_cputemp *priv)
 	for (i = 0; i < MODTEMP_CHANNEL_NUMS; i++) {
 		priv->temp_config[priv->config_idx++] = config_table[channel_core];
 
-		if (i < priv->gen_info->core_mask_bits && priv->core_mask & BIT(i)) {
+		if (i < priv->gen_info->core_mask_bits &&
+		    priv->core_mask & BIT_ULL(i)) {
 			ret = create_module_temp_label(priv, i);
 			if (ret)
 				return ret;

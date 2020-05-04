@@ -62,6 +62,12 @@ static const struct cpu_gen_info cpu_gen_info_table[] = {
 		.core_mask_bits = CORE_MASK_BITS_ON_ICXD,
 		.chan_rank_max  = CHAN_RANK_MAX_ON_ICXD,
 		.dimm_idx_max   = DIMM_IDX_MAX_ON_ICXD },
+	{ /* Sapphire Rapids */
+		.family         = INTEL_FAM6,
+		.model          = INTEL_FAM6_SAPPHIRERAPIDS,
+		.core_mask_bits = CORE_MASK_BITS_ON_SPR,
+		.chan_rank_max  = CHAN_RANK_MAX_ON_SPR,
+		.dimm_idx_max   = DIMM_IDX_MAX_ON_SPR },
 };
 
 static int peci_client_get_cpu_gen_info(struct peci_client_manager *priv)

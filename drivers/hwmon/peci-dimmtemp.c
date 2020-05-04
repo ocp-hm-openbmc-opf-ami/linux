@@ -43,6 +43,7 @@ static const u8 support_model[] = {
 	INTEL_FAM6_SKYLAKE_XD,
 	INTEL_FAM6_ICELAKE_X,
 	INTEL_FAM6_ICELAKE_XD,
+	INTEL_FAM6_SAPPHIRERAPIDS,
 };
 
 static inline int read_ddr_dimm_temp_config(struct peci_dimmtemp *priv,
@@ -112,6 +113,71 @@ static int get_dimm_temp(struct peci_dimmtemp *priv, int dimm_no)
 	}
 
 	switch (priv->gen_info->model) {
+	case INTEL_FAM6_SAPPHIRERAPIDS:
+		re_msg.addr = priv->mgr->client->addr;
+		re_msg.rx_len = 4;
+		re_msg.msg_type = PECI_ENDPTCFG_TYPE_LOCAL_PCI;
+		re_msg.params.pci_cfg.seg = 0;
+		re_msg.params.pci_cfg.bus = 30;
+		re_msg.params.pci_cfg.device = 0;
+		re_msg.params.pci_cfg.function = 2;
+		re_msg.params.pci_cfg.reg = 0xd4;
+
+		ret = peci_command(priv->mgr->client->adapter,
+				   PECI_CMD_RD_END_PT_CFG, sizeof(re_msg), &re_msg);
+		if (ret || re_msg.cc != PECI_DEV_CC_SUCCESS ||
+		    !(re_msg.data[3] & BIT(7))) {
+			/* Use default or previous value */
+			ret = 0;
+			break;
+		}
+
+		re_msg.params.pci_cfg.reg = 0xd0;
+
+		ret = peci_command(priv->mgr->client->adapter,
+				   PECI_CMD_RD_END_PT_CFG, sizeof(re_msg), &re_msg);
+		if (ret || re_msg.cc != PECI_DEV_CC_SUCCESS) {
+			/* Use default or previous value */
+			ret = 0;
+			break;
+		}
+
+		cpu_seg = re_msg.data[2];
+		cpu_bus = re_msg.data[0];
+
+		re_msg.msg_type = PECI_ENDPTCFG_TYPE_MMIO;
+		re_msg.params.mmio.seg = cpu_seg;
+		re_msg.params.mmio.bus = cpu_bus;
+		/*
+		 * Device 26, Offset 219a8: IMC 0 channel 0 -> rank 0
+		 * Device 26, Offset 299a8: IMC 0 channel 1 -> rank 1
+		 * Device 27, Offset 219a8: IMC 1 channel 0 -> rank 2
+		 * Device 27, Offset 299a8: IMC 1 channel 1 -> rank 3
+		 * Device 28, Offset 219a8: IMC 2 channel 0 -> rank 4
+		 * Device 28, Offset 299a8: IMC 2 channel 1 -> rank 5
+		 * Device 29, Offset 219a8: IMC 3 channel 0 -> rank 6
+		 * Device 29, Offset 299a8: IMC 3 channel 1 -> rank 7
+		 */
+		re_msg.params.mmio.device = 0x1a + chan_rank / 2;
+		re_msg.params.mmio.function = 0;
+		re_msg.params.mmio.bar = 0;
+		re_msg.params.mmio.addr_type = PECI_ENDPTCFG_ADDR_TYPE_MMIO_Q;
+		re_msg.params.mmio.offset = 0x219a8 + dimm_order * 4;
+		if (chan_rank % 2)
+			re_msg.params.mmio.offset += 0x8000;
+
+		ret = peci_command(priv->mgr->client->adapter,
+				   PECI_CMD_RD_END_PT_CFG, sizeof(re_msg), &re_msg);
+		if (ret || re_msg.cc != PECI_DEV_CC_SUCCESS ||
+		    re_msg.data[1] == 0 || re_msg.data[2] == 0) {
+			/* Use default or previous value */
+			ret = 0;
+			break;
+		}
+
+		priv->temp_max[dimm_no] = re_msg.data[1] * 1000;
+		priv->temp_crit[dimm_no] = re_msg.data[2] * 1000;
+		break;
 	case INTEL_FAM6_ICELAKE_X:
 	case INTEL_FAM6_ICELAKE_XD:
 		re_msg.addr = priv->mgr->client->addr;

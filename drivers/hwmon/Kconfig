@@ -1696,6 +1696,20 @@ config SENSORS_PECI_DIMMPOWER_LEGACY
 	  This driver can also be built as a module. If so, the module
 	  will be called peci-dimmpower.
 
+config SENSORS_PECI_PLATFORMPOWER_LEGACY
+	tristate "PECI platform power monitoring support"
+	depends on PECI_LEGACY
+	select MFD_INTEL_PECI_CLIENT
+	help
+	  If you say yes here you get support for the generic Intel PECI
+	  platformpower driver which provides average power of platform,
+	  current platform power limit, maximal and minimal power setting
+	  using the PECI Client Command Suite via the processor PECI client.
+	  Check Documentation/hwmon/peci-platformpower for details.
+
+	  This driver can also be built as a module. If so, the module
+	  will be called peci-platformpower.
+
 source "drivers/hwmon/peci/Kconfig"
 
 source "drivers/hwmon/pmbus/Kconfig"

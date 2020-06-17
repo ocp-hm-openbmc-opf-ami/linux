@@ -167,6 +167,7 @@ Hardware Monitoring Kernel Drivers
    peci-dimmtemp
    peci-cpupower
    peci-dimmpower
+   peci-platformpower
    pim4328
    pli1209bc
    pm6764tr

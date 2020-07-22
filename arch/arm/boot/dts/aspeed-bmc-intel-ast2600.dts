@@ -430,8 +430,6 @@
 
 &uart5 {
 	status = "okay";
-	// Workaround for A0
-	compatible = "snps,dw-apb-uart";
 };
 
 &uart_routing {

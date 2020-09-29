@@ -190,3 +190,4 @@ obj-$(CONFIG_MOST)		+= most/
 obj-$(CONFIG_PECI_LEGACY)	+= peci-legacy/
 obj-$(CONFIG_PECI)		+= peci/
 obj-$(CONFIG_HTE)		+= hte/
+obj-$(CONFIG_JTAG_ASPEED)	+= jtag/

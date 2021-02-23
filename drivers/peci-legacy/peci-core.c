@@ -340,6 +340,13 @@ static int peci_scan_cmd_mask(struct peci_adapter *adapter)
 		revision = FIELD_GET(REVISION_NUM_MASK, dib);
 	}
 
+	if (revision >= 0x41) { /* Rev. 4.1 */
+		adapter->cmd_mask |= BIT(PECI_CMD_TELEMETRY_DISC);
+		adapter->cmd_mask |= BIT(PECI_CMD_TELEMETRY_GET_TELEM_SAMPLE);
+		adapter->cmd_mask |= BIT(PECI_CMD_TELEMETRY_CONFIG_WATCHER_RD);
+		adapter->cmd_mask |= BIT(PECI_CMD_TELEMETRY_CONFIG_WATCHER_WR);
+		adapter->cmd_mask |= BIT(PECI_CMD_TELEMETRY_GET_CRASHLOG_SAMPLE);
+	}
 	if (revision >= 0x40) { /* Rev. 4.0 */
 		adapter->cmd_mask |= BIT(PECI_CMD_RD_IA_MSREX);
 		adapter->cmd_mask |= BIT(PECI_CMD_RD_END_PT_CFG);
@@ -1318,6 +1325,208 @@ static int peci_cmd_crashdump_get_frame(struct peci_adapter *adapter, uint msg_l
 	return ret;
 }
 
+static int peci_cmd_telemetry_disc(struct peci_adapter *adapter, uint msg_len, void *vmsg)
+{
+	struct peci_telemetry_disc_msg *umsg = vmsg;
+	struct peci_xfer_msg *msg;
+	u8 domain_id;
+	int ret;
+
+	/*
+	 * vmsg may not have a domain ID defined, so we need to check the msg_len.
+	 * If the msg_len is the same size as the struct, then domain ID is provided.
+	 * Otherwise the domain ID is 0.
+	 */
+	domain_id = (msg_len == sizeof(*umsg)) ? umsg->domain_id : 0;
+
+	msg = peci_get_xfer_msg(PECI_TELEMETRY_DISC_WRITE_LEN,
+				PECI_TELEMETRY_DISC_READ_LEN_BASE +
+				umsg->rx_len);
+	if (!msg)
+		return -ENOMEM;
+
+	msg->addr = umsg->addr;
+	msg->tx_buf[0] = PECI_TELEMETRY_CMD;
+	msg->tx_buf[1] = domain_id << 1; /* Domain ID [7:1] | Retry bit [0] */
+	msg->tx_buf[2] = PECI_TELEMETRY_DISC_VERSION;
+	msg->tx_buf[3] = PECI_TELEMETRY_DISC_OPCODE;
+	msg->tx_buf[4] = umsg->subopcode;
+	msg->tx_buf[5] = umsg->param0;
+	msg->tx_buf[6] = (u8)umsg->param1;
+	msg->tx_buf[7] = (u8)(umsg->param1 >> 8);
+	msg->tx_buf[8] = umsg->param2;
+
+	ret = peci_xfer_with_retries(adapter, msg, false);
+	if (!ret)
+		memcpy(umsg->data, &msg->rx_buf[1], umsg->rx_len);
+
+	umsg->cc = msg->rx_buf[0];
+	peci_put_xfer_msg(msg);
+
+	return ret;
+}
+
+static int peci_cmd_telemetry_get_telem_sample(struct peci_adapter *adapter,
+					       uint msg_len, void *vmsg)
+{
+	struct peci_telemetry_get_telem_sample_msg *umsg = vmsg;
+	struct peci_xfer_msg *msg;
+	u8 domain_id;
+	int ret;
+
+	/*
+	 * vmsg may not have a domain ID defined, so we need to check the msg_len.
+	 * If the msg_len is the same size as the struct, then domain ID is provided.
+	 * Otherwise the domain ID is 0.
+	 */
+	domain_id = (msg_len == sizeof(*umsg)) ? umsg->domain_id : 0;
+
+	msg = peci_get_xfer_msg(PECI_TELEMETRY_GET_TELEM_SAMPLE_WRITE_LEN,
+				PECI_TELEMETRY_GET_TELEM_SAMPLE_READ_LEN);
+	if (!msg)
+		return -ENOMEM;
+
+	msg->addr = umsg->addr;
+	msg->tx_buf[0] = PECI_TELEMETRY_CMD;
+	msg->tx_buf[1] = domain_id << 1; /* Domain ID [7:1] | Retry bit [0] */
+	msg->tx_buf[2] = PECI_TELEMETRY_GET_TELEM_SAMPLE_VERSION;
+	msg->tx_buf[3] = PECI_TELEMETRY_GET_TELEM_SAMPLE_OPCODE;
+	msg->tx_buf[4] = (u8)umsg->index;
+	msg->tx_buf[5] = (u8)(umsg->index >> 8);
+	msg->tx_buf[6] = (u8)umsg->sample;
+	msg->tx_buf[7] = (u8)(umsg->sample >> 8);
+
+	ret = peci_xfer_with_retries(adapter, msg, false);
+	if (!ret)
+		memcpy(umsg->data, &msg->rx_buf[1], 8);
+
+	umsg->cc = msg->rx_buf[0];
+	peci_put_xfer_msg(msg);
+
+	return ret;
+}
+
+static int peci_cmd_telemetry_config_watcher_rd(struct peci_adapter *adapter,
+						uint msg_len, void *vmsg)
+{
+	struct peci_telemetry_config_watcher_msg *umsg = vmsg;
+	struct peci_xfer_msg *msg;
+	u8 domain_id;
+	int ret;
+
+	/*
+	 * vmsg may not have a domain ID defined, so we need to check the msg_len.
+	 * If the msg_len is the same size as the struct, then domain ID is provided.
+	 * Otherwise the domain ID is 0.
+	 */
+	domain_id = (msg_len == sizeof(*umsg)) ? umsg->domain_id : 0;
+
+	msg = peci_get_xfer_msg(PECI_TELEMETRY_CONFIG_WATCHER_RD_WRITE_LEN,
+				PECI_TELEMETRY_CONFIG_WATCHER_RD_READ_LEN);
+	if (!msg)
+		return -ENOMEM;
+
+	msg->addr = umsg->addr;
+	msg->tx_buf[0] = PECI_TELEMETRY_CMD;
+	msg->tx_buf[1] = domain_id << 1; /* Domain ID [7:1] | Retry bit [0] */
+	msg->tx_buf[2] = PECI_TELEMETRY_CONFIG_WATCHER_VERSION;
+	msg->tx_buf[3] = PECI_TELEMETRY_CONFIG_WATCHER_OPCODE;
+	msg->tx_buf[4] = PECI_TELEMETRY_CONFIG_WATCHER_RD_PARAM;
+	msg->tx_buf[5] = (u8)umsg->watcher;
+	msg->tx_buf[6] = (u8)(umsg->watcher >> 8);
+	msg->tx_buf[7] = (u8)umsg->offset;
+	msg->tx_buf[8] = (u8)(umsg->offset >> 8);
+
+	ret = peci_xfer_with_retries(adapter, msg, false);
+	if (!ret)
+		memcpy(umsg->data, &msg->rx_buf[1], 8);
+
+	umsg->cc = msg->rx_buf[0];
+	peci_put_xfer_msg(msg);
+
+	return ret;
+}
+
+static int peci_cmd_telemetry_config_watcher_wr(struct peci_adapter *adapter,
+						uint msg_len, void *vmsg)
+{
+	struct peci_telemetry_config_watcher_msg *umsg = vmsg;
+	struct peci_xfer_msg *msg;
+	u8 domain_id;
+	int ret, i;
+
+	/*
+	 * vmsg may not have a domain ID defined, so we need to check the msg_len.
+	 * If the msg_len is the same size as the struct, then domain ID is provided.
+	 * Otherwise the domain ID is 0.
+	 */
+	domain_id = (msg_len == sizeof(*umsg)) ? umsg->domain_id : 0;
+	msg = peci_get_xfer_msg(PECI_TELEMETRY_CONFIG_WATCHER_WR_WRITE_LEN,
+				PECI_TELEMETRY_CONFIG_WATCHER_WR_READ_LEN);
+	if (!msg)
+		return -ENOMEM;
+
+	msg->addr = umsg->addr;
+	msg->tx_buf[0] = PECI_TELEMETRY_CMD;
+	msg->tx_buf[1] = domain_id << 1; /* Domain ID [7:1] | Retry bit [0] */
+	msg->tx_buf[2] = PECI_TELEMETRY_CONFIG_WATCHER_VERSION;
+	msg->tx_buf[3] = PECI_TELEMETRY_CONFIG_WATCHER_OPCODE;
+	msg->tx_buf[4] = PECI_TELEMETRY_CONFIG_WATCHER_WR_PARAM;
+	msg->tx_buf[5] = (u8)umsg->watcher;
+	msg->tx_buf[6] = (u8)(umsg->watcher >> 8);
+	msg->tx_buf[7] = (u8)umsg->offset;
+	msg->tx_buf[8] = (u8)(umsg->offset >> 8);
+	for (i = 0; i < sizeof(umsg->data); i++)
+		msg->tx_buf[9 + i] = umsg->data[i];
+
+	ret = peci_xfer_with_retries(adapter, msg, false);
+
+	umsg->cc = msg->rx_buf[0];
+	peci_put_xfer_msg(msg);
+
+	return ret;
+}
+
+static int peci_cmd_telemetry_get_crashlog_sample(struct peci_adapter *adapter,
+						  uint msg_len, void *vmsg)
+{
+	struct peci_telemetry_get_crashlog_sample_msg *umsg = vmsg;
+	struct peci_xfer_msg *msg;
+	u8 domain_id;
+	int ret;
+
+	/*
+	 * vmsg may not have a domain ID defined, so we need to check the msg_len.
+	 * If the msg_len is the same size as the struct, then domain ID is provided.
+	 * Otherwise the domain ID is 0.
+	 */
+	domain_id = (msg_len == sizeof(*umsg)) ? umsg->domain_id : 0;
+
+	msg = peci_get_xfer_msg(PECI_TELEMETRY_GET_CRASHLOG_SAMPLE_WRITE_LEN,
+				PECI_TELEMETRY_GET_CRASHLOG_SAMPLE_READ_LEN);
+	if (!msg)
+		return -ENOMEM;
+
+	msg->addr = umsg->addr;
+	msg->tx_buf[0] = PECI_TELEMETRY_CMD;
+	msg->tx_buf[1] = domain_id << 1; /* Domain ID [7:1] | Retry bit [0] */
+	msg->tx_buf[2] = PECI_TELEMETRY_GET_CRASHLOG_SAMPLE_VERSION;
+	msg->tx_buf[3] = PECI_TELEMETRY_GET_CRASHLOG_SAMPLE_OPCODE;
+	msg->tx_buf[4] = (u8)umsg->index;
+	msg->tx_buf[5] = (u8)(umsg->index >> 8);
+	msg->tx_buf[6] = (u8)umsg->sample;
+	msg->tx_buf[7] = (u8)(umsg->sample >> 8);
+
+	ret = peci_xfer_with_retries(adapter, msg, false);
+	if (!ret)
+		memcpy(umsg->data, &msg->rx_buf[1], 8);
+
+	umsg->cc = msg->rx_buf[0];
+	peci_put_xfer_msg(msg);
+
+	return ret;
+}
+
 typedef int (*peci_cmd_fn_type)(struct peci_adapter *, uint, void *);
 
 static const peci_cmd_fn_type peci_cmd_fn[PECI_CMD_MAX] = {
@@ -1338,6 +1547,11 @@ static const peci_cmd_fn_type peci_cmd_fn[PECI_CMD_MAX] = {
 	peci_cmd_wr_end_pt_cfg,
 	peci_cmd_crashdump_disc,
 	peci_cmd_crashdump_get_frame,
+	peci_cmd_telemetry_disc,
+	peci_cmd_telemetry_get_telem_sample,
+	peci_cmd_telemetry_config_watcher_rd,
+	peci_cmd_telemetry_config_watcher_wr,
+	peci_cmd_telemetry_get_crashlog_sample,
 };
 
 /**

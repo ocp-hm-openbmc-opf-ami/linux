@@ -80,6 +80,11 @@ enum peci_cmd {
 	PECI_CMD_WR_END_PT_CFG,
 	PECI_CMD_CRASHDUMP_DISC,
 	PECI_CMD_CRASHDUMP_GET_FRAME,
+	PECI_CMD_TELEMETRY_DISC,
+	PECI_CMD_TELEMETRY_GET_TELEM_SAMPLE,
+	PECI_CMD_TELEMETRY_CONFIG_WATCHER_RD,
+	PECI_CMD_TELEMETRY_CONFIG_WATCHER_WR,
+	PECI_CMD_TELEMETRY_GET_CRASHLOG_SAMPLE,
 	PECI_CMD_MAX
 };
 
@@ -641,6 +646,74 @@ struct peci_crashdump_get_frame_msg {
 	__u8	padding2[3];
 } __attribute__((__packed__));
 
+struct peci_telemetry_disc_msg {
+#define PECI_TELEMETRY_DISC_WRITE_LEN		9
+#define PECI_TELEMETRY_DISC_READ_LEN_BASE	1
+#define PECI_TELEMETRY_DISC_VERSION		0
+#define PECI_TELEMETRY_DISC_OPCODE		1
+#define PECI_TELEMETRY_CMD			0x81
+
+	__u8	addr;
+	__u8	subopcode;
+	__u8	cc;
+	__u8	param0;
+	__u16	param1;
+	__u8	param2;
+	__u8	rx_len;
+	__u8	data[10];
+	__u8	domain_id;
+	__u8	padding;
+} __attribute__((__packed__));
+
+struct peci_telemetry_get_telem_sample_msg {
+#define PECI_TELEMETRY_GET_TELEM_SAMPLE_WRITE_LEN	8
+#define PECI_TELEMETRY_GET_TELEM_SAMPLE_READ_LEN	9
+#define PECI_TELEMETRY_GET_TELEM_SAMPLE_VERSION	0
+#define PECI_TELEMETRY_GET_TELEM_SAMPLE_OPCODE	2
+
+	__u8	addr;
+	__u8	cc;
+	__u16	index;
+	__u16	sample;
+	__u8	data[8];
+	__u8	domain_id;
+	__u8	padding;
+} __attribute__((__packed__));
+
+struct peci_telemetry_config_watcher_msg {
+#define PECI_TELEMETRY_CONFIG_WATCHER_RD_WRITE_LEN	9
+#define PECI_TELEMETRY_CONFIG_WATCHER_RD_READ_LEN	9
+#define PECI_TELEMETRY_CONFIG_WATCHER_WR_WRITE_LEN	17
+#define PECI_TELEMETRY_CONFIG_WATCHER_WR_READ_LEN	1
+#define PECI_TELEMETRY_CONFIG_WATCHER_VERSION		0
+#define PECI_TELEMETRY_CONFIG_WATCHER_OPCODE		3
+#define PECI_TELEMETRY_CONFIG_WATCHER_RD_PARAM		0
+#define PECI_TELEMETRY_CONFIG_WATCHER_WR_PARAM		1
+
+	__u8	addr;
+	__u8	cc;
+	__u16	watcher;
+	__u16	offset;
+	__u8	data[8];
+	__u8	domain_id;
+	__u8	padding;
+} __attribute__((__packed__));
+
+struct peci_telemetry_get_crashlog_sample_msg {
+#define PECI_TELEMETRY_GET_CRASHLOG_SAMPLE_WRITE_LEN	8
+#define PECI_TELEMETRY_GET_CRASHLOG_SAMPLE_READ_LEN	9
+#define PECI_TELEMETRY_GET_CRASHLOG_SAMPLE_VERSION	0
+#define PECI_TELEMETRY_GET_CRASHLOG_SAMPLE_OPCODE	12
+
+	__u8	addr;
+	__u8	cc;
+	__u16	index;
+	__u16	sample;
+	__u8	data[8];
+	__u8	domain_id;
+	__u8	padding;
+} __attribute__((__packed__));
+
 #define PECI_IOC_BASE	0xb8
 
 #define PECI_IOC_XFER \
@@ -699,5 +772,25 @@ struct peci_crashdump_get_frame_msg {
 #define PECI_IOC_CRASHDUMP_GET_FRAME \
 	_IOWR(PECI_IOC_BASE, PECI_CMD_CRASHDUMP_GET_FRAME, \
 	      struct peci_crashdump_get_frame_msg)
+
+#define PECI_IOC_TELEMETRY_DISC \
+	_IOWR(PECI_IOC_BASE, PECI_CMD_TELEMETRY_DISC, \
+	      struct peci_telemetry_disc_msg)
+
+#define PECI_IOC_TELEMETRY_GET_TELEM_SAMPLE \
+	_IOWR(PECI_IOC_BASE, PECI_CMD_TELEMETRY_GET_TELEM_SAMPLE, \
+	      struct peci_telemetry_get_telem_sample_msg)
+
+#define PECI_IOC_TELEMETRY_CONFIG_WATCHER_RD \
+	_IOWR(PECI_IOC_BASE, PECI_CMD_TELEMETRY_CONFIG_WATCHER_RD, \
+	      struct peci_telemetry_config_watcher_msg)
+
+#define PECI_IOC_TELEMETRY_CONFIG_WATCHER_WR \
+	_IOWR(PECI_IOC_BASE, PECI_CMD_TELEMETRY_CONFIG_WATCHER_WR, \
+	      struct peci_telemetry_config_watcher_msg)
+
+#define PECI_IOC_TELEMETRY_GET_CRASHLOG_SAMPLE \
+	_IOWR(PECI_IOC_BASE, PECI_CMD_TELEMETRY_GET_CRASHLOG_SAMPLE, \
+	      struct peci_telemetry_get_crashlog_sample_msg)
 
 #endif /* __PECI_IOCTL_H */

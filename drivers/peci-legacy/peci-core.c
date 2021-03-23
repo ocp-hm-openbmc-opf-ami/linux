@@ -25,6 +25,13 @@ static bool is_registered;
 static DEFINE_MUTEX(core_lock);
 static DEFINE_IDR(peci_adapter_idr);
 
+static uint total_retry_timeout_us __read_mostly;
+module_param(total_retry_timeout_us, uint, 0660);
+static uint retry_interval_min_us __read_mostly = PECI_DEV_RETRY_INTERVAL_MIN_USEC;
+module_param(retry_interval_min_us, uint, 0660);
+static uint retry_interval_max_us __read_mostly = PECI_DEV_RETRY_INTERVAL_MAX_USEC;
+module_param(retry_interval_max_us, uint, 0660);
+
 struct peci_adapter *peci_get_adapter(int nr)
 {
 	struct peci_adapter *adapter;
@@ -193,7 +200,7 @@ static int peci_aw_fcs(struct peci_xfer_msg *msg, int len, u8 *aw_fcs)
 static int __peci_xfer(struct peci_adapter *adapter, struct peci_xfer_msg *msg,
 		       bool do_retry, bool has_aw_fcs)
 {
-	uint interval_us = PECI_DEV_RETRY_INTERVAL_MIN_USEC;
+	uint interval_us = retry_interval_min_us;
 	char task_name[TASK_COMM_LEN];
 	ulong timeout = jiffies;
 	u8 aw_fcs;
@@ -230,7 +237,7 @@ static int __peci_xfer(struct peci_adapter *adapter, struct peci_xfer_msg *msg,
 	 */
 
 	if (do_retry)
-		timeout += PECI_DEV_RETRY_TIMEOUT;
+		timeout += usecs_to_jiffies(total_retry_timeout_us);
 
 	for (;;) {
 		ret = adapter->xfer(adapter, msg);
@@ -265,8 +272,8 @@ static int __peci_xfer(struct peci_adapter *adapter, struct peci_xfer_msg *msg,
 		usleep_range(interval_us, interval_us * 2);
 
 		interval_us *= 2;
-		if (interval_us > PECI_DEV_RETRY_INTERVAL_MAX_USEC)
-			interval_us = PECI_DEV_RETRY_INTERVAL_MAX_USEC;
+		if (interval_us > retry_interval_max_us)
+			interval_us = retry_interval_max_us;
 	}
 
 	if (ret)
@@ -2237,6 +2244,8 @@ EXPORT_SYMBOL_GPL(peci_del_driver);
 static int __init peci_init(void)
 {
 	int ret;
+
+	total_retry_timeout_us = jiffies_to_usecs(PECI_DEV_RETRY_TIMEOUT);
 
 	ret = bus_register(&peci_bus_type);
 	if (ret < 0) {

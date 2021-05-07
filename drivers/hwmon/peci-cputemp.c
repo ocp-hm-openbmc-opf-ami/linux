@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 // Copyright (c) 2018-2019 Intel Corporation
 
+#include <linux/bitfield.h>
 #include <linux/hwmon.h>
 #include <linux/jiffies.h>
 #include <linux/mfd/intel-peci-client.h>
@@ -10,8 +11,11 @@
 #include "peci-hwmon.h"
 
 #define DEFAULT_CHANNEL_NUMS	5
-#define MODTEMP_CHANNEL_NUMS	CORE_MASK_BITS_MAX
+#define HBMTEMP_CHANNEL_NUMS	8
+#define HBM_PARAM_OFFSET	0xe0
+#define MODTEMP_CHANNEL_NUMS	(CORE_MASK_BITS_MAX + HBMTEMP_CHANNEL_NUMS)
 #define CPUTEMP_CHANNEL_NUMS	(DEFAULT_CHANNEL_NUMS + MODTEMP_CHANNEL_NUMS)
+#define HBM_ENABLED_MASK	GENMASK(30, 27)
 #define BIOS_RST_CPL3		BIT(3)
 
 struct temp_group {
@@ -30,6 +34,7 @@ struct peci_cputemp {
 	const struct cpu_gen_info	*gen_info;
 	struct temp_group		temp;
 	u64				core_mask;
+	u64				hbm_mask;
 	u32				temp_config[CPUTEMP_CHANNEL_NUMS + 1];
 	uint				config_idx;
 	struct hwmon_channel_info	temp_info;
@@ -45,6 +50,7 @@ enum cputemp_channels {
 	channel_tthrottle,
 	channel_tjmax,
 	channel_core,
+	channel_hbm,
 };
 
 static const u32 config_table[] = {
@@ -67,6 +73,10 @@ static const u32 config_table[] = {
 
 	/* Core temperature - for all core channels */
 	HWMON_T_LABEL | HWMON_T_INPUT,
+
+	/* HBM temperature - for all high bandwidth memory channels */
+	HWMON_T_LABEL | HWMON_T_INPUT | HWMON_T_MAX | HWMON_T_CRIT |
+	HWMON_T_CRIT_HYST,
 };
 
 static const char *cputemp_label[DEFAULT_CHANNEL_NUMS] = {
@@ -222,14 +232,20 @@ static int get_module_temp(struct peci_cputemp *priv, int index)
 {
 	s32 module_dts_margin;
 	u8  pkg_cfg[4];
+	u16 param;
 	int ret;
 
 	if (!peci_sensor_need_update(&priv->temp.module[index]))
 		return 0;
 
+	if (index < CORE_MASK_BITS_MAX)
+		param = index;
+	else
+		param = index - CORE_MASK_BITS_MAX + HBM_PARAM_OFFSET;
+
 	ret = peci_client_read_package_config(priv->mgr,
 					      PECI_MBX_INDEX_MODULE_TEMP,
-					      index, pkg_cfg);
+					      param, pkg_cfg);
 	if (ret)
 		return ret;
 
@@ -348,12 +364,15 @@ static umode_t cputemp_is_visible(const void *data,
 				  u32 attr, int channel)
 {
 	const struct peci_cputemp *priv = data;
+	uint hbm_chan_offset = DEFAULT_CHANNEL_NUMS + CORE_MASK_BITS_MAX;
 
 	if (channel < ARRAY_SIZE(priv->temp_config) &&
 	    (priv->temp_config[channel] & BIT(attr)) &&
 	    (channel < DEFAULT_CHANNEL_NUMS ||
-	     (channel >= DEFAULT_CHANNEL_NUMS &&
-	      (priv->core_mask & BIT_ULL(channel - DEFAULT_CHANNEL_NUMS)))))
+	     (channel < hbm_chan_offset &&
+	      (priv->core_mask & BIT_ULL(channel - DEFAULT_CHANNEL_NUMS))) ||
+	     (channel >= hbm_chan_offset &&
+	      (priv->hbm_mask & BIT_ULL((channel - hbm_chan_offset) / 2)))))
 		return 0444;
 
 	return 0;
@@ -476,17 +495,26 @@ static int create_module_temp_label(struct peci_cputemp *priv, int idx)
 	if (!priv->module_temp_label[idx])
 		return -ENOMEM;
 
-	sprintf(priv->module_temp_label[idx], "Core %d", idx);
+	if (idx < CORE_MASK_BITS_MAX) {
+		sprintf(priv->module_temp_label[idx], "Core %d", idx);
+	} else {
+		int hbm_idx = idx - CORE_MASK_BITS_MAX;
+
+		sprintf(priv->module_temp_label[idx], "%s %d",
+			hbm_idx % 2 ? "HBM DRAM" : "HBM Logic",
+			hbm_idx / 2 + 1);
+	}
 
 	return 0;
 }
 
 static int create_module_temp_info(struct peci_cputemp *priv)
 {
+	u8 model = priv->gen_info->model;
 	int ret, i;
 
 	ret = check_resolved_cores(priv);
-	if (ret)
+	if (ret && model != INTEL_FAM6_SAPPHIRERAPIDS)
 		return ret;
 
 	priv->module_temp_label = devm_kzalloc(priv->dev,
@@ -496,11 +524,38 @@ static int create_module_temp_info(struct peci_cputemp *priv)
 	if (!priv->module_temp_label)
 		return -ENOMEM;
 
-	for (i = 0; i < MODTEMP_CHANNEL_NUMS; i++) {
-		priv->temp_config[priv->config_idx++] = config_table[channel_core];
+	if (model == INTEL_FAM6_SAPPHIRERAPIDS) {
+		struct peci_rd_end_pt_cfg_msg re_msg;
+		u32 capid3_cfg;
 
-		if (i < priv->gen_info->core_mask_bits &&
-		    priv->core_mask & BIT_ULL(i)) {
+		re_msg.addr = priv->mgr->client->addr;
+		re_msg.rx_len = 4;
+		re_msg.msg_type = PECI_ENDPTCFG_TYPE_LOCAL_PCI;
+		re_msg.params.pci_cfg.seg = 0;
+		re_msg.params.pci_cfg.bus = 31;
+		re_msg.params.pci_cfg.device = 30;
+		re_msg.params.pci_cfg.function = 3;
+		re_msg.params.pci_cfg.reg = 0x90;
+
+		ret = peci_command(priv->mgr->client->adapter,
+				   PECI_CMD_RD_END_PT_CFG, sizeof(re_msg), &re_msg);
+		if (ret || re_msg.cc != PECI_DEV_CC_SUCCESS)
+			ret = -EAGAIN;
+		if (ret)
+			return ret;
+
+		capid3_cfg = le32_to_cpup((__le32 *)re_msg.data);
+		priv->hbm_mask = FIELD_GET(HBM_ENABLED_MASK, capid3_cfg);
+	}
+
+	for (i = 0; i < MODTEMP_CHANNEL_NUMS; i++) {
+		priv->temp_config[priv->config_idx++] = i < CORE_MASK_BITS_MAX ?
+			config_table[channel_core] : config_table[channel_hbm];
+
+		if ((i < priv->gen_info->core_mask_bits &&
+		     priv->core_mask & BIT_ULL(i)) ||
+		    (i >= CORE_MASK_BITS_MAX &&
+		     priv->hbm_mask & BIT_ULL((i - CORE_MASK_BITS_MAX) / 2))) {
 			ret = create_module_temp_label(priv, i);
 			if (ret)
 				return ret;

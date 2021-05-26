@@ -293,6 +293,8 @@ static umode_t max31790_fan_is_visible(const void *_data, u32 attr, int channel)
 	case hwmon_fan_enable:
 		if (channel < NR_CHANNEL)
 			return 0644;
+		if (fan_config & MAX31790_FAN_CFG_TACH_INPUT)
+			return 0444;
 		return 0;
 	default:
 		return 0;
@@ -453,12 +455,12 @@ static const struct hwmon_channel_info *max31790_info[] = {
 			   HWMON_F_INPUT | HWMON_F_TARGET | HWMON_F_FAULT | HWMON_F_ENABLE,
 			   HWMON_F_INPUT | HWMON_F_TARGET | HWMON_F_FAULT | HWMON_F_ENABLE,
 			   HWMON_F_INPUT | HWMON_F_TARGET | HWMON_F_FAULT | HWMON_F_ENABLE,
-			   HWMON_F_INPUT | HWMON_F_FAULT,
-			   HWMON_F_INPUT | HWMON_F_FAULT,
-			   HWMON_F_INPUT | HWMON_F_FAULT,
-			   HWMON_F_INPUT | HWMON_F_FAULT,
-			   HWMON_F_INPUT | HWMON_F_FAULT,
-			   HWMON_F_INPUT | HWMON_F_FAULT),
+			   HWMON_F_INPUT | HWMON_F_FAULT  | HWMON_F_ENABLE,
+			   HWMON_F_INPUT | HWMON_F_FAULT  | HWMON_F_ENABLE,
+			   HWMON_F_INPUT | HWMON_F_FAULT  | HWMON_F_ENABLE,
+			   HWMON_F_INPUT | HWMON_F_FAULT  | HWMON_F_ENABLE,
+			   HWMON_F_INPUT | HWMON_F_FAULT  | HWMON_F_ENABLE,
+			   HWMON_F_INPUT | HWMON_F_FAULT  | HWMON_F_ENABLE),
 	HWMON_CHANNEL_INFO(pwm,
 			   HWMON_PWM_INPUT | HWMON_PWM_ENABLE,
 			   HWMON_PWM_INPUT | HWMON_PWM_ENABLE,

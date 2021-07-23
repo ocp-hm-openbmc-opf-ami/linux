@@ -32,6 +32,15 @@ module_param(retry_interval_min_us, uint, 0660);
 static uint retry_interval_max_us __read_mostly = PECI_DEV_RETRY_INTERVAL_MAX_USEC;
 module_param(retry_interval_max_us, uint, 0660);
 
+static size_t total_retry_cc_count;
+module_param(total_retry_cc_count, uint, 0660);
+static size_t total_success_cc_count;
+module_param(total_success_cc_count, uint, 0660);
+static size_t total_timeout_count;
+module_param(total_timeout_count, uint, 0660);
+static size_t total_command_count;
+module_param(total_command_count, uint, 0660);
+
 struct peci_adapter *peci_get_adapter(int nr)
 {
 	struct peci_adapter *adapter;
@@ -245,6 +254,12 @@ static int __peci_xfer(struct peci_adapter *adapter, struct peci_xfer_msg *msg,
 		if (!do_retry || ret || !msg->rx_buf)
 			break;
 
+		if ((msg->rx_buf[0] & PECI_DEV_CC_RETRY_CHECK_MASK) ==
+		    PECI_DEV_CC_NEED_RETRY)
+			total_retry_cc_count++;
+		else if (msg->rx_buf[0] == PECI_DEV_CC_SUCCESS)
+			total_success_cc_count++;
+
 		/* Retry is needed when completion code is 0x8x */
 		if ((msg->rx_buf[0] & PECI_DEV_CC_RETRY_CHECK_MASK) !=
 		    PECI_DEV_CC_NEED_RETRY)
@@ -266,6 +281,7 @@ static int __peci_xfer(struct peci_adapter *adapter, struct peci_xfer_msg *msg,
 		if (time_after(jiffies, timeout)) {
 			dev_dbg(&adapter->dev, "Timeout retrying xfer!\n");
 			ret = -ETIMEDOUT;
+			total_timeout_count++;
 			break;
 		}
 
@@ -278,6 +294,8 @@ static int __peci_xfer(struct peci_adapter *adapter, struct peci_xfer_msg *msg,
 
 	if (ret)
 		dev_dbg(&adapter->dev, "xfer error: %d\n", ret);
+
+	total_command_count++;
 
 	return ret;
 }

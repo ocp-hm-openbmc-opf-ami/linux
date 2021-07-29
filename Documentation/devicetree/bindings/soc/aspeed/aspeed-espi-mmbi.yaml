@@ -1,0 +1,92 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: "http://devicetree.org/schemas/soc/aspeed/aspeed-espi-mmbi.yaml#"
+$schema: "http://devicetree.org/meta-schemas/core.yaml#"
+
+title: Aspeed AST26xx MMBI Controller
+
+maintainers:
+ - Apparao Puli <apparao.puli@intel.com>
+
+description: |
+  This binding describes the  MMBI controller in the AST26xx SOCs.
+  The MMBI Controller allows the memory mapping over eSPI and thus
+  allows efficient memory sharing between Host and BMC.
+
+properties:
+  compatible:
+    enum:
+      - aspeed,ast2600-espi-mmbi
+
+  reg:
+    maxItems: 1
+    description: contains the MMBI control register and size
+
+  interrupts:
+    maxItems: 1
+
+  clocks:
+    maxItems: 1
+    description: A reference to syscon node describing the clocks
+
+  aspeed,espi:
+    description: a reference to the eSPI controller of the Aspeed SOC
+    allOf:
+      - $ref: /schemas/types.yaml#/definitions/phandle
+
+  aspeed,lpc:
+    description: a reference to the LPC controller of the Aspeed SOC
+    allOf:
+      - $ref: /schemas/types.yaml#/definitions/phandle
+
+  memory-region:
+    maxItems: 1
+    description:
+      contains a phandle to the BMC SOC memory mapping base address
+      and its size
+
+  host-map-addr:
+    maxItems: 1
+    description: contains a base address which is mapped on host side
+
+required:
+  - compatible
+  - reg
+  - interrupts
+  - clocks
+  - aspeed,espi
+  - aspeed,lpc
+  - memory-region
+  - host-map-addr
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/interrupt-controller/arm-gic.h>
+    #include <dt-bindings/clock/ast2600-clock.h>
+    #include <dt-bindings/interrupt-controller/aspeed-scu-ic.h>
+
+    reserved-memory {
+        #address-cells = <1>;
+        #size-cells = <1>;
+        ranges;
+
+        espi_mmbi_memory: mmbi@9eff0000 {
+            reg = <0x9EFF0000 0x10000>;
+            no-map;
+        };
+    };
+
+    mmbi: mmbi@1e6ee800 {
+        compatible = "aspeed,ast2600-espi-mmbi";
+        reg = <0x1e6ee800 0x50>;
+        interrupts = <GIC_SPI 108 IRQ_TYPE_LEVEL_HIGH>;
+        clocks = <&syscon ASPEED_CLK_GATE_ESPICLK>;
+        aspeed,espi = <&espi>;
+        aspeed,lpc = <&lpc>;
+        status = "disabled";
+        host-map-addr = <0xFE0B0000>;
+        memory-region = <&espi_mmbi_memory>;
+    };

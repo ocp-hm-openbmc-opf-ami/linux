@@ -37,6 +37,11 @@
 			compatible = "shared-dma-pool";
 			reusable;
 		};
+
+		espi_mmbi_memory: espi_mmbi_memory {
+			no-map;
+			reg = <0x9EFF0000 0x10000>; /* 64K */
+		};
 	};
 
 	reserved-memory {
@@ -156,6 +161,13 @@
 	oob,dma-mode;
 	oob,dma-tx-desc-num = <0x2>;
 	oob,dma-rx-desc-num = <0x8>;
+};
+
+&mmbi {
+	status = "okay";
+
+	host-map-addr = <0xFE0B0000>;
+	memory-region = <&espi_mmbi_memory>;
 };
 
 &mctp {

@@ -128,6 +128,14 @@ config ASPEED_OTP
 	tristate "Aspeed OTP Driver"
 	depends on MACH_ASPEED_G6
 
+config ASPEED_ESPI_MMBI
+	tristate "Aspeed ast2600 MMBI support over eSPI"
+	help
+	  Enable support for MMBI support over eSPI.
+	  This adds the drivers which allows efficient memory sharing
+	  between Host/BIOS to BMC. This also creates protocol specific
+	  device nodes and IOCTLs for interfacing with userspace applications.
+
 endmenu
 
 endif

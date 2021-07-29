@@ -926,7 +926,7 @@
 			};
 
 			espi: espi@1e6ee000 {
-				compatible = "aspeed,ast2600-espi-slave";
+				compatible = "aspeed,ast2600-espi-slave", "syscon";
 				reg = <0x1e6ee000 0x200>;
 				interrupts-extended = <&gic GIC_SPI 42 IRQ_TYPE_LEVEL_HIGH>,
 					<&gpio0 ASPEED_GPIO(W, 7) IRQ_TYPE_EDGE_FALLING>;
@@ -936,6 +936,16 @@
 				pinctrl-names = "default";
 				pinctrl-0 = <&pinctrl_espi_default>,
 					    <&pinctrl_espialt_default>;
+			};
+
+			mmbi: mmbi@1e6ee800 {
+				compatible = "aspeed,ast2600-espi-mmbi";
+				interrupts = <GIC_SPI 108 IRQ_TYPE_LEVEL_HIGH>;
+				reg = <0x1e6ee800 0x50>;
+				clocks = <&syscon ASPEED_CLK_GATE_ESPICLK>;
+				aspeed,espi = <&espi>;
+				aspeed,lpc = <&lpc>;
+				status = "disabled";
 			};
 
 			i2c: bus@1e78a000 {

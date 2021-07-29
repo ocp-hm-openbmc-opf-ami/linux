@@ -15,3 +15,4 @@ obj-$(CONFIG_ASPEED_UDMA)               += aspeed-udma.o
 obj-$(CONFIG_ASPEED_VGA_SHAREDMEM)	+= aspeed-vga-sharedmem.o
 obj-$(CONFIG_ASPEED_MCTP)		+= aspeed-mctp.o
 obj-$(CONFIG_ASPEED_OTP)		+= aspeed-otp.o
+obj-$(CONFIG_ASPEED_ESPI_MMBI)		+= aspeed-espi-mmbi.o

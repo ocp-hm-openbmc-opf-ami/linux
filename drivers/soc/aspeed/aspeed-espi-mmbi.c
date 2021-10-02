@@ -88,10 +88,10 @@ struct mmbi_header {
 
 enum protocol_type {
 	ipmi = 1,
-	host_targeted_ipmi = 2,
-	node_manager = 3,
-	ras_offload = 4,
-	mctp = 5
+	seamless = 2,
+	ras_offload = 3,
+	mctp = 4,
+	node_manager = 5
 };
 
 struct aspeed_mmbi_protocol {
@@ -679,14 +679,14 @@ static char *get_protocol_suffix(enum protocol_type type)
 	switch (type) {
 	case ipmi:
 		return "ipmi";
-	case host_targeted_ipmi:
-		return "ht_ipmi";
-	case node_manager:
-		return "nm";
+	case seamless:
+		return "seamless";
 	case ras_offload:
 		return "ras_offload";
 	case mctp:
 		return "mctp";
+	case node_manager:
+		return "nm";
 	}
 
 	return NULL;
@@ -799,9 +799,8 @@ static int mmbi_channel_init(struct aspeed_espi_mmbi *priv, u8 idx)
 	memcpy(priv->chan[idx].desc_vmem, &ch_desc, sizeof(ch_desc));
 
 	/* TODO: Get supported protocol from dts file. */
-	priv->chan[idx].supported_protocols[0] = ipmi;
-	priv->chan[idx].supported_protocols[1] = host_targeted_ipmi;
-	priv->chan[idx].supported_protocols[2] = ras_offload;
+	priv->chan[idx].supported_protocols[0] = seamless;
+	priv->chan[idx].supported_protocols[1] = ras_offload;
 
 	for (i = 0; priv->chan[idx].supported_protocols[i] != 0; i++) {
 		char *dev_name;

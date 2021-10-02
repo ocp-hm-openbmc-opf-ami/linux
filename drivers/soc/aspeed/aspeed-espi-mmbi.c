@@ -160,7 +160,12 @@ static void raise_sci_interrupt(struct regmap *lpc_regmap)
 	/*
 	 * Just asserting the SCI VW will trigger the SCI event continuosly.
 	 * So BMC must deassert SCI VW to avoid it.
+	 * Workaround: Host is unable to invoke the SCI handler, if SCI VW is
+	 * clear immediatley. So adding small(6us) delay to work around
+	 * the issue.
 	 */
+	udelay(6);
+
 	regmap_write_bits(lpc_regmap, AST_LPC_SWCR0300,
 			  LPC_BMC_TRIG_WAKEUP_EVT_STS,
 			  LPC_BMC_TRIG_WAKEUP_EVT_STS);

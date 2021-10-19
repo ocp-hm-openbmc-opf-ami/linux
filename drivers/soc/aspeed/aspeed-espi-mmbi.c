@@ -3,6 +3,7 @@
 
 #include <linux/bitfield.h>
 #include <linux/crc8.h>
+#include <linux/dma-mapping.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/mfd/syscon.h>
@@ -132,8 +133,9 @@ struct aspeed_espi_mmbi {
 
 	int irq;
 	phys_addr_t host_map_addr;
-	phys_addr_t mem_base;
-	resource_size_t mem_size;
+	dma_addr_t mmbi_phys_addr;
+	resource_size_t mmbi_size;
+	u8 *dma_vaddr;
 
 	struct aspeed_mmbi_channel chan[MAX_NO_OF_SUPPORTED_CHANNELS];
 };
@@ -295,8 +297,12 @@ static void update_host_rop(struct aspeed_mmbi_channel *channel,
 		hrop.b2h_wp);
 	memcpy(channel->hrop_vmem, &hrop, sizeof(hrop));
 
-	/* Raise SCI interrupt */
-	raise_sci_interrupt(channel->priv->lpc_map);
+	/*
+	 * Raise SCI interrupt only if B2H buffer is updated
+	 * Don't raise SCI, after BMC read the H2B buffer
+	 */
+	if (w_len != 0)
+		raise_sci_interrupt(channel->priv->lpc_map);
 }
 
 static int send_bmc_reset_request(struct aspeed_mmbi_channel *channel)
@@ -743,32 +749,14 @@ static int mmbi_channel_init(struct aspeed_espi_mmbi *priv, u8 idx)
 	struct mmbi_cap_desc ch_desc;
 	struct host_rop hrop;
 
-	u32 b2h_physaddr = priv->mem_base;
-	u32 h2b_physaddr = priv->mem_base + (priv->mem_size / 2);
-	u32 b2h_size = (priv->mem_size / 2);
-	u32 h2b_size = (priv->mem_size / 2);
+	u32 b2h_size = (priv->mmbi_size / 2);
+	u32 h2b_size = (priv->mmbi_size / 2);
 
-	dev_dbg(priv->dev, "Channel(%d): B2H Physical Adrr:0x%0x, Size:0x%x\n",
-		idx, b2h_physaddr, b2h_size);
-	dev_dbg(priv->dev, "Channel(%d): H2B Physical Adrr:0x%0x, Size:0x%x\n",
-		idx, h2b_physaddr, h2b_size);
+	b2h_vaddr = priv->dma_vaddr;
+	h2b_vaddr = priv->dma_vaddr + (priv->mmbi_size / 2);
 
 	memset(&priv->chan[idx], 0, sizeof(struct aspeed_mmbi_channel));
-
 	priv->chan[idx].chan_num = idx;
-	b2h_vaddr = memremap(b2h_physaddr, b2h_size, MEMREMAP_WB);
-	if (!b2h_vaddr) {
-		dev_err(dev, "ERROR while performing memremap()\n");
-		goto err_destroy_channel;
-	}
-	memset(b2h_vaddr, 0, b2h_size);
-
-	h2b_vaddr = memremap(h2b_physaddr, h2b_size, MEMREMAP_WB);
-	if (!h2b_vaddr) {
-		dev_err(dev, "ERROR while performing memremap()\n");
-		goto err_destroy_channel;
-	}
-	memset(h2b_vaddr, 0, h2b_size);
 
 	priv->chan[idx].desc_vmem = b2h_vaddr;
 	priv->chan[idx].hrop_vmem = b2h_vaddr + sizeof(struct mmbi_cap_desc);
@@ -958,27 +946,36 @@ static int aspeed_espi_mmbi_probe(struct platform_device *pdev)
 		rc = of_address_to_resource(node, 0, &resm);
 		of_node_put(node);
 		if (!rc) {
-			priv->mem_size = resource_size(&resm);
-			priv->mem_base = resm.start;
+			priv->mmbi_size = resource_size(&resm);
+			priv->mmbi_phys_addr = resm.start;
 		} else {
-			priv->mem_size = ESPI_MMBI_TOTAL_SIZE;
-			priv->mem_base = BMC_SRAM_BASE_ADDRESS;
+			priv->mmbi_size = ESPI_MMBI_TOTAL_SIZE;
+			priv->mmbi_phys_addr = BMC_SRAM_BASE_ADDRESS;
 		}
 	} else {
 		dev_dbg(priv->dev,
 			"No DTS config, assign default MMBI Address\n");
 		priv->host_map_addr = PCH_ESPI_LGMR_BASE_ADDRESS;
-		priv->mem_size = ESPI_MMBI_TOTAL_SIZE;
-		priv->mem_base = BMC_SRAM_BASE_ADDRESS;
+		priv->mmbi_size = ESPI_MMBI_TOTAL_SIZE;
+		priv->mmbi_phys_addr = BMC_SRAM_BASE_ADDRESS;
 	}
 	dev_dbg(priv->dev, "MMBI: HostAddr:0x%x, SramAddr:0x%x, Size: 0x%0x\n",
-		priv->host_map_addr, priv->mem_base, priv->mem_size);
+		priv->host_map_addr, priv->mmbi_phys_addr, priv->mmbi_size);
+	priv->dma_vaddr = dma_alloc_coherent(priv->dev, priv->mmbi_size,
+					     &priv->mmbi_phys_addr, GFP_KERNEL);
+
+	if (!priv->dma_vaddr) {
+		dev_err(priv->dev, "MMBI: DMA memory allocation failed\n");
+		return -ENOMEM;
+	}
+	dev_dbg(priv->dev, "MMBI: DMA Addr: 0x%x\n", (u32)priv->dma_vaddr);
+	memset(priv->dma_vaddr, 0, priv->mmbi_size);
 
 	crc8_populate_msb(mmbi_crc8_table, MMBI_CRC8_POLYNOMIAL);
 
 	/* eSPI Controller settings */
 	regmap_write(priv->pmap, ASPEED_ESPI_PC_RX_SADDR, priv->host_map_addr);
-	regmap_write(priv->pmap, ASPEED_ESPI_PC_RX_TADDR, priv->mem_base);
+	regmap_write(priv->pmap, ASPEED_ESPI_PC_RX_TADDR, priv->mmbi_phys_addr);
 	regmap_write(priv->pmap, ASPEED_ESPI_PC_RX_TADDRM,
 		     ASPEED_ESPI_PC_RX_TADDR_MASK);
 	regmap_update_bits(priv->pmap, ASPEED_ESPI_CTRL2,
@@ -1033,15 +1030,13 @@ static int aspeed_espi_mmbi_remove(struct platform_device *pdev)
 	dev_dbg(priv->dev, "MMBI: Removing MMBI device\n");
 
 	for (i = 0; i < MAX_NO_OF_SUPPORTED_CHANNELS; i++) {
-		if (priv->chan[i].desc_vmem)
-			memunmap(priv->chan[i].desc_vmem);
-
-		if (priv->chan[i].hrwp_vmem)
-			memunmap(priv->chan[i].hrwp_vmem);
-
 		for (j = 0; priv->chan[i].supported_protocols[j] != 0; j++)
 			misc_deregister(&priv->chan[i].protocol[j].miscdev);
 	}
+
+	if (priv->dma_vaddr)
+		dma_free_coherent(priv->dev, priv->mmbi_size, priv->dma_vaddr,
+				  priv->mmbi_phys_addr);
 
 	return 0;
 }

@@ -27,11 +27,13 @@
 #define MMBI_HDR_TYPE_MASK GENMASK(31, 24)
 #define HOST_RESET_REQUEST_BIT BIT(31)
 #define HOST_READY_BIT BIT(31)
+#define ESPI_SCI_STATUS_BIT BIT(24)
 
 #define GET_H2B_WRITE_POINTER(x) ((x) & H2B_WRITE_POINTER_MASK)
 #define GET_B2H_READ_POINTER(x) ((x) & B2H_READ_POINTER_MASK)
 #define GET_HOST_RESET_REQ_BIT(x) ((x) & HOST_RESET_REQUEST_BIT)
 #define GET_HOST_READY_BIT(x) ((x) & HOST_READY_BIT)
+#define HOST_READ_SCI_STATUS_BIT(x) ((x) & ESPI_SCI_STATUS_BIT)
 
 #define MMBI_CRC8_POLYNOMIAL 0x07
 DECLARE_CRC8_TABLE(mmbi_crc8_table);
@@ -147,8 +149,14 @@ static const struct regmap_config aspeed_espi_mmbi_regmap_cfg = {
 	.max_register = 0x04C,
 };
 
-static void raise_sci_interrupt(struct regmap *lpc_regmap)
+static void raise_sci_interrupt(struct aspeed_mmbi_channel *channel)
 {
+	u32 val;
+	int retry;
+	struct regmap *lpc_regmap = channel->priv->lpc_map;
+
+	dev_dbg(channel->priv->dev, "Raising SCI interrupt...\n");
+
 	regmap_write_bits(lpc_regmap, AST_LPC_ACPIB7B4, LPC_BMC_TRIG_SCI_EVT_EN,
 			  LPC_BMC_TRIG_SCI_EVT_EN);
 
@@ -162,11 +170,27 @@ static void raise_sci_interrupt(struct regmap *lpc_regmap)
 	/*
 	 * Just asserting the SCI VW will trigger the SCI event continuosly.
 	 * So BMC must deassert SCI VW to avoid it.
-	 * Workaround: Host is unable to invoke the SCI handler, if SCI VW is
-	 * clear immediatley. So adding small(6us) delay to work around
-	 * the issue.
+	 * ESPI098[24] reading will confirm Host read data or not.
+	 * - 0 means host read the data
+	 * - 1 means host not yet read data, so retry with 1us delay.
 	 */
-	udelay(6);
+	retry = 30;
+	while (retry) {
+		if (regmap_read(channel->priv->pmap, ASPEED_ESPI_SYS_EVENT,
+				&val)) {
+			dev_err(channel->priv->dev, "Unable to read ESPI098\n");
+			break;
+		}
+
+		if (HOST_READ_SCI_STATUS_BIT(val) == 0)
+			break;
+
+		retry--;
+		dev_dbg(channel->priv->dev,
+			"Host SCI handler not invoked(ESPI098: 0x%0x), so retry(%d) after 1us...\n",
+			val, retry);
+		udelay(1);
+	}
 
 	regmap_write_bits(lpc_regmap, AST_LPC_SWCR0300,
 			  LPC_BMC_TRIG_WAKEUP_EVT_STS,
@@ -302,7 +326,7 @@ static void update_host_rop(struct aspeed_mmbi_channel *channel,
 	 * Don't raise SCI, after BMC read the H2B buffer
 	 */
 	if (w_len != 0)
-		raise_sci_interrupt(channel->priv->lpc_map);
+		raise_sci_interrupt(channel);
 }
 
 static int send_bmc_reset_request(struct aspeed_mmbi_channel *channel)
@@ -330,7 +354,7 @@ static int send_bmc_reset_request(struct aspeed_mmbi_channel *channel)
 	memcpy(channel->hrop_vmem, &hrop, sizeof(hrop));
 
 	/* Raise SCI interrupt */
-	raise_sci_interrupt(channel->priv->lpc_map);
+	raise_sci_interrupt(channel);
 
 	return 0;
 }

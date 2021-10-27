@@ -27,6 +27,7 @@ struct aspeed_mmbi_protocol;
 #define ESPI_MMBI_TOTAL_SIZE (1024 * 64) /* 64KB  MMBI size */
 
 #define ASPEED_ESPI_CTRL2 0x80 /* Engine Control 2 */
+#define ASPEED_ESPI_SYS_EVENT 0x98 /* ESPI098 - System Event from and to master */
 #define ESPI_DISABLE_PERP_MEM_READ BIT(6)
 #define ESPI_DISABLE_PERP_MEM_WRITE BIT(4)
 

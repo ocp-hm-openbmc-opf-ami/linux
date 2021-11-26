@@ -1,0 +1,251 @@
+// SPDX-License-Identifier: GPL-2.0+
+/dts-v1/;
+
+#include "aspeed-bmc-intel-bhs.dtsi"
+
+/ {
+	model = "Intel Avenue City BMC";
+	compatible = "intel,avc-bmc", "aspeed,ast2600";
+};
+
+&i3c2 {
+	/* I3C_MNG_LVC18 */
+
+	hub@0,0 {
+		cp0-ldo = "disabled";
+		cp1-ldo = "disabled";
+		tp0145-ldo = "disabled";
+		tp2367-ldo = "disabled";
+		tp0145-pullup = "2k";
+		tp2367-pullup = "2k";
+
+		target-port@0 {
+			mode = "i3c";
+			pullup = "enabled";
+		};
+		target-port@1 {
+			mode = "disabled";
+			pullup = "enabled";
+		};
+		target-port@2 {
+			mode = "i3c";
+			pullup = "enabled";
+		};
+		target-port@3 {
+			mode = "disabled";
+			pullup = "enabled";
+		};
+		target-port@4 {
+			mode = "disabled";
+			pullup = "enabled";
+		};
+		target-port@5 {
+			mode = "disabled";
+			pullup = "enabled";
+		};
+		target-port@6 {
+			mode = "disabled";
+			pullup = "enabled";
+		};
+		target-port@7 {
+			mode = "disabled";
+			pullup = "enabled";
+		};
+	};
+};
+
+&i3c3 {
+	/* I3C_SPD_BMC */
+
+	/* Renesas RG3MxxB12A0 */
+	hub@70,3C000000100 {
+		reg = <0x70 0x3C0 0x00000100>;
+		assigned-address = <0x70>;
+		dcr = <0xC2>;
+
+		cp0-ldo = "disabled";
+		cp1-ldo = "disabled";
+		tp0145-ldo = "disabled";
+		tp2367-ldo = "disabled";
+		tp0145-pullup = "2k";
+		tp2367-pullup = "2k";
+
+		target-port@0 {
+			mode = "i3c";
+			pullup = "enabled";
+		};
+		target-port@1 {
+			mode = "i3c";
+			pullup = "enabled";
+		};
+		target-port@2 {
+			mode = "i3c";
+			pullup = "enabled";
+		};
+		target-port@3 {
+			mode = "i3c";
+			pullup = "enabled";
+		};
+		target-port@4 {
+			mode = "i3c";
+			pullup = "enabled";
+		};
+		target-port@5 {
+			mode = "i3c";
+			pullup = "enabled";
+		};
+		target-port@6 {
+			mode = "i3c";
+			pullup = "enabled";
+		};
+		target-port@7 {
+			mode = "i3c";
+			pullup = "enabled";
+		};
+
+		i3c0@01 {
+			jdec-spd;
+			/* Renesas SPD5118 */
+			spd@50,3C000000000 {
+				assigned-address = <0x50>;
+				reg = <0x50 0x3C0 0x00000000>;
+			};
+			/* Renesas SPD5118 */
+			spd@52,3C000000001 {
+				assigned-address = <0x52>;
+				reg = <0x52 0x3C0 0x00000001>;
+			};
+			/* Renesas SPD5118 */
+			spd@54,3C000000002 {
+				assigned-address = <0x54>;
+				reg = <0x54 0x3C0 0x00000002>;
+			};
+		};
+		i3c1@02 {
+			jdec-spd;
+			/* Renesas SPD5118 */
+			spd@50,3C000000000 {
+				assigned-address = <0x50>;
+				reg = <0x50 0x3C0 0x00000000>;
+			};
+			/* Renesas SPD5118 */
+			spd@52,3C000000001 {
+				assigned-address = <0x52>;
+				reg = <0x52 0x3C0 0x00000001>;
+			};
+			/* Renesas SPD5118 */
+			spd@54,3C000000002 {
+				assigned-address = <0x54>;
+				reg = <0x54 0x3C0 0x00000002>;
+			};
+		};
+		i3c2@10 {
+			jdec-spd;
+			/* Renesas SPD5118 */
+			spd@50,3C000000000 {
+				assigned-address = <0x50>;
+				reg = <0x50 0x3C0 0x00000000>;
+			};
+			/* Renesas SPD5118 */
+			spd@52,3C000000001 {
+				assigned-address = <0x52>;
+				reg = <0x52 0x3C0 0x00000001>;
+			};
+			/* Renesas SPD5118 */
+			spd@54,3C000000002 {
+				assigned-address = <0x54>;
+				reg = <0x54 0x3C0 0x00000002>;
+			};
+		};
+		i3c3@20 {
+			jdec-spd;
+			/* Renesas SPD5118 */
+			spd@50,3C000000000 {
+				assigned-address = <0x50>;
+				reg = <0x50 0x3C0 0x00000000>;
+			};
+			/* Renesas SPD5118 */
+			spd@52,3C000000001 {
+				assigned-address = <0x52>;
+				reg = <0x52 0x3C0 0x00000001>;
+			};
+			/* Renesas SPD5118 */
+			spd@54,3C000000002 {
+				assigned-address = <0x54>;
+				reg = <0x54 0x3C0 0x00000002>;
+			};
+		};
+		i3c4@04 {
+			jdec-spd;
+			/* Renesas SPD5118 */
+			spd@50,3C000000000 {
+				assigned-address = <0x50>;
+				reg = <0x50 0x3C0 0x00000000>;
+			};
+			/* Renesas SPD5118 */
+			spd@52,3C000000001 {
+				assigned-address = <0x52>;
+				reg = <0x52 0x3C0 0x00000001>;
+			};
+			/* Renesas SPD5118 */
+			spd@54,3C000000002 {
+				assigned-address = <0x54>;
+				reg = <0x54 0x3C0 0x00000002>;
+			};
+		};
+		i3c5@08 {
+			jdec-spd;
+			/* Renesas SPD5118 */
+			spd@50,3C000000000 {
+				assigned-address = <0x50>;
+				reg = <0x50 0x3C0 0x00000000>;
+			};
+			/* Renesas SPD5118 */
+			spd@52,3C000000001 {
+				assigned-address = <0x52>;
+				reg = <0x52 0x3C0 0x00000001>;
+			};
+			/* Renesas SPD5118 */
+			spd@54,3C000000002 {
+				assigned-address = <0x54>;
+				reg = <0x54 0x3C0 0x00000002>;
+			};
+		};
+		i3c6@40 {
+			jdec-spd;
+			/* Renesas SPD5118 */
+			spd@50,3C000000000 {
+				assigned-address = <0x50>;
+				reg = <0x50 0x3C0 0x00000000>;
+			};
+			/* Renesas SPD5118 */
+			spd@52,3C000000001 {
+				assigned-address = <0x52>;
+				reg = <0x52 0x3C0 0x00000001>;
+			};
+			/* Renesas SPD5118 */
+			spd@54,3C000000002 {
+				assigned-address = <0x54>;
+				reg = <0x54 0x3C0 0x00000002>;
+			};
+		};
+		i3c7@80 {
+			jdec-spd;
+			/* Renesas SPD5118 */
+			spd@50,3C000000000 {
+				assigned-address = <0x50>;
+				reg = <0x50 0x3C0 0x00000000>;
+			};
+			/* Renesas SPD5118 */
+			spd@52,3C000000001 {
+				assigned-address = <0x52>;
+				reg = <0x52 0x3C0 0x00000001>;
+			};
+			/* Renesas SPD5118 */
+			spd@54,3C000000002 {
+				assigned-address = <0x54>;
+				reg = <0x54 0x3C0 0x00000002>;
+			};
+		};
+	};
+};

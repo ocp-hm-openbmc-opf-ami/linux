@@ -14,6 +14,9 @@
 #include <linux/i2c.h>
 #include <linux/pmbus.h>
 #include "pmbus.h"
+#ifdef CONFIG_SMART_MODULE
+ #include "smart.h"
+#endif /* CONFIG_SMART_MODULE */
 
 struct pmbus_device_info {
 	int pages;
@@ -217,6 +220,13 @@ static int pmbus_probe(struct i2c_client *client)
 	return pmbus_do_probe(client, info);
 }
 
+#ifdef CONFIG_SMART_MODULE
+static void pmbus_remove(struct i2c_client *client)
+{
+	pmbus_do_remove(client);
+}
+#endif /* CONFIG_SMART_MODULE */
+
 static const struct pmbus_device_info pmbus_info_one = {
 	.pages = 1,
 	.flags = 0
@@ -281,6 +291,9 @@ static struct i2c_driver pmbus_driver = {
 		   .name = "pmbus",
 		   },
 	.probe_new = pmbus_probe,
+#ifdef CONFIG_SMART_MODULE
+	.remove = pmbus_remove,
+#endif /* CONFIG_SMART_MODULE */
 	.id_table = pmbus_id,
 };
 

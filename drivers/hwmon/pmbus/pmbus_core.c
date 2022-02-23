@@ -22,6 +22,11 @@
 #include <linux/of.h>
 #include <linux/thermal.h>
 #include "pmbus.h"
+#ifdef CONFIG_SMART_MODULE
+ #include "smart.h"
+#endif /* CONFIG_SMART_MODULE */
+
+#include <linux/device.h>
 
 /*
  * Number of additional attribute pointers to allocate
@@ -3723,9 +3728,29 @@ int pmbus_do_probe(struct i2c_client *client, struct pmbus_driver_info *info)
 	if (ret)
 		dev_warn(dev, "Failed to register debugfs\n");
 
+#ifdef CONFIG_SMART_MODULE
+	ret = smart_register_psu(dev);
+	if (ret)
+		dev_warn(dev, "Failed to register pmbus device in SmaRT");
+#endif /* CONFIG_SMART_MODULE */
+
 	return 0;
 }
 EXPORT_SYMBOL_NS_GPL(pmbus_do_probe, PMBUS);
+
+#ifdef CONFIG_SMART_MODULE
+int pmbus_do_remove(struct i2c_client *client)
+{
+	int ret;
+
+	ret = smart_unregister_psu(&client->dev);
+	if (ret)
+		dev_warn(&client->dev, "Failed to unregister pmbus device in SmaRT, ret %d", ret);
+
+	return 0;
+}
+EXPORT_SYMBOL_NS_GPL(pmbus_do_remove, PMBUS);
+#endif /* CONFIG_SMART_MODULE */
 
 struct dentry *pmbus_get_debugfs_dir(struct i2c_client *client)
 {

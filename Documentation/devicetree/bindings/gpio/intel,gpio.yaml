@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: (GPL-2.0 OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/gpio/intel,smart.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Intel SmaRT & CLST
+
+maintainers:
+  - Agata Wiatrowska <agata.wiatrowska@intel.com>
+  - Wojciech Dembinski <wojciech.dembinski@intel.com>
+
+properties:
+  compatible:
+    enum:
+      - intel,smart
+
+  smbalert-gpio:
+    maxItems: 1
+
+required:
+  - compatible
+  - smbalert-gpio
+
+additionalProperties: false
+
+examples:
+  - |
+    smart {
+        compatible = "intel,smart";
+        status = "okay";
+        smbalert-gpio = <&gpio0 ASPEED_GPIO(Y, 3) GPIO_ACTIVE_HIGH>;
+    };
+
+...

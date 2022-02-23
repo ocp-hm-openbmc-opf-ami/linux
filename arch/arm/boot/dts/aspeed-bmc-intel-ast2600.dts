@@ -132,6 +132,12 @@
 		compatible = "pwm-beeper";
 		pwms = <&pwm_tacho 7 1000000 0>;
 	};
+
+	smart {
+		compatible = "intel,smart";
+		status = "okay";
+		smbalert-gpio = <&gpio0 ASPEED_GPIO(Y, 3) GPIO_ACTIVE_HIGH>;
+	};
 };
 
 &fmc {

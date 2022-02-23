@@ -27,6 +27,17 @@ config SENSORS_PMBUS
 	  This driver can also be built as a module. If so, the module will
 	  be called pmbus.
 
+config SMART_MODULE
+	tristate "SmaRT & CLST module"
+	depends on GPIOLIB
+	help
+	  Say yes here if you want to enable SmaRT & CLST feature. SmaRT & CLST
+	  handles SMBAlert# interrupt at the BMC side and responds to UV, OC
+	  and OT faults. It's fully configurable with sysfs attributes
+	  and cooperates with Node Manager application which runs in user space.
+	  However, this is not required to have Node Manager enabled to get it
+	  working properly.
+
 config SENSORS_ADM1266
 	tristate "Analog Devices ADM1266 Sequencer"
 	select CRC8

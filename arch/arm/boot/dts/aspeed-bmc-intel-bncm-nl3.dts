@@ -1,0 +1,16 @@
+// SPDX-License-Identifier: GPL-2.0
+/dts-v1/;
+
+#include "aspeed-bmc-intel-bhs.dtsi"
+
+/ {
+	model = "Intel Beechnut City Modular BMC Non-Legacy 3";
+	compatible = "intel,bncm-nl3-bmc", "aspeed,ast2600";
+};
+
+&i3c2 {
+	/* I3C_MNG_LVC18 */
+	initial-role = "target";
+	dcr = <0xCC>;
+	pid = <0x020a 0x00003000>;
+};

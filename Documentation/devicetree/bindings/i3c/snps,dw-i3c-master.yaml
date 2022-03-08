@@ -25,6 +25,34 @@ properties:
   interrupts:
     maxItems: 1
 
+  i3c-od-scl-low-ns:
+    description:
+      SCL low period for Open-Drain phase. Expressed in nanoseconds.
+    minimum: 200
+
+  i3c-od-scl-high-ns:
+    description:
+      SCL high period for Open-Drain phase. Expressed in nanoseconds.
+    minimum: 25
+
+  i3c-pp-scl-low-ns:
+    description:
+      SCL low period for Push-Pull phase. Expressed in nanoseconds.
+    minimum: 25
+
+  i3c-pp-scl-high-ns:
+    description:
+      SCL high period for Push-Pull phase. Expressed in nanoseconds.
+    minimum: 25
+
+  sda-tx-hold-ns:
+    description:
+      SDA Hold Time (Thd_dat). Expressed in nanoseconds. Not validated by
+      driver. Out-of-range values will be trimmed to the range.
+      This parameter is not supported by old IP versions.
+    minimum: 5
+    maximum: 35
+
 required:
   - compatible
   - reg

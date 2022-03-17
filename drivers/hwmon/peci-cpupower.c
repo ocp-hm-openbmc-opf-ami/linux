@@ -8,6 +8,9 @@
 #include <linux/of_device.h>
 #include <linux/platform_device.h>
 #include "peci-hwmon.h"
+#ifdef CONFIG_SMART_MODULE
+ #include "pmbus/smart.h"
+#endif /* CONFIG_SMART_MODULE */
 
 enum PECI_CPUPOWER_POWER_SENSOR_TYPES {
 	PECI_CPUPOWER_SENSOR_TYPE_POWER = 0,
@@ -51,6 +54,11 @@ struct peci_cpupower {
 	u32 ppl1_time_window;
 	u32 ppl2_time_window;
 	bool ppl_time_windows_valid;
+
+#ifdef CONFIG_SMART_MODULE
+	bool block_set_power_limit;
+	s32 latest_power_limit_set;
+#endif /* CONFIG_SMART_MODULE */
 };
 
 static const char *peci_cpupower_labels[PECI_CPUPOWER_SENSOR_TYPES_COUNT] = {
@@ -608,6 +616,12 @@ peci_cpupower_write(struct device *dev, enum hwmon_sensor_types type,
 		return ret;
 
 	if (sensor_conf->write) {
+#ifdef CONFIG_SMART_MODULE
+		if (sensor_conf->write == peci_cpupower_set_power_limit &&
+		    priv->block_set_power_limit)
+			return -EPERM;
+		priv->latest_power_limit_set = val;
+#endif /* CONFIG_SMART_MODULE */
 		ret = sensor_conf->write(priv, sensor_conf, sensor_data,
 					 (s32)val);
 	} else {
@@ -656,6 +670,62 @@ peci_cpupower_is_visible(const void *data, enum hwmon_sensor_types type,
 	return mode;
 }
 
+#ifdef CONFIG_SMART_MODULE
+#define MINIMUM_POWER_CAP_VALUE	1
+
+static int request_throttling(const struct device *dev)
+{
+	struct peci_cpupower *priv = dev_get_drvdata(dev);
+	struct peci_sensor_conf *sensor_conf;
+	struct peci_sensor_data *sensor_data;
+	int ret;
+
+	dev_dbg(dev, "Request max throttling\n");
+	priv->block_set_power_limit = true;
+	ret = peci_sensor_get_ctx(hwmon_power_cap, peci_cpupower_power_cfg[0],
+				  &sensor_conf,
+				  priv->power_sensor_data_list[0],
+				  &sensor_data,
+				  ARRAY_SIZE(peci_cpupower_power_cfg[0]));
+	if (ret) {
+		dev_dbg(dev, "Error while getting sensor context, ret: %d\n", ret);
+		return ret;
+	}
+	peci_cpupower_set_power_limit(priv, sensor_conf, sensor_data,
+				      MINIMUM_POWER_CAP_VALUE);
+
+	return 0;
+}
+
+static int remove_throttling(const struct device *dev)
+{
+	struct peci_cpupower *priv = dev_get_drvdata(dev);
+	struct peci_sensor_conf *sensor_conf;
+	struct peci_sensor_data *sensor_data;
+	int ret;
+
+	dev_dbg(dev, "Remove max throttling\n");
+	ret = peci_sensor_get_ctx(hwmon_power_cap, peci_cpupower_power_cfg[0],
+				  &sensor_conf,
+				  priv->power_sensor_data_list[0],
+				  &sensor_data,
+				  ARRAY_SIZE(peci_cpupower_power_cfg[0]));
+	if (ret) {
+		dev_dbg(dev, "Error while getting sensor context, ret: %d\n", ret);
+		return ret;
+	}
+	peci_cpupower_set_power_limit(priv, sensor_conf, sensor_data, priv->latest_power_limit_set);
+	priv->block_set_power_limit = false;
+
+	return 0;
+}
+
+static struct peci_throttling_ops peci_ops = {
+	.request_max_power_throttling = request_throttling,
+	.remove_max_power_throttling = remove_throttling
+};
+#endif /* CONFIG_SMART_MODULE */
+
 static const struct hwmon_ops peci_cpupower_ops = {
 	.is_visible = peci_cpupower_is_visible,
 	.read_string = peci_cpupower_read_string,
@@ -689,6 +759,9 @@ static int peci_cpupower_probe(struct platform_device *pdev)
 	u32 power_cfg_idx = 0;
 	u32 energy_cfg_idx = 0;
 	u32 cmd_mask;
+#ifdef CONFIG_SMART_MODULE
+	int ret;
+#endif /* CONFIG_SMART_MODULE */
 
 	cmd_mask = BIT(PECI_CMD_RD_PKG_CFG) | BIT(PECI_CMD_WR_PKG_CFG);
 	if ((mgr->client->adapter->cmd_mask & cmd_mask) != cmd_mask)
@@ -733,10 +806,40 @@ static int peci_cpupower_probe(struct platform_device *pdev)
 	if (IS_ERR(hwmon_dev))
 		return PTR_ERR(hwmon_dev);
 
-	dev_dbg(dev, "%s: sensor '%s'\n", dev_name(hwmon_dev), priv->name);
+#ifdef CONFIG_SMART_MODULE
+	ret = smart_register_peci(hwmon_dev, &peci_ops);
+	if (ret)
+		dev_warn(hwmon_dev, "Failed to register peci device in SmaRT");
+#endif /* CONFIG_SMART_MODULE */
 
 	return 0;
 }
+
+#ifdef CONFIG_SMART_MODULE
+static int find_hwmon_dev(struct device *dev, void *data)
+{
+	if (strstr(dev_name(dev), "hwmon"))
+		return 1;
+
+	return 0;
+}
+
+static int peci_cpupower_remove(struct platform_device *pdev)
+{
+	struct device *dev;
+	int ret;
+
+	dev = device_find_child(&pdev->dev, NULL, find_hwmon_dev);
+	if (dev) {
+		ret = smart_unregister_peci(dev);
+		if (ret)
+			dev_warn(dev, "Failed to unregister peci device in SmaRT, ret %d", ret);
+		put_device(dev);
+	}
+
+	return 0;
+}
+#endif /* CONFIG_SMART_MODULE */
 
 static const struct platform_device_id peci_cpupower_ids[] = {
 	{ .name = "peci-cpupower", .driver_data = 0 },
@@ -746,6 +849,9 @@ MODULE_DEVICE_TABLE(platform, peci_cpupower_ids);
 
 static struct platform_driver peci_cpupower_driver = {
 	.probe    = peci_cpupower_probe,
+#ifdef CONFIG_SMART_MODULE
+	.remove   = peci_cpupower_remove,
+#endif /* CONFIG_SMART_MODULE */
 	.id_table = peci_cpupower_ids,
 	.driver   = { .name = KBUILD_MODNAME, },
 };

@@ -15,6 +15,7 @@
 #include <linux/poll.h>
 #include <linux/regmap.h>
 #include <uapi/linux/aspeed-espi-mmbi.h>
+#include <dt-bindings/mmbi/protocols.h>
 
 #define DEVICE_NAME "mmbi"
 #define MAX_NO_OF_SUPPORTED_CHANNELS 1
@@ -37,6 +38,8 @@
 
 #define MMBI_CRC8_POLYNOMIAL 0x07
 DECLARE_CRC8_TABLE(mmbi_crc8_table);
+
+typedef u8 protocol_type;
 
 struct host_rop {
 	unsigned int
@@ -89,18 +92,10 @@ struct mmbi_header {
 	u32 data;
 };
 
-enum protocol_type {
-	ipmi = 1,
-	seamless = 2,
-	ras_offload = 3,
-	mctp = 4,
-	node_manager = 5
-};
-
 struct aspeed_mmbi_protocol {
 	struct miscdevice miscdev;
 	struct aspeed_mmbi_channel *chan_ref;
-	enum protocol_type type;
+	protocol_type type;
 
 	bool data_available;
 	/*
@@ -709,18 +704,18 @@ static const struct file_operations aspeed_espi_mmbi_fops = {
 	.poll = mmbi_poll
 };
 
-static char *get_protocol_suffix(enum protocol_type type)
+static char *get_protocol_suffix(protocol_type type)
 {
 	switch (type) {
-	case ipmi:
+	case MMBI_PROTOCOL_IPMI:
 		return "ipmi";
-	case seamless:
+	case MMBI_PROTOCOL_SEAMLESS:
 		return "seamless";
-	case ras_offload:
+	case MMBI_PROTOCOL_RAS_OFFLOAD:
 		return "ras_offload";
-	case mctp:
+	case MMBI_PROTOCOL_MCTP:
 		return "mctp";
-	case node_manager:
+	case MMBI_PROTOCOL_NODE_MANAGER:
 		return "nm";
 	}
 
@@ -772,6 +767,9 @@ static int mmbi_channel_init(struct aspeed_espi_mmbi *priv, u8 idx)
 	u8 *h2b_vaddr, *b2h_vaddr;
 	struct mmbi_cap_desc ch_desc;
 	struct host_rop hrop;
+	struct device_node *node;
+	int no_of_protocols_enabled;
+	u8 mmbi_supported_protocols[MAX_NO_OF_SUPPORTED_PROTOCOLS];
 
 	u32 b2h_size = (priv->mmbi_size / 2);
 	u32 h2b_size = (priv->mmbi_size / 2);
@@ -815,11 +813,29 @@ static int mmbi_channel_init(struct aspeed_espi_mmbi *priv, u8 idx)
 	ch_desc = mmbi_desc_init(priv->chan[idx]);
 	memcpy(priv->chan[idx].desc_vmem, &ch_desc, sizeof(ch_desc));
 
-	/* TODO: Get supported protocol from dts file. */
-	priv->chan[idx].supported_protocols[0] = seamless;
-	priv->chan[idx].supported_protocols[1] = ras_offload;
+	node = of_get_child_by_name(priv->dev->of_node, "instance");
+	if (!node) {
+		dev_err(priv->dev, "mmbi protocol : no instance found\n");
+		goto err_destroy_channel;
+	}
+	no_of_protocols_enabled = of_property_count_u8_elems(node, "protocols");
+	if (no_of_protocols_enabled <= 0 || no_of_protocols_enabled >
+	    MAX_NO_OF_SUPPORTED_PROTOCOLS){
+		dev_err(dev, "No supported mmbi protocol\n");
+		of_node_put(node);
+		goto err_destroy_channel;
+	}
+	rc = of_property_read_u8_array(node, "protocols", mmbi_supported_protocols,
+				       no_of_protocols_enabled);
+	if (!rc) {
+		memset(&priv->chan[idx].supported_protocols, 0,
+		       sizeof(priv->chan[idx].supported_protocols));
+		memcpy(&priv->chan[idx].supported_protocols, mmbi_supported_protocols,
+		       sizeof(mmbi_supported_protocols));
+	}
+	of_node_put(node);
 
-	for (i = 0; priv->chan[idx].supported_protocols[i] != 0; i++) {
+	for (i = 0; i < no_of_protocols_enabled; i++) {
 		char *dev_name;
 		u8 proto_type;
 

@@ -5,6 +5,7 @@
 #include <dt-bindings/interrupt-controller/aspeed-scu-ic.h>
 #include <dt-bindings/clock/ast2600-clock.h>
 #include <dt-bindings/gpio/aspeed-gpio.h>
+#include <dt-bindings/mmbi/protocols.h>
 
 / {
 	model = "Aspeed BMC";
@@ -946,6 +947,10 @@
 				aspeed,espi = <&espi>;
 				aspeed,lpc = <&lpc>;
 				status = "disabled";
+				instance@0 {
+					protocols = /bits/ 8 <MMBI_PROTOCOL_SEAMLESS
+						MMBI_PROTOCOL_RAS_OFFLOAD>;
+				};
 			};
 
 			i2c: bus@1e78a000 {

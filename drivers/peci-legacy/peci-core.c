@@ -1570,13 +1570,6 @@ static struct peci_client *peci_new_device(struct peci_adapter *adapter,
 	client->addr = info->addr;
 	strlcpy(client->name, info->type, sizeof(client->name));
 
-	ret = peci_check_addr_validity(client->addr);
-	if (ret) {
-		dev_err(&adapter->dev, "Invalid PECI CPU address 0x%02hx\n",
-			client->addr);
-		goto err_free_client_silent;
-	}
-
 	/* Check online status of client */
 	ret = peci_detect(adapter, client->addr);
 	if (ret)
@@ -1608,7 +1601,6 @@ err_free_client:
 	dev_err(&adapter->dev,
 		"Failed to register peci client %s at 0x%02x (%d)\n",
 		client->name, client->addr, ret);
-err_free_client_silent:
 	kfree(client);
 err_put_adapter:
 	peci_put_adapter(adapter);
@@ -1656,7 +1648,7 @@ static ssize_t peci_sysfs_new_device(struct device *dev,
 	struct peci_board_info info = {};
 	struct peci_client *client;
 	char *blank, end;
-	short addr;
+	u8 addr;
 	int ret;
 
 	/* Parse device type */
@@ -1672,7 +1664,7 @@ static ssize_t peci_sysfs_new_device(struct device *dev,
 	memcpy(info.type, buf, blank - buf);
 
 	/* Parse remaining parameters, reject extra parameters */
-	ret = sscanf(++blank, "%hi%c", &addr, &end);
+	ret = sscanf(++blank, "%hhi%c", &addr, &end);
 	if (ret < 1) {
 		dev_err(dev, "%s: Can't parse client address\n", "new_device");
 		return -EINVAL;
@@ -1682,7 +1674,11 @@ static ssize_t peci_sysfs_new_device(struct device *dev,
 		return -EINVAL;
 	}
 
-	info.addr = (u8)addr;
+	ret = peci_check_addr_validity(addr);
+	if (ret)
+		return ret;
+
+	info.addr = addr;
 	client = peci_new_device(adapter, &info);
 	if (!client)
 		return -EINVAL;
@@ -1706,7 +1702,7 @@ static ssize_t peci_sysfs_delete_device(struct device *dev,
 	struct peci_client *client, *next;
 	struct peci_board_info info = {};
 	char *blank, end;
-	short addr;
+	u8 addr;
 	int ret;
 
 	/* Parse device type */
@@ -1722,7 +1718,7 @@ static ssize_t peci_sysfs_delete_device(struct device *dev,
 	memcpy(info.type, buf, blank - buf);
 
 	/* Parse remaining parameters, reject extra parameters */
-	ret = sscanf(++blank, "%hi%c", &addr, &end);
+	ret = sscanf(++blank, "%hhi%c", &addr, &end);
 	if (ret < 1) {
 		dev_err(dev, "%s: Can't parse client address\n",
 			"delete_device");
@@ -1733,7 +1729,11 @@ static ssize_t peci_sysfs_delete_device(struct device *dev,
 		return -EINVAL;
 	}
 
-	info.addr = (u8)addr;
+	ret = peci_check_addr_validity(addr);
+	if (ret)
+		return ret;
+
+	info.addr = addr;
 
 	/* Make sure the device was added through sysfs */
 	ret = -ENOENT;
@@ -1806,6 +1806,9 @@ static struct peci_client *peci_of_register_device(struct peci_adapter *adapter,
 		return ERR_PTR(ret);
 	}
 
+	ret = peci_check_addr_validity(addr);
+	if (ret)
+		return ERR_PTR(ret);
 	info.addr = addr;
 	info.of_node = node;
 

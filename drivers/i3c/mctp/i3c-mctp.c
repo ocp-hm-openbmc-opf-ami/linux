@@ -3,6 +3,8 @@
 
 #include <linux/cdev.h>
 #include <linux/fs.h>
+#include <linux/list.h>
+#include <linux/list_sort.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/poll.h>
@@ -16,6 +18,8 @@
 #include <linux/i3c/device.h>
 
 #include <linux/i3c/mctp/i3c-mctp.h>
+
+#include <uapi/linux/i3c/i3c-mctp.h>
 
 #define I3C_MCTP_MINORS				32
 #define CCC_DEVICE_STATUS_PENDING_INTR(x)	(((x) & GENMASK(3, 0)) >> 0)
@@ -43,12 +47,23 @@ struct i3c_mctp {
 	struct i3c_mctp_client *peci_client;
 	u16 max_read_len;
 	u16 max_write_len;
+	struct list_head endpoints;
+	size_t endpoints_count;
+	/*
+	 * endpoints_lock protects list of endpoints
+	 */
+	struct mutex endpoints_lock;
 };
 
 struct i3c_mctp_client {
 	struct i3c_mctp *priv;
 	struct ptr_ring rx_queue;
 	wait_queue_head_t wait_queue;
+};
+
+struct i3c_mctp_endpoint {
+	struct i3c_mctp_eid_info eid_info;
+	struct list_head link;
 };
 
 static struct class *i3c_mctp_class;
@@ -287,6 +302,135 @@ static __poll_t i3c_mctp_poll(struct file *file, struct poll_table_struct *pt)
 	return ret;
 }
 
+static int
+eid_info_cmp(void *priv, const struct list_head *a, const struct list_head *b)
+{
+	struct i3c_mctp_endpoint *endpoint_a;
+	struct i3c_mctp_endpoint *endpoint_b;
+
+	if (a == b)
+		return 0;
+
+	endpoint_a = list_entry(a, typeof(*endpoint_a), link);
+	endpoint_b = list_entry(b, typeof(*endpoint_b), link);
+
+	if (endpoint_a->eid_info.eid < endpoint_b->eid_info.eid)
+		return -1;
+	else if (endpoint_a->eid_info.eid > endpoint_b->eid_info.eid)
+		return 1;
+
+	return 0;
+}
+
+static void i3c_mctp_eid_info_list_remove(struct list_head *list)
+{
+	struct i3c_mctp_endpoint *endpoint;
+	struct i3c_mctp_endpoint *tmp;
+
+	list_for_each_entry_safe(endpoint, tmp, list, link) {
+		list_del(&endpoint->link);
+		kfree(endpoint);
+	}
+}
+
+static bool
+i3c_mctp_eid_info_list_valid(struct list_head *list)
+{
+	struct i3c_mctp_endpoint *endpoint;
+	struct i3c_mctp_endpoint *next;
+
+	list_for_each_entry(endpoint, list, link) {
+		next = list_next_entry(endpoint, link);
+		if (&next->link == list)
+			break;
+
+		/* duplicated eids */
+		if (next->eid_info.eid == endpoint->eid_info.eid)
+			return false;
+	}
+
+	return true;
+}
+
+static int
+i3c_mctp_set_eid_info(struct i3c_mctp *priv, struct i3c_mctp_set_eid_info __user *userbuf)
+{
+	struct list_head list = LIST_HEAD_INIT(list);
+	struct i3c_mctp_set_eid_info set_eid;
+	struct i3c_mctp_endpoint *endpoint;
+	struct i3c_device_info info;
+	void *user_ptr;
+	int ret = 0;
+	size_t i;
+
+	i3c_device_get_info(priv->i3c, &info);
+
+	if (copy_from_user(&set_eid, userbuf, sizeof(set_eid))) {
+		dev_err(priv->dev, "copy from user failed\n");
+		return -EFAULT;
+	}
+
+	if (set_eid.count > I3C_MCTP_EID_INFO_MAX)
+		return -EINVAL;
+
+	user_ptr = u64_to_user_ptr(set_eid.ptr);
+	for (i = 0; i < set_eid.count; i++) {
+		endpoint = kzalloc(sizeof(*endpoint), GFP_KERNEL);
+		if (!endpoint) {
+			ret = -ENOMEM;
+			goto out;
+		}
+		memset(endpoint, 0, sizeof(*endpoint));
+
+		ret = copy_from_user(&endpoint->eid_info,
+				     &(((struct i3c_mctp_eid_info *)user_ptr)[i]),
+				     sizeof(struct i3c_mctp_eid_info));
+
+		if (ret) {
+			dev_err(priv->dev, "copy from user failed\n");
+			kfree(endpoint);
+			ret = -EFAULT;
+			goto out;
+		}
+
+		list_add_tail(&endpoint->link, &list);
+	}
+
+	list_sort(NULL, &list, eid_info_cmp);
+	if (!i3c_mctp_eid_info_list_valid(&list)) {
+		ret = -EINVAL;
+		goto out;
+	}
+
+	mutex_lock(&priv->endpoints_lock);
+	if (list_empty(&priv->endpoints))
+		list_splice_init(&list, &priv->endpoints);
+	else
+		list_swap(&list, &priv->endpoints);
+	priv->endpoints_count = set_eid.count;
+	mutex_unlock(&priv->endpoints_lock);
+out:
+	i3c_mctp_eid_info_list_remove(&list);
+	return ret;
+}
+
+static long
+i3c_mctp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+{
+	struct i3c_mctp *priv = file->private_data;
+	void __user *userbuf = (void __user *)arg;
+	int ret;
+
+	switch (cmd) {
+	case I3C_MCTP_IOCTL_SET_EID_INFO:
+		ret = i3c_mctp_set_eid_info(priv, userbuf);
+		break;
+	default:
+		break;
+	}
+	return ret;
+}
+
 static const struct file_operations i3c_mctp_fops = {
 	.owner = THIS_MODULE,
 	.read = i3c_mctp_read,
@@ -294,6 +438,7 @@ static const struct file_operations i3c_mctp_fops = {
 	.poll = i3c_mctp_poll,
 	.open = i3c_mctp_open,
 	.release = i3c_mctp_release,
+	.unlocked_ioctl = i3c_mctp_ioctl,
 };
 
 /**
@@ -348,6 +493,9 @@ static struct i3c_mctp *i3c_mctp_alloc(struct i3c_device *i3c)
 
 	priv->id = id;
 	priv->i3c = i3c;
+
+	INIT_LIST_HEAD(&priv->endpoints);
+	mutex_init(&priv->endpoints_lock);
 
 	spin_lock_init(&priv->device_file_lock);
 
@@ -604,6 +752,7 @@ static void i3c_mctp_remove(struct i3c_device *i3cdev)
 
 	device_destroy(i3c_mctp_class, MKDEV(MAJOR(i3c_mctp_devt), priv->id));
 	cdev_del(&priv->cdev);
+	i3c_mctp_eid_info_list_remove(&priv->endpoints);
 	ida_free(&i3c_mctp_ida, priv->id);
 }
 

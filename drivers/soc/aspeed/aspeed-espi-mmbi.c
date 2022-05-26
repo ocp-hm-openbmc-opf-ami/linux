@@ -239,9 +239,9 @@ static int get_b2h_avail_buf_len(struct aspeed_mmbi_channel *channel,
 static int get_mmbi_header(struct aspeed_mmbi_channel *channel,
 			   u32 *data_length, u8 *type, u32 *unread_data_len)
 {
+	u32 h2b_wp, b2h_rp, h_rwp0, h_rwp1;
 	struct mmbi_header header;
 	struct host_rop hrop;
-	u32 h2b_wp, h_rwp0;
 
 	memcpy(&hrop, channel->hrop_vmem, sizeof(struct host_rop));
 	dev_dbg(channel->priv->dev,
@@ -252,8 +252,13 @@ static int get_mmbi_header(struct aspeed_mmbi_channel *channel,
 		dev_err(channel->priv->dev, "Failed to read Host RWP\n");
 		return -EAGAIN;
 	}
+	if (read_host_rwp_val(channel, ASPEED_MMBI_HRWP1_INSTANCE0, &h_rwp1)) {
+		dev_err(channel->priv->dev, "Failed to read Host RWP\n");
+		return -EAGAIN;
+	}
 	h2b_wp = GET_H2B_WRITE_POINTER(h_rwp0);
-	dev_dbg(channel->priv->dev, "MMBI HRWP - h2b_wp: 0x%0x\n", h2b_wp);
+	b2h_rp = GET_B2H_READ_POINTER(h_rwp1);
+	dev_dbg(channel->priv->dev, "MMBI HRWP - h2b_wp: 0x%0x, b2h_rp: 0x%0x\n", h2b_wp, b2h_rp);
 
 	if (h2b_wp >= hrop.h2b_rp)
 		*unread_data_len = h2b_wp - hrop.h2b_rp;
@@ -270,7 +275,17 @@ static int get_mmbi_header(struct aspeed_mmbi_channel *channel,
 		(u32)(channel->h2b_cb_vmem + hrop.h2b_rp));
 
 	/* Extract MMBI protocol - protocol type and length */
-	memcpy(&header, channel->h2b_cb_vmem + hrop.h2b_rp, sizeof(header));
+	if ((hrop.h2b_rp + sizeof(header)) <= channel->h2b_cb_size) {
+		memcpy(&header, channel->h2b_cb_vmem + hrop.h2b_rp,
+		       sizeof(header));
+	} else {
+		ssize_t chunk_len = channel->h2b_cb_size - hrop.h2b_rp;
+
+		memcpy(&header, channel->h2b_cb_vmem + hrop.h2b_rp, chunk_len);
+		memcpy(((u8 *)&header) + chunk_len, channel->h2b_cb_vmem,
+		       sizeof(header) - chunk_len);
+	}
+
 	*data_length = FIELD_GET(MMBI_HDR_LENGTH_MASK, header.data);
 	*type = FIELD_GET(MMBI_HDR_TYPE_MASK, header.data);
 
@@ -474,14 +489,6 @@ static ssize_t mmbi_read(struct file *filp, char *buff, size_t count,
 		goto err_out;
 	}
 
-	if (*offp >= channel->h2b_cb_size) {
-		ret = -EINVAL;
-		goto err_out;
-	}
-
-	if (*offp + count > channel->h2b_cb_size)
-		count = channel->h2b_cb_size - *offp;
-
 	ret = get_mmbi_header(channel, &req_data_len, &type, &unread_data_len);
 	if (ret != 0) {
 		/* Bail out as we can't read header. */
@@ -498,7 +505,13 @@ static ssize_t mmbi_read(struct file *filp, char *buff, size_t count,
 	}
 
 	memcpy(&hrop, channel->hrop_vmem, sizeof(struct host_rop));
-	rd_offset = hrop.h2b_rp + sizeof(struct mmbi_header);
+	if ((hrop.h2b_rp + sizeof(struct mmbi_header)) <=
+	    channel->h2b_cb_size) {
+		rd_offset = hrop.h2b_rp + sizeof(struct mmbi_header);
+	} else {
+		rd_offset = hrop.h2b_rp + sizeof(struct mmbi_header) -
+			    channel->h2b_cb_size;
+	}
 	rd_len = req_data_len;
 
 	/* Extract data and copy to user space application */

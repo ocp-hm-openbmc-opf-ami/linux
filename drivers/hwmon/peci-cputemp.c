@@ -92,13 +92,52 @@ static s32 ten_dot_six_to_millidegree(s32 val)
 	return ((val ^ 0x8000) - 0x8000) * 1000 / 64;
 }
 
-static int get_temp_targets(struct peci_cputemp *priv)
+/*
+ * CPU can return invalid temperatures prior to BIOS-PCU handshake
+ * BIOS_RST_CPL3 completion is used to filter the invalid readings out.
+ */
+static int get_bios_reset_cfg(struct peci_cputemp *priv)
 {
 	struct peci_rd_end_pt_cfg_msg re_msg;
 	u32 bios_reset_cpl_cfg;
+	int ret;
+
+	switch (priv->gen_info->model) {
+	case INTEL_FAM6_SAPPHIRERAPIDS:
+		re_msg.addr = priv->mgr->client->addr;
+		re_msg.msg_type = PECI_ENDPTCFG_TYPE_LOCAL_PCI;
+		re_msg.params.pci_cfg.seg = 0;
+		re_msg.params.pci_cfg.bus = 31;
+		re_msg.params.pci_cfg.device = 30;
+		re_msg.params.pci_cfg.function = 1;
+		re_msg.params.pci_cfg.reg = 0x94;
+		re_msg.rx_len = 4;
+		break;
+	default:
+		return 0;
+	}
+	ret = peci_command(priv->mgr->client->adapter, PECI_CMD_RD_END_PT_CFG,
+			   sizeof(re_msg), &re_msg);
+	if (ret || re_msg.cc != PECI_DEV_CC_SUCCESS)
+		ret = -EIO;
+	if (ret)
+		return ret;
+
+	bios_reset_cpl_cfg = le32_to_cpup((__le32 *)re_msg.data);
+	if (!(bios_reset_cpl_cfg & BIOS_RST_CPL3)) {
+		dev_dbg(priv->dev,
+			"BIOS and Pcode Node ID isn't configured, BIOS_RESET_CPL_CFG: 0x%x\n",
+			bios_reset_cpl_cfg);
+		return -EIO;
+	}
+	return 0;
+}
+
+static int get_temp_targets(struct peci_cputemp *priv)
+{
 	s32 tthrottle_offset;
 	s32 tcontrol_margin;
-	u8  pkg_cfg[4];
+	u8 pkg_cfg[4];
 	int ret;
 
 	/*
@@ -108,48 +147,14 @@ static int get_temp_targets(struct peci_cputemp *priv)
 	if (!peci_sensor_need_update(&priv->temp.tcontrol))
 		return 0;
 
-	/*
-	 * CPU can return invalid temperatures prior to BIOS-PCU handshake
-	 * RST_CPL3 completion so filter the invalid readings out.
-	 */
-	switch (priv->gen_info->model) {
-	case INTEL_FAM6_ICELAKE_X:
-	case INTEL_FAM6_ICELAKE_XD:
-		re_msg.addr = priv->mgr->client->addr;
-		re_msg.msg_type = PECI_ENDPTCFG_TYPE_LOCAL_PCI;
-		re_msg.params.pci_cfg.seg = 0;
-		re_msg.params.pci_cfg.bus = 31;
-		re_msg.params.pci_cfg.device = 30;
-		re_msg.params.pci_cfg.function = 1;
-		re_msg.params.pci_cfg.reg = 0x94;
-		re_msg.rx_len = 4;
-		re_msg.domain_id = priv->mgr->client->domain_id;
-
-		ret = peci_command(priv->mgr->client->adapter,
-				   PECI_CMD_RD_END_PT_CFG, sizeof(re_msg), &re_msg);
-		if (ret || re_msg.cc != PECI_DEV_CC_SUCCESS)
-			ret = -EAGAIN;
-		if (ret)
-			return ret;
-
-		bios_reset_cpl_cfg = le32_to_cpup((__le32 *)re_msg.data);
-		if (!(bios_reset_cpl_cfg & BIOS_RST_CPL3)) {
-			dev_dbg(priv->dev, "BIOS and Pcode Node ID isn't configured, BIOS_RESET_CPL_CFG: 0x%x\n",
-				bios_reset_cpl_cfg);
-			return -EAGAIN;
-		}
-
-		break;
-	default:
-		/* TODO: Check reset completion for other CPUs if needed */
-		break;
-	}
-
 	ret = peci_client_read_package_config(priv->mgr,
 					      PECI_MBX_INDEX_TEMP_TARGET, 0,
 					      pkg_cfg);
 	if (ret)
 		return ret;
+
+	if (pkg_cfg[2] == 0 && get_bios_reset_cfg(priv))
+		return -EAGAIN;
 
 	priv->temp.tjmax.value = pkg_cfg[2] * 1000;
 
@@ -179,6 +184,8 @@ static int get_die_temp(struct peci_cputemp *priv)
 	if (ret)
 		return ret;
 
+	if (msg.temp_raw == 0 && get_bios_reset_cfg(priv))
+		return -EAGAIN;
 	/* Note that the tjmax should be available before calling it */
 	priv->temp.die.value = priv->temp.tjmax.value +
 			       (msg.temp_raw * 1000 / 64);
@@ -219,6 +226,10 @@ static int get_dts(struct peci_cputemp *priv)
 		return -EIO;
 
 	dts_margin = ten_dot_six_to_millidegree(dts_margin);
+	if (dts_margin <= 0 && get_bios_reset_cfg(priv)) {
+		dev_dbg(priv->dev, "BIOS and Pcode Node ID isn't configured, ignore bad dts margin\n");
+		return -EAGAIN;
+	}
 
 	/* Note that the tcontrol should be available before calling it */
 	priv->temp.dts.value = priv->temp.tcontrol.value - dts_margin;

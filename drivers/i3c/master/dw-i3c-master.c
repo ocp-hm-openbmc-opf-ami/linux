@@ -254,6 +254,7 @@
 #define DEV_ADDR_TABLE_SIR_REJECT	BIT(13)
 #define DEV_ADDR_TABLE_IBI_WITH_DATA	BIT(12)
 #define DEV_ADDR_TABLE_DYNAMIC_ADDR(x)	(((x) << 16) & GENMASK(23, 16))
+#define DEV_ADDR_TABLE_DYNAMIC_ADDR_GET(x)	(((x) & GENMASK(23, 16)) >> 16)
 #define DEV_ADDR_TABLE_STATIC_ADDR(x)	((x) & GENMASK(6, 0))
 #define DEV_ADDR_TABLE_LOC(start, idx)	((start) + ((idx) << 2))
 
@@ -1584,28 +1585,15 @@ static int dw_i3c_master_reattach_i3c_dev(struct i3c_dev_desc *dev,
 	struct dw_i3c_i2c_dev_data *data = i3c_dev_get_master_data(dev);
 	struct i3c_master_controller *m = i3c_dev_get_master(dev);
 	struct dw_i3c_master *master = to_dw_i3c_master(m);
-	int pos;
+	int offset = DEV_ADDR_TABLE_LOC(master->datstartaddr, data->index);
+	u32 dat_reg;
 
-	pos = dw_i3c_master_get_free_pos(master);
-
-	if (data->index > pos && pos > 0) {
-		writel(0,
-		       master->regs +
-		       DEV_ADDR_TABLE_LOC(master->datstartaddr, data->index));
-
-		master->addrs[data->index] = 0;
-		master->free_pos |= BIT(data->index);
-
-		data->index = pos;
-		master->addrs[pos] = dev->info.dyn_addr;
-		master->free_pos &= ~BIT(pos);
+	dat_reg = readl(master->regs + offset);
+	if (DEV_ADDR_TABLE_DYNAMIC_ADDR_GET(dat_reg) != dev->info.dyn_addr) {
+		master->addrs[data->index] = dev->info.dyn_addr;
+		writel(DEV_ADDR_TABLE_DYNAMIC_ADDR(master->addrs[data->index]),
+		       master->regs + offset);
 	}
-
-	writel(DEV_ADDR_TABLE_DYNAMIC_ADDR(dev->info.dyn_addr),
-	       master->regs +
-	       DEV_ADDR_TABLE_LOC(master->datstartaddr, data->index));
-
-	master->addrs[data->index] = dev->info.dyn_addr;
 
 	return 0;
 }
@@ -1617,9 +1605,12 @@ static int dw_i3c_master_attach_i3c_dev(struct i3c_dev_desc *dev)
 	struct dw_i3c_i2c_dev_data *data;
 	int pos;
 
-	pos = dw_i3c_master_get_free_pos(master);
-	if (pos < 0)
-		return pos;
+	pos = dw_i3c_master_get_addr_pos(master, dev->info.dyn_addr ? : dev->info.static_addr);
+	if (pos < 0) {
+		pos = dw_i3c_master_get_free_pos(master);
+		if (pos < 0)
+			return pos;
+	}
 
 	data = kzalloc(sizeof(*data), GFP_KERNEL);
 	if (!data)

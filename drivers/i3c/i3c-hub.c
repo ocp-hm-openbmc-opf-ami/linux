@@ -12,6 +12,8 @@
 
 #define I3C_HUB_TP_MAX_COUNT				0x08
 
+#define I3C_HUB_LOGICAL_BUS_MAX_COUNT			0x08
+
 /* I3C HUB REGISTERS */
 
 /*
@@ -183,10 +185,22 @@ struct dt_settings {
 	struct tp_setting tp[I3C_HUB_TP_MAX_COUNT];
 };
 
+struct logical_bus {
+	bool available;
+	u8 tp_map;
+	struct i3c_master_controller controller;
+	struct device_node *of_node;
+	struct i3c_hub *priv;
+};
+
 struct i3c_hub {
 	struct i3c_device *i3cdev;
+	struct i3c_master_controller *controller;
 	struct regmap *regmap;
 	struct dt_settings settings;
+	struct delayed_work delayed_work;
+
+	struct logical_bus logical_bus[I3C_HUB_LOGICAL_BUS_MAX_COUNT];
 
 	/* Offset for reading HUB's register. */
 	u8 reg_addr;
@@ -318,7 +332,7 @@ static void i3c_hub_tp_of_get_setting(struct device *dev, const struct device_no
 	}
 }
 
-static void i3c_hub_of_get_configuration(struct device *dev, const struct device_node *node)
+static void i3c_hub_of_get_conf_static(struct device *dev, const struct device_node *node)
 {
 	struct i3c_hub *priv = dev_get_drvdata(dev);
 	int ret;
@@ -528,6 +542,28 @@ static int i3c_hub_configure_hw(struct device *dev)
 	return i3c_hub_hw_configure_tp(dev);
 }
 
+static void i3c_hub_of_get_conf_runtime(struct device *dev, const struct device_node *node)
+{
+	struct i3c_hub *priv = dev_get_drvdata(dev);
+	struct device_node *i3c_node;
+	int i3c_id;
+	u8 tp_mask;
+
+	for_each_available_child_of_node(node, i3c_node) {
+		if (!i3c_node->full_name ||
+		    (sscanf(i3c_node->full_name, "i3c%i@%hhx", &i3c_id, &tp_mask) != 2)) {
+			continue;
+		}
+
+		if (i3c_id < I3C_HUB_LOGICAL_BUS_MAX_COUNT) {
+			priv->logical_bus[i3c_id].available = true;
+			priv->logical_bus[i3c_id].of_node = i3c_node;
+			priv->logical_bus[i3c_id].tp_map = tp_mask;
+			priv->logical_bus[i3c_id].priv = priv;
+		}
+	}
+}
+
 static const struct i3c_device_id i3c_hub_ids[] = {
 	I3C_CLASS(I3C_DCR_HUB, NULL),
 	{ },
@@ -607,6 +643,240 @@ err_remove:
 	return PTR_ERR(entry);
 }
 
+static void i3c_hub_trans_pre_cb(struct i3c_master_controller *master)
+{
+	struct logical_bus *bus = container_of(master, struct logical_bus, controller);
+	struct i3c_hub *priv = bus->priv;
+	struct device *dev = i3cdev_to_dev(priv->i3cdev);
+	int ret;
+
+	ret = regmap_write(priv->regmap, I3C_HUB_TP_NET_CON_CONF, bus->tp_map);
+	if (ret)
+		dev_warn(dev, "Failed to open Target Port");
+}
+
+static void i3c_hub_trans_post_cb(struct i3c_master_controller *master)
+{
+	struct logical_bus *bus = container_of(master, struct logical_bus, controller);
+	struct i3c_hub *priv = bus->priv;
+	struct device *dev = i3cdev_to_dev(priv->i3cdev);
+	int ret;
+
+	ret = regmap_write(priv->regmap, I3C_HUB_TP_NET_CON_CONF, 0x00);
+	if (ret)
+		dev_warn(dev, "Failed to close Target Port");
+}
+
+static struct logical_bus *bus_from_i3c_desc(struct i3c_dev_desc *desc)
+{
+	struct i3c_master_controller *controller = i3c_dev_get_master(desc);
+
+	return container_of(controller, struct logical_bus, controller);
+}
+
+static struct i3c_master_controller
+	*parent_from_controller(struct i3c_master_controller *controller)
+{
+	struct logical_bus *bus = container_of(controller, struct logical_bus, controller);
+
+	return bus->priv->controller;
+}
+
+static struct i3c_master_controller *parent_controller_from_i3c_desc(struct i3c_dev_desc *desc)
+{
+	struct i3c_master_controller *controller = i3c_dev_get_master(desc);
+	struct logical_bus *bus = container_of(controller, struct logical_bus, controller);
+
+	return bus->priv->controller;
+}
+
+static struct i3c_master_controller *parent_controller_from_i2c_desc(struct i2c_dev_desc *desc)
+{
+	struct i3c_master_controller *controller = desc->common.master;
+	struct logical_bus *bus = container_of(controller, struct logical_bus, controller);
+
+	return bus->priv->controller;
+}
+
+static int i3c_hub_bus_init(struct i3c_master_controller *master)
+{
+	struct logical_bus *bus = container_of(master, struct logical_bus, controller);
+
+	master->this = bus->priv->i3cdev->desc;
+	return 0;
+}
+
+static void i3c_hub_bus_cleanup(struct i3c_master_controller *master)
+{
+	master->this = NULL;
+}
+
+static int i3c_hub_attach_i3c_dev(struct i3c_dev_desc *dev)
+{
+	struct i3c_master_controller *parent = parent_controller_from_i3c_desc(dev);
+
+	return parent->ops->attach_i3c_dev(dev);
+}
+
+static int i3c_hub_reattach_i3c_dev(struct i3c_dev_desc *dev, u8 old_dyn_addr)
+{
+	struct i3c_master_controller *parent = parent_controller_from_i3c_desc(dev);
+
+	return parent->ops->reattach_i3c_dev(dev, old_dyn_addr);
+}
+
+static void i3c_hub_detach_i3c_dev(struct i3c_dev_desc *dev)
+{
+	struct i3c_master_controller *parent = parent_controller_from_i3c_desc(dev);
+
+	parent->ops->detach_i3c_dev(dev);
+}
+
+static int i3c_hub_do_daa(struct i3c_master_controller *master)
+{
+	struct i3c_master_controller *parent = parent_from_controller(master);
+
+	return parent->ops->do_daa(master);
+}
+
+static bool i3c_hub_supports_ccc_cmd(struct i3c_master_controller *master,
+				     const struct i3c_ccc_cmd *cmd)
+{
+	struct i3c_master_controller *parent = parent_from_controller(master);
+
+	return parent->ops->supports_ccc_cmd(master, cmd);
+}
+
+static int i3c_hub_send_ccc_cmd(struct i3c_master_controller *master, struct i3c_ccc_cmd *cmd)
+{
+	struct i3c_master_controller *parent = parent_from_controller(master);
+
+	return parent->ops->send_ccc_cmd(master, cmd);
+}
+
+static int i3c_hub_priv_xfers(struct i3c_dev_desc *dev, struct i3c_priv_xfer *xfers, int nxfers)
+{
+	struct i3c_master_controller *parent = parent_controller_from_i3c_desc(dev);
+	struct logical_bus *bus = bus_from_i3c_desc(dev);
+	int res;
+
+	i3c_hub_trans_pre_cb(&bus->controller);
+	res = parent->ops->priv_xfers(dev, xfers, nxfers);
+	i3c_hub_trans_post_cb(&bus->controller);
+
+	return res;
+}
+
+static int i3c_hub_attach_i2c_dev(struct i2c_dev_desc *dev)
+{
+	struct i3c_master_controller *parent = parent_controller_from_i2c_desc(dev);
+
+	return parent->ops->attach_i2c_dev(dev);
+}
+
+static void i3c_hub_detach_i2c_dev(struct i2c_dev_desc *dev)
+{
+	struct i3c_master_controller *parent = parent_controller_from_i2c_desc(dev);
+
+	parent->ops->detach_i2c_dev(dev);
+}
+
+static int i3c_hub_i2c_xfers(struct i2c_dev_desc *dev, const struct i2c_msg *xfers, int nxfers)
+{
+	struct i3c_master_controller *parent = parent_controller_from_i2c_desc(dev);
+
+	return parent->ops->i2c_xfers(dev, xfers, nxfers);
+}
+
+static int i3c_hub_request_ibi(struct i3c_dev_desc *dev, const struct i3c_ibi_setup *req)
+{
+	struct i3c_master_controller *parent = parent_controller_from_i3c_desc(dev);
+
+	return parent->ops->request_ibi(dev, req);
+}
+
+static void i3c_hub_free_ibi(struct i3c_dev_desc *dev)
+{
+	struct i3c_master_controller *parent = parent_controller_from_i3c_desc(dev);
+
+	parent->ops->free_ibi(dev);
+}
+
+static int i3c_hub_enable_ibi(struct i3c_dev_desc *dev)
+{
+	struct i3c_master_controller *parent = parent_controller_from_i3c_desc(dev);
+
+	return parent->ops->enable_ibi(dev);
+}
+
+static int i3c_hub_disable_ibi(struct i3c_dev_desc *dev)
+{
+	struct i3c_master_controller *parent = parent_controller_from_i3c_desc(dev);
+
+	return parent->ops->disable_ibi(dev);
+}
+
+static void i3c_hub_recycle_ibi_slot(struct i3c_dev_desc *dev, struct i3c_ibi_slot *slot)
+{
+	struct i3c_master_controller *parent = parent_controller_from_i3c_desc(dev);
+
+	return parent->ops->recycle_ibi_slot(dev, slot);
+}
+
+static const struct i3c_master_controller_ops i3c_hub_i3c_ops = {
+	.bus_init = i3c_hub_bus_init,
+	.bus_cleanup = i3c_hub_bus_cleanup,
+	.attach_i3c_dev = i3c_hub_attach_i3c_dev,
+	.reattach_i3c_dev = i3c_hub_reattach_i3c_dev,
+	.detach_i3c_dev = i3c_hub_detach_i3c_dev,
+	.do_daa = i3c_hub_do_daa,
+	.supports_ccc_cmd = i3c_hub_supports_ccc_cmd,
+	.send_ccc_cmd = i3c_hub_send_ccc_cmd,
+	.priv_xfers = i3c_hub_priv_xfers,
+	.attach_i2c_dev = i3c_hub_attach_i2c_dev,
+	.detach_i2c_dev = i3c_hub_detach_i2c_dev,
+	.i2c_xfers = i3c_hub_i2c_xfers,
+	.request_ibi = i3c_hub_request_ibi,
+	.free_ibi = i3c_hub_free_ibi,
+	.enable_ibi = i3c_hub_enable_ibi,
+	.disable_ibi = i3c_hub_disable_ibi,
+	.recycle_ibi_slot = i3c_hub_recycle_ibi_slot,
+};
+
+int i3c_hub_logic_register(struct i3c_master_controller *master,
+			   struct i3c_master_controller *top_master, struct device *parent)
+{
+	master->bus_driver_context = top_master->bus_driver_context;
+	return i3c_master_register(master, parent, &i3c_hub_i3c_ops, false);
+}
+
+static void i3c_hub_delayed_work(struct work_struct *work)
+{
+	struct i3c_hub *priv = container_of(work, typeof(*priv), delayed_work.work);
+	struct device *dev = i3cdev_to_dev(priv->i3cdev);
+	int ret;
+	int i;
+
+	for (i = 0; i < I3C_HUB_LOGICAL_BUS_MAX_COUNT; ++i) {
+		if (priv->logical_bus[i].available) {
+			ret = regmap_write(priv->regmap, I3C_HUB_TP_NET_CON_CONF,
+					   priv->logical_bus[i].tp_map);
+			if (ret)
+				dev_warn(dev, "Failed to open Target Port");
+
+			dev->of_node = priv->logical_bus[i].of_node;
+			ret = i3c_hub_logic_register(&priv->logical_bus[i].controller,
+						     i3c_dev_get_master(priv->i3cdev->desc), dev);
+			if (ret)
+				dev_warn(dev, "Failed to register i3c controller\n");
+
+			ret = regmap_write(priv->regmap, I3C_HUB_TP_NET_CON_CONF, 0x00);
+			if (ret)
+				dev_warn(dev, "Failed to close Target Port");
+		}
+	}
+}
+
 static int i3c_hub_probe(struct i3c_device *i3cdev)
 {
 	struct regmap_config i3c_hub_regmap_config = {
@@ -625,8 +895,9 @@ static int i3c_hub_probe(struct i3c_device *i3cdev)
 		return -ENOMEM;
 
 	priv->i3cdev = i3cdev;
+	priv->controller = i3c_dev_get_master(i3cdev->desc);
 	i3cdev_set_drvdata(i3cdev, priv);
-
+	INIT_DELAYED_WORK(&priv->delayed_work, i3c_hub_delayed_work);
 	sprintf(hub_id, "i3c-hub-%d-%llx", i3c_dev_get_master(i3cdev->desc)->bus_id,
 		i3cdev->desc->info.pid);
 	ret = i3c_hub_debugfs_init(priv, hub_id);
@@ -637,11 +908,15 @@ static int i3c_hub_probe(struct i3c_device *i3cdev)
 
 	/* TBD: Support for multiple HUBs. */
 	/* Just get first hub node from DT */
-	node = of_get_child_by_name(dev->parent->of_node, "hub");
+	node = of_node_get(dev->of_node);
+	if (!node)
+		node = of_get_child_by_name(dev->parent->of_node, "hub");
+
 	if (!node) {
 		dev_warn(dev, "Failed to find DT entry for the driver. Running with defaults.\n");
 	} else {
-		i3c_hub_of_get_configuration(dev, node);
+		i3c_hub_of_get_conf_static(dev, node);
+		i3c_hub_of_get_conf_runtime(dev, node);
 		of_node_put(node);
 	}
 
@@ -676,6 +951,8 @@ static int i3c_hub_probe(struct i3c_device *i3cdev)
 
 	/* TBD: Apply special/security lock here using DEV_CMD register */
 
+	schedule_delayed_work(&priv->delayed_work, msecs_to_jiffies(100));
+
 	return 0;
 
 error:
@@ -686,7 +963,13 @@ error:
 static void i3c_hub_remove(struct i3c_device *i3cdev)
 {
 	struct i3c_hub *priv = i3cdev_get_drvdata(i3cdev);
+	int i;
 
+	for (i = 0; i < I3C_HUB_LOGICAL_BUS_MAX_COUNT; ++i) {
+		if (priv->logical_bus[i].available)
+			i3c_master_unregister(&priv->logical_bus[i].controller);
+	}
+	cancel_delayed_work_sync(&priv->delayed_work);
 	debugfs_remove_recursive(priv->debug_dir);
 }
 

@@ -169,6 +169,10 @@ struct i3c_device_ibi_info {
  * @pid: I3C Provisional ID exposed by the device. This is a unique identifier
  *	 that may be used to attach boardinfo to i3c_dev_desc when the device
  *	 does not have a static address
+ * @dcr: I3C Device Characteristic Register value. This value is used to
+ *	 identify type of I3C device. It is read during ENTDAA procedure but in
+ *	 case static configuration it could be also provided in DTS as a
+ *	 boardinfo
  * @of_node: optional DT node in case the device has been described in the DT
  *
  * This structure is used to attach board-level information to an I3C device.
@@ -181,6 +185,7 @@ struct i3c_dev_boardinfo {
 	u8 init_dyn_addr;
 	u8 static_addr;
 	u64 pid;
+	u32 dcr;
 	struct device_node *of_node;
 };
 

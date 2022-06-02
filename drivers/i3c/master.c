@@ -1629,8 +1629,10 @@ i3c_master_register_new_i3c_devs(struct i3c_master_controller *master)
 		dev_set_name(&desc->dev->dev, "%d-%llx", master->bus.id,
 			     desc->info.pid);
 
-		if (desc->boardinfo)
+		if (desc->boardinfo) {
 			desc->dev->dev.of_node = desc->boardinfo->of_node;
+			desc->info.dcr = desc->boardinfo->dcr;
+		}
 
 		ret = device_register(&desc->dev->dev);
 		if (ret)
@@ -2173,6 +2175,8 @@ of_i3c_master_add_i3c_boardinfo(struct i3c_master_controller *master,
 	struct device *dev = &master->dev;
 	enum i3c_addr_slot_status addrstatus;
 	u32 init_dyn_addr = 0;
+	u32 dcr;
+	int ret;
 
 	boardinfo = devm_kzalloc(dev, sizeof(*boardinfo), GFP_KERNEL);
 	if (!boardinfo)
@@ -2205,6 +2209,10 @@ of_i3c_master_add_i3c_boardinfo(struct i3c_master_controller *master,
 	if ((boardinfo->pid & GENMASK_ULL(63, 48)) ||
 	    I3C_PID_RND_LOWER_32BITS(boardinfo->pid))
 		return -EINVAL;
+
+	ret = of_property_read_u32(node, "dcr", &dcr);
+	if (!ret)
+		boardinfo->dcr = dcr;
 
 	boardinfo->init_dyn_addr = init_dyn_addr;
 	boardinfo->of_node = of_node_get(node);

@@ -623,7 +623,8 @@ static int i3c_hub_probe(struct i3c_device *i3cdev)
 	priv->i3cdev = i3cdev;
 	i3cdev_set_drvdata(i3cdev, priv);
 
-	sprintf(hub_id, "i3c-hub-%d-%llx", i3cdev->bus->id, i3cdev->desc->info.pid);
+	sprintf(hub_id, "i3c-hub-%d-%llx", i3c_dev_get_master(i3cdev->desc)->bus_id,
+		i3cdev->desc->info.pid);
 	ret = i3c_hub_debugfs_init(priv, hub_id);
 	if (ret)
 		return dev_err_probe(dev, ret, "Failed to initialized DebugFS.\n");

@@ -419,15 +419,16 @@ static void i3c_bus_init_addrslots(struct i3c_bus *bus)
 					     I3C_ADDR_SLOT_RSVD);
 }
 
-static void i3c_bus_cleanup(struct i3c_bus *i3cbus)
+static void i3c_bus_cleanup(struct i3c_master_controller *master)
 {
 	mutex_lock(&i3c_core_lock);
-	idr_remove(&i3c_bus_idr, i3cbus->id);
+	idr_remove(&i3c_bus_idr, master->bus_id);
 	mutex_unlock(&i3c_core_lock);
 }
 
-static int i3c_bus_init(struct i3c_bus *i3cbus)
+static int i3c_bus_init(struct i3c_master_controller *master)
 {
+	struct i3c_bus *i3cbus = i3c_master_get_bus(master);
 	int ret;
 
 	init_rwsem(&i3cbus->lock);
@@ -443,7 +444,7 @@ static int i3c_bus_init(struct i3c_bus *i3cbus)
 	if (ret < 0)
 		return ret;
 
-	i3cbus->id = ret;
+	master->bus_id = ret;
 
 	return 0;
 }
@@ -479,11 +480,12 @@ static ssize_t current_master_show(struct device *dev,
 				   struct device_attribute *da,
 				   char *buf)
 {
+	struct i3c_master_controller *master = dev_to_i3cmaster(dev);
 	struct i3c_bus *i3cbus = dev_to_i3cbus(dev);
 	ssize_t ret;
 
 	i3c_bus_normaluse_lock(i3cbus);
-	ret = sprintf(buf, "%d-%llx\n", i3cbus->id,
+	ret = sprintf(buf, "%d-%llx\n", master->bus_id,
 		      i3cbus->cur_master->info.pid);
 	i3c_bus_normaluse_unlock(i3cbus);
 
@@ -544,7 +546,7 @@ static void i3c_masterdev_release(struct device *dev)
 		destroy_workqueue(master->wq);
 
 	WARN_ON(!list_empty(&bus->devs.i2c) || !list_empty(&bus->devs.i3c));
-	i3c_bus_cleanup(bus);
+	i3c_bus_cleanup(master);
 
 	of_node_put(dev->of_node);
 }
@@ -1494,6 +1496,7 @@ static int i3c_master_reattach_i3c_dev(struct i3c_dev_desc *dev,
 						      dev->info.dyn_addr);
 		if (status != I3C_ADDR_SLOT_FREE)
 			return -EBUSY;
+
 		i3c_bus_set_addr_slot_status(&master->bus,
 					     dev->info.dyn_addr,
 					     I3C_ADDR_SLOT_I3C_DEV);
@@ -1626,7 +1629,7 @@ i3c_master_register_new_i3c_devs(struct i3c_master_controller *master)
 		desc->dev->dev.type = &i3c_device_type;
 		desc->dev->dev.bus = &i3c_bus_type;
 		desc->dev->dev.release = i3c_device_release;
-		dev_set_name(&desc->dev->dev, "%d-%llx", master->bus.id,
+		dev_set_name(&desc->dev->dev, "%d-%llx", master->bus_id,
 			     desc->info.pid);
 
 		if (desc->boardinfo) {
@@ -1880,7 +1883,6 @@ static int i3c_master_bus_init(struct i3c_master_controller *master)
 	 * i3c_master_add_i3c_dev_locked().
 	 */
 	list_for_each_entry(i3cboardinfo, &master->boardinfo.i3c, node) {
-
 		/*
 		 * We don't reserve a dynamic address for devices that
 		 * don't explicitly request one.
@@ -2087,7 +2089,7 @@ int i3c_master_add_i3c_dev_locked(struct i3c_master_controller *master,
 		} else {
 			dev_err(&master->dev,
 				"Failed to assign reserved/old address to device %d%llx",
-				master->bus.id, newdev->info.pid);
+				master->bus_id, newdev->info.pid);
 		}
 	}
 
@@ -2104,13 +2106,13 @@ int i3c_master_add_i3c_dev_locked(struct i3c_master_controller *master,
 		if (ret) {
 			dev_err(&master->dev,
 				"Failed to request IBI on device %d-%llx",
-				master->bus.id, newdev->info.pid);
+				master->bus_id, newdev->info.pid);
 		} else if (enable_ibi) {
 			ret = i3c_dev_enable_ibi_locked(newdev);
 			if (ret)
 				dev_err(&master->dev,
 					"Failed to re-enable IBI on device %d-%llx",
-					master->bus.id, newdev->info.pid);
+					master->bus_id, newdev->info.pid);
 		}
 		mutex_unlock(&newdev->ibi_lock);
 	}
@@ -2744,9 +2746,9 @@ int i3c_master_register(struct i3c_master_controller *master,
 			bool secondary)
 {
 	unsigned long i2c_scl_rate = I3C_BUS_I2C_FM_PLUS_SCL_RATE;
-	struct i3c_bus *i3cbus = i3c_master_get_bus(master);
 	enum i3c_bus_mode mode = I3C_BUS_MODE_PURE;
 	struct i2c_dev_boardinfo *i2cbi;
+	struct i3c_bus *i3cbus;
 	int ret;
 
 	/* We do not support secondary masters yet. */
@@ -2767,12 +2769,14 @@ int i3c_master_register(struct i3c_master_controller *master,
 	INIT_LIST_HEAD(&master->boardinfo.i2c);
 	INIT_LIST_HEAD(&master->boardinfo.i3c);
 
-	ret = i3c_bus_init(i3cbus);
+	ret = i3c_bus_init(master);
 	if (ret)
 		return ret;
 
+	i3cbus = i3c_master_get_bus(master);
+
 	device_initialize(&master->dev);
-	dev_set_name(&master->dev, "i3c-%d", i3cbus->id);
+	dev_set_name(&master->dev, "i3c-%d", master->bus_id);
 
 	ret = of_populate_i3c_bus(master);
 	if (ret)
@@ -2883,11 +2887,10 @@ static void i3c_target_bus_cleanup(struct i3c_master_controller *master)
 
 static void i3c_targetdev_release(struct device *dev)
 {
-	struct i3c_master_controller *master = container_of(dev, struct i3c_master_controller, dev);
-	struct i3c_bus *bus = &master->bus;
+	struct i3c_master_controller *master = dev_to_i3cmaster(dev);
 
 	mutex_lock(&i3c_core_lock);
-	idr_remove(&i3c_bus_idr, bus->id);
+	idr_remove(&i3c_bus_idr, master->bus_id);
 	mutex_unlock(&i3c_core_lock);
 
 	of_node_put(dev->of_node);
@@ -2926,7 +2929,7 @@ i3c_target_register_new_i3c_dev(struct i3c_master_controller *master, struct i3c
 	desc->dev->dev.release = i3c_target_device_release;
 	desc->info = info;
 	desc->common.master = master;
-	dev_set_name(&desc->dev->dev, "%d-target", master->bus.id);
+	dev_set_name(&desc->dev->dev, "%d-target", master->bus_id);
 
 	ret = device_register(&desc->dev->dev);
 	if (ret)
@@ -2996,10 +2999,10 @@ int i3c_target_register(struct i3c_master_controller *master, struct device *par
 	mutex_unlock(&i3c_core_lock);
 	if (ret < 0)
 		return ret;
-	i3cbus->id = ret;
+	master->bus_id = ret;
 
 	device_initialize(&master->dev);
-	dev_set_name(&master->dev, "i3c-%d", i3cbus->id);
+	dev_set_name(&master->dev, "i3c-%d", master->bus_id);
 
 	ret = device_add(&master->dev);
 	if (ret)

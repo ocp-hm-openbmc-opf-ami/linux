@@ -2190,7 +2190,7 @@ static int dw_i3c_probe(struct platform_device *pdev)
 		goto err_assert_rst;
 
 	dev_info(&pdev->dev, "i3c bus %d registered, irq %d\n",
-		 master->base.bus.id, irq);
+		 master->base.bus_id, irq);
 
 	return 0;
 

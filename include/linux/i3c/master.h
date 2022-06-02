@@ -313,7 +313,6 @@ enum i3c_addr_slot_status {
  *		this can change over the time. Will be used to let a master
  *		know whether it needs to request bus ownership before sending
  *		a frame or not
- * @id: bus ID. Assigned by the framework when register the bus
  * @addrslots: a bitmap with 2-bits per-slot to encode the address status and
  *	       ease the DAA (Dynamic Address Assignment) procedure (see
  *	       &enum i3c_addr_slot_status)
@@ -347,7 +346,6 @@ enum i3c_addr_slot_status {
  */
 struct i3c_bus {
 	struct i3c_dev_desc *cur_master;
-	int id;
 	unsigned long addrslots[((I2C_MAX_ADDR + 1) * 2) / BITS_PER_LONG];
 	enum i3c_bus_mode mode;
 	struct {
@@ -473,6 +471,7 @@ struct i3c_master_controller_ops {
 /**
  * struct i3c_master_controller - I3C master controller object
  * @dev: device to be registered to the device-model
+ * @bus_id: bus ID. Assigned by the framework when register the bus
  * @this: an I3C device object representing this master. This device will be
  *	  added to the list of I3C devs available on the bus
  * @i2c: I2C adapter used for backward compatibility. This adapter is
@@ -500,6 +499,7 @@ struct i3c_master_controller_ops {
  */
 struct i3c_master_controller {
 	struct device dev;
+	int bus_id;
 	struct i3c_dev_desc *this;
 	struct i2c_adapter i2c;
 	const struct i3c_master_controller_ops *ops;

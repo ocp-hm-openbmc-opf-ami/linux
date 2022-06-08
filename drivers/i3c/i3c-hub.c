@@ -492,6 +492,10 @@ static int i3c_hub_hw_configure_tp(struct device *dev)
 	if (ret)
 		return ret;
 
+	ret = regmap_update_bits(priv->regmap, I3C_HUB_TP_IO_MODE_CONF, smbus_mask, smbus_val);
+	if (ret)
+		return ret;
+
 	ret = regmap_update_bits(priv->regmap, I3C_HUB_TP_SMBUS_AGNT_EN, smbus_mask, smbus_val);
 	if (ret)
 		return ret;

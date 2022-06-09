@@ -702,6 +702,27 @@ static int pmbus_get_status(struct i2c_client *client, int page, int reg)
 	return status;
 }
 
+int pmbus_query_register(struct i2c_client *client, int reg)
+{
+	int rv;
+	union i2c_smbus_data data;
+
+	data.block[0] = 1;
+	data.block[1] = reg;
+
+	rv = i2c_smbus_xfer(client->adapter, client->addr, client->flags,
+			    I2C_SMBUS_WRITE, PMBUS_QUERY,
+			    I2C_SMBUS_BLOCK_PROC_CALL, &data);
+	if (rv < 0)
+		return rv;
+
+	if (data.block[0] != 1)
+		return -EIO;
+
+	return data.block[1];
+}
+EXPORT_SYMBOL_NS_GPL(pmbus_query_register, PMBUS);
+
 static void pmbus_update_sensor_data(struct i2c_client *client, struct pmbus_sensor *sensor)
 {
 	if (sensor->data < 0 || sensor->update)

@@ -364,6 +364,19 @@ enum pmbus_fan_mode { percent = 0, rpm };
 #define PB_CML_FAULT_INVALID_DATA	BIT(6)
 #define PB_CML_FAULT_INVALID_COMMAND	BIT(7)
 
+/*
+ * QUERY
+ */
+#define PB_QUERY_COMMAND_MODE_MASK	0x1C
+
+#define PB_QUERY_COMMAND_MODE_LINEAR	0x00
+#define PB_QUERY_COMMAND_MODE_DIRECT	0x0C
+#define PB_QUERY_COMMAND_MODE_VID	0x14
+
+#define PB_QUERY_COMMAND_SUPPORTED_FOR_READ	BIT(5)
+#define PB_QUERY_COMMAND_SUPPORTED_FOR_WRITE	BIT(6)
+#define PB_QUERY_COMMAND_SUPPORTED	BIT(7)
+
 enum pmbus_sensor_classes {
 	PSC_VOLTAGE_IN = 0,
 	PSC_VOLTAGE_OUT,
@@ -498,6 +511,7 @@ int pmbus_update_byte_data(struct i2c_client *client, int page, u8 reg,
 void pmbus_clear_faults(struct i2c_client *client);
 bool pmbus_check_byte_register(struct i2c_client *client, int page, int reg);
 bool pmbus_check_word_register(struct i2c_client *client, int page, int reg);
+int pmbus_query_register(struct i2c_client *client, int reg);
 int pmbus_do_probe(struct i2c_client *client, struct pmbus_driver_info *info);
 const struct pmbus_driver_info *pmbus_get_driver_info(struct i2c_client
 						      *client);

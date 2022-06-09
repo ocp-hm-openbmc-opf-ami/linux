@@ -588,9 +588,25 @@ static int i3c_mctp_enable_ibi(struct i3c_device *i3cdev)
  */
 int i3c_mctp_get_eid(struct i3c_mctp_client *client, u8 domain_id, u8 *eid)
 {
-	/* TODO: Implement EID assignment basing on domain ID */
-	*eid = 1;
-	return 0;
+	struct i3c_mctp_endpoint *endpoint;
+	struct i3c_device_info info;
+	int ret = -ENOENT;
+
+	i3c_device_get_info(client->priv->i3c, &info);
+
+	mutex_lock(&client->priv->endpoints_lock);
+
+	list_for_each_entry(endpoint, &client->priv->endpoints, link) {
+		if (endpoint->eid_info.domain_id == domain_id &&
+		    endpoint->eid_info.dyn_addr == info.dyn_addr) {
+			*eid = endpoint->eid_info.eid;
+			ret = 0;
+			break;
+		}
+	}
+
+	mutex_unlock(&client->priv->endpoints_lock);
+	return ret;
 }
 EXPORT_SYMBOL_GPL(i3c_mctp_get_eid);
 

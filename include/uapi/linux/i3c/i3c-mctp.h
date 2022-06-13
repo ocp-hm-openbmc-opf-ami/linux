@@ -16,6 +16,7 @@
  * MCTP operations
  * @I3C_MCTP_SET_EID_INFO: write or overwrite already existing list of
  * CPU EID and Domain ID mappings
+ * @I3C_MCTP_SET_OWN_EID: write/overwrite own EID information
  */
 
 struct i3c_mctp_eid_info {
@@ -29,9 +30,15 @@ struct i3c_mctp_set_eid_info {
 	__u16 count;
 };
 
+struct i3c_mctp_set_own_eid {
+	__u8 eid;
+};
+
 #define I3C_MCTP_IOCTL_BASE    0x69
 
 #define I3C_MCTP_IOCTL_SET_EID_INFO \
 	_IOW(I3C_MCTP_IOCTL_BASE, 0x41, struct i3c_mctp_set_eid_info)
+#define I3C_MCTP_IOCTL_SET_OWN_EID \
+	_IOW(I3C_MCTP_IOCTL_BASE, 0x42, struct i3c_mctp_set_own_eid)
 
 #endif /* _UAPI_LINUX_I3C_MCTP_H */

@@ -29,6 +29,9 @@
 #define I3C_MCTP_MIN_TRANSFER_SIZE		69
 #define I3C_MCTP_IBI_PAYLOAD_SIZE		2
 
+/* MCTP header definitions */
+#define MCTP_HDR_SRC_EID_OFFSET			2
+
 struct i3c_mctp {
 	struct i3c_device *i3c;
 	struct cdev cdev;
@@ -53,6 +56,7 @@ struct i3c_mctp {
 	 * endpoints_lock protects list of endpoints
 	 */
 	struct mutex endpoints_lock;
+	u8 eid;
 };
 
 struct i3c_mctp_client {
@@ -414,6 +418,20 @@ out:
 	return ret;
 }
 
+static int i3c_mctp_set_own_eid(struct i3c_mctp *priv, void __user *userbuf)
+{
+	struct i3c_mctp_set_own_eid data;
+
+	if (copy_from_user(&data, userbuf, sizeof(data))) {
+		dev_err(priv->dev, "copy from user failed\n");
+		return -EFAULT;
+	}
+
+	priv->eid = data.eid;
+
+	return 0;
+}
+
 static long
 i3c_mctp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
@@ -424,6 +442,9 @@ i3c_mctp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	switch (cmd) {
 	case I3C_MCTP_IOCTL_SET_EID_INFO:
 		ret = i3c_mctp_set_eid_info(priv, userbuf);
+		break;
+	case I3C_MCTP_IOCTL_SET_OWN_EID:
+		ret = i3c_mctp_set_own_eid(priv, userbuf);
 		break;
 	default:
 		break;
@@ -493,6 +514,7 @@ static struct i3c_mctp *i3c_mctp_alloc(struct i3c_device *i3c)
 
 	priv->id = id;
 	priv->i3c = i3c;
+	priv->eid = 0;
 
 	INIT_LIST_HEAD(&priv->endpoints);
 	mutex_init(&priv->endpoints_lock);
@@ -621,6 +643,7 @@ EXPORT_SYMBOL_GPL(i3c_mctp_get_eid);
 int i3c_mctp_send_packet(struct i3c_device *i3c, struct i3c_mctp_packet *tx_packet)
 {
 	struct i3c_mctp *priv = dev_get_drvdata(i3cdev_to_dev(i3c));
+	u8 *protocol_hdr = (u8 *)tx_packet->data.protocol_hdr;
 	struct i3c_priv_xfer xfers = {
 		.rnw = false,
 		.len = tx_packet->size,
@@ -636,6 +659,9 @@ int i3c_mctp_send_packet(struct i3c_device *i3c, struct i3c_mctp_packet *tx_pack
 			priv->max_write_len, xfers.len);
 		return -EINVAL;
 	}
+
+	if (i3c_mctp_find_client(priv, tx_packet) == priv->peci_client)
+		protocol_hdr[MCTP_HDR_SRC_EID_OFFSET] = priv->eid;
 
 	return i3c_device_do_priv_xfers(i3c, &xfers, 1);
 }

@@ -200,32 +200,30 @@ static ssize_t i3c_mctp_write(struct file *file, const char __user *buf, size_t 
 {
 	struct i3c_mctp *priv = file->private_data;
 	struct i3c_device *i3c = priv->i3c;
-	struct i3c_priv_xfer xfers = {
-		.rnw = false,
-		.len = count,
-	};
-	u8 *data;
+	struct i3c_mctp_packet *tx_packet;
 	int ret;
 
-	/*
-	 * Check against packet size + PEC byte
-	 * to not send more data than it was set in the probe
-	 */
-	if (priv->max_write_len < xfers.len + 1) {
-		dev_dbg(i3cdev_to_dev(i3c), "Length mismatch. MWL = %d, xfers.len = %d",
-			priv->max_write_len, xfers.len);
-		return -EINVAL;
+	tx_packet = i3c_mctp_packet_alloc(GFP_KERNEL);
+	if (!tx_packet)
+		return -ENOMEM;
+
+	if (copy_from_user(&tx_packet->data, buf, count)) {
+		dev_err(priv->dev, "copy from user failed\n");
+		ret = -EFAULT;
+		goto out_packet;
 	}
 
-	data = memdup_user(buf, count);
-	if (IS_ERR(data))
-		return PTR_ERR(data);
+	tx_packet->size = count;
 
-	xfers.data.out = data;
+	ret = i3c_mctp_send_packet(i3c, tx_packet);
+	if (ret)
+		goto out_packet;
 
-	ret = i3c_device_do_priv_xfers(i3c, &xfers, 1);
-	kfree(data);
-	return ret ?: count;
+	ret = count;
+
+out_packet:
+	i3c_mctp_packet_free(tx_packet);
+	return ret;
 }
 
 static ssize_t i3c_mctp_read(struct file *file, char __user *buf, size_t count, loff_t *f_pos)
@@ -458,11 +456,22 @@ EXPORT_SYMBOL_GPL(i3c_mctp_get_eid);
  */
 int i3c_mctp_send_packet(struct i3c_device *i3c, struct i3c_mctp_packet *tx_packet)
 {
+	struct i3c_mctp *priv = dev_get_drvdata(i3cdev_to_dev(i3c));
 	struct i3c_priv_xfer xfers = {
 		.rnw = false,
 		.len = tx_packet->size,
 		.data.out = &tx_packet->data,
 	};
+
+	/*
+	 * Check against packet size + PEC byte
+	 * to not send more data than it was set in the probe
+	 */
+	if (priv->max_write_len < xfers.len + 1) {
+		dev_dbg(i3cdev_to_dev(i3c), "Length mismatch. MWL = %d, xfers.len = %d",
+			priv->max_write_len, xfers.len);
+		return -EINVAL;
+	}
 
 	return i3c_device_do_priv_xfers(i3c, &xfers, 1);
 }

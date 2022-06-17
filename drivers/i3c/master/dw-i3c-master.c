@@ -422,7 +422,7 @@ static bool dw_i3c_master_supports_ccc_cmd(struct i3c_master_controller *m,
 static inline struct dw_i3c_master *
 to_dw_i3c_master(struct i3c_master_controller *master)
 {
-	return container_of(master, struct dw_i3c_master, base);
+	return (struct dw_i3c_master *)master->bus_driver_context;
 }
 
 static void dw_i3c_master_disable(struct dw_i3c_master *master)
@@ -2121,6 +2121,7 @@ static int dw_i3c_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	master->dev = &pdev->dev;
+	master->base.bus_driver_context = master;
 
 	master->regs = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(master->regs))

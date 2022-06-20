@@ -1414,6 +1414,26 @@ static int pmbus_thermal_add_sensor(struct pmbus_data *pmbus_data,
 	return 0;
 }
 
+static void pmbus_sensor_init(struct pmbus_sensor *sensor, const char *name, const char *type,
+			      int seq, int page, int phase, int reg,
+			      enum pmbus_sensor_classes class, bool update, bool convert)
+{
+	if (type)
+		snprintf(sensor->name, sizeof(sensor->name), "%s%d_%s",
+			 name, seq, type);
+	else
+		snprintf(sensor->name, sizeof(sensor->name), "%s%d",
+			 name, seq);
+
+	sensor->page = page;
+	sensor->phase = phase;
+	sensor->reg = reg;
+	sensor->class = class;
+	sensor->update = update;
+	sensor->convert = convert;
+	sensor->data = -ENODATA;
+}
+
 static struct pmbus_sensor *pmbus_add_sensor(struct pmbus_data *data,
 					     const char *name, const char *type,
 					     int seq, int page, int phase,
@@ -1428,25 +1448,14 @@ static struct pmbus_sensor *pmbus_add_sensor(struct pmbus_data *data,
 	sensor = devm_kzalloc(data->dev, sizeof(*sensor), GFP_KERNEL);
 	if (!sensor)
 		return NULL;
-	a = &sensor->attribute;
 
-	if (type)
-		snprintf(sensor->name, sizeof(sensor->name), "%s%d_%s",
-			 name, seq, type);
-	else
-		snprintf(sensor->name, sizeof(sensor->name), "%s%d",
-			 name, seq);
+	pmbus_sensor_init(sensor, name, type, seq, page, phase, reg, class, update, convert);
 
 	if (data->flags & PMBUS_WRITE_PROTECTED)
 		readonly = true;
 
-	sensor->page = page;
-	sensor->phase = phase;
-	sensor->reg = reg;
-	sensor->class = class;
-	sensor->update = update;
-	sensor->convert = convert;
-	sensor->data = -ENODATA;
+	a = &sensor->attribute;
+
 	pmbus_dev_attr_init(a, sensor->name,
 			    readonly ? 0444 : 0644,
 			    pmbus_show_sensor, pmbus_set_sensor);

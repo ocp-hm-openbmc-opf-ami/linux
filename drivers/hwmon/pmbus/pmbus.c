@@ -30,6 +30,7 @@ static void pmbus_find_sensor_groups(struct i2c_client *client,
 {
 	int page;
 	int fan_mode;
+	int rv;
 
 	/* Sensors detected on page 0 only */
 	if (pmbus_check_word_register(client, 0, PMBUS_READ_VIN))
@@ -73,6 +74,25 @@ static void pmbus_find_sensor_groups(struct i2c_client *client,
 	    && pmbus_check_byte_register(client, 0,
 					 PMBUS_STATUS_TEMPERATURE))
 			info->func[0] |= PMBUS_HAVE_STATUS_TEMP;
+
+	rv = pmbus_query_register(client, PMBUS_READ_EIN);
+	/* only direct format for EIN and EOUT supported */
+	if (rv > 0 && (rv & PB_QUERY_COMMAND_SUPPORTED) &&
+	    (rv & PB_QUERY_COMMAND_SUPPORTED_FOR_READ) &&
+		((rv & PB_QUERY_COMMAND_MODE_MASK) == PB_QUERY_COMMAND_MODE_DIRECT)) {
+		info->func[0] |= PMBUS_HAVE_EIN;
+		info->format[PSC_POWER_AVERAGE] = direct;
+		info->m[PSC_POWER_AVERAGE] = 1;
+	}
+
+	rv = pmbus_query_register(client, PMBUS_READ_EOUT);
+	if (rv > 0 && (rv & PB_QUERY_COMMAND_SUPPORTED) &&
+	    (rv & PB_QUERY_COMMAND_SUPPORTED_FOR_READ) &&
+		((rv & PB_QUERY_COMMAND_MODE_MASK) == PB_QUERY_COMMAND_MODE_DIRECT)) {
+		info->func[0] |= PMBUS_HAVE_EOUT;
+		info->format[PSC_POWER_AVERAGE] = direct;
+		info->m[PSC_POWER_AVERAGE] = 1;
+	}
 
 	/* Sensors detected on all pages */
 	for (page = 0; page < info->pages; page++) {

@@ -94,6 +94,8 @@ enum pmbus_regs {
 	PMBUS_STATUS_FAN_12		= 0x81,
 	PMBUS_STATUS_FAN_34		= 0x82,
 
+	PMBUS_READ_EIN			= 0x86,
+	PMBUS_READ_EOUT			= 0x87,
 	PMBUS_READ_VIN			= 0x88,
 	PMBUS_READ_IIN			= 0x89,
 	PMBUS_READ_VCAP			= 0x8A,
@@ -383,6 +385,7 @@ enum pmbus_sensor_classes {
 	PSC_CURRENT_IN,
 	PSC_CURRENT_OUT,
 	PSC_POWER,
+	PSC_POWER_AVERAGE,
 	PSC_TEMPERATURE,
 	PSC_FAN,
 	PSC_PWM,
@@ -416,6 +419,8 @@ enum pmbus_sensor_classes {
 #define PMBUS_HAVE_PWM12	BIT(20)
 #define PMBUS_HAVE_PWM34	BIT(21)
 #define PMBUS_HAVE_SAMPLES	BIT(22)
+#define PMBUS_HAVE_EIN		BIT(23)
+#define PMBUS_HAVE_EOUT		BIT(24)
 
 #define PMBUS_PHASE_VIRTUAL	BIT(30)	/* Phases on this page are virtual */
 #define PMBUS_PAGE_VIRTUAL	BIT(31)	/* Page is virtual */

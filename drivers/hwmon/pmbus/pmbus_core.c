@@ -46,6 +46,15 @@ struct pmbus_sensor {
 #define to_pmbus_sensor(_attr) \
 	container_of(_attr, struct pmbus_sensor, attribute)
 
+struct pmbus_power_average_sensor {
+	struct pmbus_sensor sensor;
+	u64 energy_count;
+	u32 sample_count;
+};
+
+#define to_pmbus_power_average_sensor(_attr) \
+	container_of(to_pmbus_sensor(_attr), struct pmbus_power_average_sensor, sensor)
+
 struct pmbus_boolean {
 	char name[PMBUS_NAME_SIZE];	/* sysfs boolean name */
 	struct sensor_device_attribute attribute;
@@ -816,7 +825,7 @@ static s64 pmbus_reg2data_linear(struct pmbus_data *data,
 		val = val * 1000LL;
 
 	/* scale result to micro-units for power sensors */
-	if (sensor->class == PSC_POWER)
+	if (sensor->class == PSC_POWER || sensor->class == PSC_POWER_AVERAGE)
 		val = val * 1000LL;
 
 	if (exponent >= 0)
@@ -853,7 +862,7 @@ static s64 pmbus_reg2data_direct(struct pmbus_data *data,
 	}
 
 	/* scale result to micro-units for power sensors */
-	if (sensor->class == PSC_POWER) {
+	if (sensor->class == PSC_POWER || sensor->class == PSC_POWER_AVERAGE) {
 		R += 3;
 		b *= 1000;
 	}
@@ -997,6 +1006,21 @@ static u16 pmbus_data2reg_ieee754(struct pmbus_data *data,
 
 #define MAX_LIN_MANTISSA	(1023 * 1000)
 #define MIN_LIN_MANTISSA	(511 * 1000)
+
+static u64 pmbus_energy_count(struct pmbus_data *data,
+			      struct pmbus_power_average_sensor *sensor,
+			      u32 accumulator_current,
+			      u8 rollover)
+{
+	s64 val;
+	u64 accumulator_max;
+
+	sensor->sensor.data = accumulator_current;
+	val = pmbus_reg2data(data, &sensor->sensor);
+	sensor->sensor.data = 0x7FFF;
+	accumulator_max = (u64)pmbus_reg2data(data, &sensor->sensor);
+	return rollover * accumulator_max + val;
+}
 
 static u16 pmbus_data2reg_linear(struct pmbus_data *data,
 				 struct pmbus_sensor *sensor, s64 val)
@@ -1240,6 +1264,54 @@ static ssize_t pmbus_show_sensor(struct device *dev,
 	return ret;
 }
 
+static ssize_t pmbus_show_power_average_sensor(struct device *dev,
+					       struct device_attribute *devattr, char *buf)
+{
+	struct pmbus_power_average_sensor *sensor = to_pmbus_power_average_sensor(devattr);
+	struct i2c_client *client = to_i2c_client(dev->parent);
+	struct pmbus_data *data = i2c_get_clientdata(client);
+	u64 last_energy_count = sensor->energy_count;
+	u32 last_sample_count = sensor->sample_count;
+	u8 buffer[I2C_SMBUS_BLOCK_MAX];
+	s16 accumulator_current;
+	u64 energy_count_diff;
+	u32 sample_count_diff;
+	ssize_t ret;
+
+	mutex_lock(&data->update_lock);
+	ret = pmbus_set_page(client, sensor->sensor.page, sensor->sensor.phase);
+	if (ret < 0)
+		goto unlock;
+
+	ret = i2c_smbus_read_i2c_block_data(client, sensor->sensor.reg, 8, buffer);
+	if (ret < 0)
+		goto unlock;
+
+	accumulator_current = buffer[1] + (buffer[2] << 8);
+	sensor->sample_count = buffer[4] + (buffer[5] << 8) + (buffer[6] << 16);
+	sensor->energy_count = pmbus_energy_count(data, sensor, accumulator_current, buffer[3]);
+
+	if (sensor->sample_count == last_sample_count) {
+		ret = -ENODATA;
+		goto unlock;
+	}
+	if (sensor->energy_count < last_energy_count)
+		energy_count_diff = sensor->energy_count +
+			(pmbus_energy_count(data, sensor, 0xFFFF, 0xFF) + 1) - last_energy_count;
+	else
+		energy_count_diff = sensor->energy_count - last_energy_count;
+
+	if (sensor->sample_count < last_sample_count)
+		sample_count_diff = sensor->sample_count + (0xFFFFFF + 1) - last_sample_count;
+	else
+		sample_count_diff = sensor->sample_count - last_sample_count;
+
+	ret = sysfs_emit(buf, "%llu\n", div_u64(energy_count_diff, sample_count_diff));
+unlock:
+	mutex_unlock(&data->update_lock);
+	return ret;
+}
+
 static ssize_t pmbus_set_sensor(struct device *dev,
 				struct device_attribute *devattr,
 				const char *buf, size_t count)
@@ -1473,6 +1545,40 @@ static struct pmbus_sensor *pmbus_add_sensor(struct pmbus_data *data,
 	return sensor;
 }
 
+static struct pmbus_power_average_sensor
+*pmbus_add_power_average_sensor(struct pmbus_data *data, const char *name, const char *type,
+				int seq, int page, int phase, int reg,
+				enum pmbus_sensor_classes class, bool update, bool readonly,
+				bool convert)
+{
+	struct pmbus_power_average_sensor *sensor;
+	struct device_attribute *a;
+
+	sensor = devm_kzalloc(data->dev, sizeof(*sensor), GFP_KERNEL);
+	if (!sensor)
+		return NULL;
+
+	pmbus_sensor_init(&sensor->sensor, name, type, seq, page, phase, reg, class, update,
+			  convert);
+
+	if (data->flags & PMBUS_WRITE_PROTECTED)
+		readonly = true;
+
+	a = &sensor->sensor.attribute;
+
+	pmbus_dev_attr_init(a, sensor->sensor.name,
+			    readonly ? 0444 : 0644,
+			    pmbus_show_power_average_sensor, NULL);
+
+	if (pmbus_add_attribute(data, &a->attr))
+		return NULL;
+
+	sensor->sensor.next = data->sensors;
+	data->sensors = &sensor->sensor;
+
+	return sensor;
+}
+
 static int pmbus_add_label(struct pmbus_data *data,
 			   const char *name, int seq,
 			   const char *lstring, int index, int phase)
@@ -1662,6 +1768,23 @@ static int pmbus_add_sensor_attrs_one(struct i2c_client *client,
 		if (ret)
 			return ret;
 	}
+	return 0;
+}
+
+static int pmbus_add_power_average_sensor_attrs_one(struct i2c_client *client,
+						    struct pmbus_data *data,
+						    const struct pmbus_driver_info *info,
+						    const char *name, int index, int page,
+						    int phase,
+						    const struct pmbus_sensor_attr *attr,
+						    bool paged)
+{
+	struct pmbus_power_average_sensor *base;
+
+	base = pmbus_add_power_average_sensor(data, name, "average", index, page, phase,
+					      attr->reg, attr->class, true, true, true);
+	if (!base)
+		return -ENOMEM;
 	return 0;
 }
 
@@ -2076,6 +2199,26 @@ static const struct pmbus_sensor_attr power_attributes[] = {
 	}
 };
 
+static const struct pmbus_sensor_attr power_average_attributes[] = {
+	{
+		.reg = PMBUS_READ_EIN,
+		.class = PSC_POWER_AVERAGE,
+		.paged = true,
+		.update = true,
+		.compare = true,
+		.label = "ein",
+		.func = PMBUS_HAVE_EIN,
+	}, {
+		.reg = PMBUS_READ_EOUT,
+		.class = PSC_POWER_AVERAGE,
+		.paged = true,
+		.update = true,
+		.compare = true,
+		.label = "eout",
+		.func = PMBUS_HAVE_EOUT,
+	}
+};
+
 /* Temperature atributes */
 
 static const struct pmbus_limit_attr temp_limit_attrs[] = {
@@ -2370,6 +2513,53 @@ static int pmbus_add_fan_attributes(struct i2c_client *client,
 	return 0;
 }
 
+static int pmbus_add_power_average_sensor_attrs(struct i2c_client *client,
+						struct pmbus_data *data)
+{
+	const struct pmbus_sensor_attr *attrs = power_average_attributes;
+	const struct pmbus_driver_info *info = data->info;
+	int index = 1;
+	int ret, i;
+
+	for (i = 0; i < ARRAY_SIZE(power_average_attributes); i++) {
+		int page, pages;
+		bool paged = pmbus_sensor_is_paged(info, attrs);
+
+		pages = paged ? info->pages : 1;
+		for (page = 0; page < pages; page++) {
+			if (info->func[page] & attrs->func) {
+				ret = pmbus_add_power_average_sensor_attrs_one(client, data, info,
+									       "power", index,
+									       page, 0xff, attrs,
+									       paged);
+				if (ret)
+					return ret;
+				index++;
+			}
+			if (info->phases[page]) {
+				int phase;
+
+				for (phase = 0; phase < info->phases[page]; phase++) {
+					if (!(info->pfunc[phase] & attrs->func))
+						continue;
+					ret = pmbus_add_power_average_sensor_attrs_one(client,
+										       data, info,
+										       "power",
+										       index,
+										       page, phase,
+										       attrs,
+										       paged);
+					if (ret)
+						return ret;
+					index++;
+				}
+			}
+		}
+		attrs++;
+	}
+	return 0;
+}
+
 struct pmbus_samples_attr {
 	int reg;
 	char *name;
@@ -2516,6 +2706,11 @@ static int pmbus_find_attributes(struct i2c_client *client,
 	if (ret)
 		return ret;
 
+	/* Power average */
+	ret = pmbus_add_power_average_sensor_attrs(client, data);
+	if (ret)
+		return ret;
+
 	ret = pmbus_add_samples_attributes(client, data);
 	return ret;
 }
@@ -2555,6 +2750,10 @@ static const struct pmbus_class_attr_map class_attr_map[] = {
 		.class = PSC_TEMPERATURE,
 		.attr = temp_attributes,
 		.nattr = ARRAY_SIZE(temp_attributes),
+	}, {
+		.class = PSC_POWER_AVERAGE,
+		.attr = power_average_attributes,
+		.nattr = ARRAY_SIZE(power_average_attributes),
 	}
 };
 

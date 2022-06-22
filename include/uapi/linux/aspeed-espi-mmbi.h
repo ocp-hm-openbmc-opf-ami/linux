@@ -67,6 +67,14 @@ struct aspeed_mmbi_get_empty_space {
 	__u32 length;
 };
 
+struct aspeed_mmbi_get_config {
+	bool h_rdy;
+	__u32 h2b_wp;
+	__u32 b2h_rp;
+	__u32 h2b_rp;
+	__u32 b2h_wp;
+};
+
 #define __ASPEED_MMBI_CTRL_IOCTL_MAGIC 0xbb
 /*
  * This IOCTL is meant to read empty space in B2H buffer
@@ -77,7 +85,12 @@ struct aspeed_mmbi_get_empty_space {
 	      struct aspeed_mmbi_get_empty_space)
 
 /* This IOCTL to send BMC reset request */
-#define ASPEED_MMBI_CTRL_IOCTL_SEND_RESET_REQUEST	                       \
+#define ASPEED_MMBI_CTRL_IOCTL_SEND_RESET_REQUEST                           \
 	_IOW(__ASPEED_MMBI_CTRL_IOCTL_MAGIC, 0x01, int)
+
+/* This IOCTL is to Get Config in HROP and HRWP */
+#define ASPEED_MMBI_CTRL_IOCTL_GET_CONFIG                             \
+	_IOWR(__ASPEED_MMBI_CTRL_IOCTL_MAGIC, 0x02,                                \
+	      struct aspeed_mmbi_get_config)
 
 #endif /* __LINUX_ASPEED_ESPI_MMBI_H */

@@ -659,6 +659,42 @@ static ssize_t mmbi_write(struct file *filp, const char *buffer, size_t len,
 	return len;
 }
 
+static int get_mmbi_config(struct aspeed_mmbi_channel *channel, void __user *userbuf)
+{
+	bool h_ready;
+	struct host_rop hrop;
+	struct aspeed_mmbi_get_config get_conf;
+	u32 h2b_wptr, b2h_rptr, h_rwp0, h_rwp1;
+
+	if (read_host_rwp_val(channel, ASPEED_MMBI_HRWP0_INSTANCE0, &h_rwp0)) {
+		dev_err(channel->priv->dev, "Failed to read Host RWP\n");
+		return -EAGAIN;
+	}
+	if (read_host_rwp_val(channel, ASPEED_MMBI_HRWP1_INSTANCE0, &h_rwp1)) {
+		dev_err(channel->priv->dev, "Failed to read Host RWP\n");
+		return -EAGAIN;
+	}
+
+	h2b_wptr = GET_H2B_WRITE_POINTER(h_rwp0);
+	b2h_rptr = GET_B2H_READ_POINTER(h_rwp1);
+
+	h_ready = GET_HOST_READY_BIT(h_rwp0) ? true : false;
+
+	memcpy(&hrop, channel->hrop_vmem, sizeof(struct host_rop));
+
+	get_conf.h_rdy = h_ready;
+	get_conf.h2b_wp = h2b_wptr;
+	get_conf.b2h_rp = b2h_rptr;
+	get_conf.h2b_rp = hrop.h2b_rp;
+	get_conf.b2h_wp = hrop.b2h_wp;
+
+	if (copy_to_user(userbuf, &get_conf, sizeof(get_conf))) {
+		dev_err(channel->priv->dev, "copy to user failed\n");
+		return -EFAULT;
+	}
+	return 0;
+}
+
 static int get_b2h_empty_space(struct aspeed_mmbi_channel *channel,
 			       void __user *userbuf)
 {
@@ -697,6 +733,10 @@ static long mmbi_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 
 	case ASPEED_MMBI_CTRL_IOCTL_SEND_RESET_REQUEST:
 		ret = send_bmc_reset_request(channel);
+		break;
+
+	case ASPEED_MMBI_CTRL_IOCTL_GET_CONFIG:
+		ret = get_mmbi_config(channel, userbuf);
 		break;
 
 	default:

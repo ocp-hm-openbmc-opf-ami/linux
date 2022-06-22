@@ -18,7 +18,7 @@
 #include <dt-bindings/mmbi/protocols.h>
 
 #define DEVICE_NAME "mmbi"
-#define MAX_NO_OF_SUPPORTED_CHANNELS 1
+#define MAX_NO_OF_SUPPORTED_CHANNELS 8
 #define MAX_NO_OF_SUPPORTED_PROTOCOLS 5
 
 /* 20 Bits for H2B/B2H Write/Read Pointers */
@@ -120,6 +120,7 @@ struct aspeed_mmbi_channel {
 	u8 *b2h_cb_vmem;
 	u8 *hrwp_vmem;
 	u8 *h2b_cb_vmem;
+	bool enabled;
 };
 
 struct aspeed_espi_mmbi {
@@ -812,7 +813,7 @@ static struct mmbi_cap_desc mmbi_desc_init(struct aspeed_mmbi_channel channel)
 	return ch_desc;
 }
 
-static int mmbi_channel_init(struct aspeed_espi_mmbi *priv, u8 idx)
+static int mmbi_channel_init(struct aspeed_espi_mmbi *priv, struct device_node *node, u8 idx)
 {
 	struct device *dev = priv->dev;
 	int rc;
@@ -820,7 +821,6 @@ static int mmbi_channel_init(struct aspeed_espi_mmbi *priv, u8 idx)
 	u8 *h2b_vaddr, *b2h_vaddr;
 	struct mmbi_cap_desc ch_desc;
 	struct host_rop hrop;
-	struct device_node *node;
 	int no_of_protocols_enabled;
 	u8 mmbi_supported_protocols[MAX_NO_OF_SUPPORTED_PROTOCOLS];
 
@@ -866,7 +866,7 @@ static int mmbi_channel_init(struct aspeed_espi_mmbi *priv, u8 idx)
 	ch_desc = mmbi_desc_init(priv->chan[idx]);
 	memcpy(priv->chan[idx].desc_vmem, &ch_desc, sizeof(ch_desc));
 
-	node = of_get_child_by_name(priv->dev->of_node, "instance");
+	priv->chan[idx].enabled = true;
 	if (!node) {
 		dev_err(priv->dev, "mmbi protocol : no instance found\n");
 		goto err_destroy_channel;
@@ -875,7 +875,6 @@ static int mmbi_channel_init(struct aspeed_espi_mmbi *priv, u8 idx)
 	if (no_of_protocols_enabled <= 0 || no_of_protocols_enabled >
 	    MAX_NO_OF_SUPPORTED_PROTOCOLS){
 		dev_err(dev, "No supported mmbi protocol\n");
-		of_node_put(node);
 		goto err_destroy_channel;
 	}
 	rc = of_property_read_u8_array(node, "protocols", mmbi_supported_protocols,
@@ -886,7 +885,6 @@ static int mmbi_channel_init(struct aspeed_espi_mmbi *priv, u8 idx)
 		memcpy(&priv->chan[idx].supported_protocols, mmbi_supported_protocols,
 		       sizeof(mmbi_supported_protocols));
 	}
-	of_node_put(node);
 
 	for (i = 0; i < no_of_protocols_enabled; i++) {
 		char *dev_name;
@@ -934,6 +932,7 @@ err_destroy_channel:
 	if (h2b_vaddr)
 		memunmap(h2b_vaddr);
 
+	priv->chan[idx].enabled = false;
 	return -ENOMEM;
 }
 
@@ -955,6 +954,8 @@ static irqreturn_t aspeed_espi_mmbi_irq(int irq, void *arg)
 		 * Host RWP0: It gets updated when host write data on H2B,
 		 * So process the request by invoking corresponding device.
 		 */
+		if (!priv->chan[idx].enabled)
+			continue;
 		if ((status >> (idx * 2)) & HRWP1_READ_MASK)
 			check_host_reset_request(&priv->chan[idx]);
 		else
@@ -1084,15 +1085,17 @@ static int aspeed_espi_mmbi_probe(struct platform_device *pdev)
 	regmap_write(priv->map, ASPEED_MMBI_IRQ_ENABLE, 0x03);
 
 	dev_set_drvdata(priv->dev, priv);
-
-	for (i = 0; i < MAX_NO_OF_SUPPORTED_CHANNELS; i++) {
-		rc = mmbi_channel_init(priv, i);
+	for_each_child_of_node(priv->dev->of_node, node) {
+		rc = of_property_read_u32(node, "channel", &i);
+		if (rc || i >= MAX_NO_OF_SUPPORTED_CHANNELS || priv->chan[i].enabled)
+			continue;
+		rc = mmbi_channel_init(priv, node, i);
 		if (rc) {
 			dev_err(priv->dev, "MMBI: Channel(%d) init failed\n",
 				i);
-			return rc;
+		} else {
+			enable_irqs += (0x03 << i);
 		}
-		enable_irqs += (0x03 << i);
 	}
 	regmap_write(priv->map, ASPEED_MMBI_IRQ_ENABLE, enable_irqs);
 
@@ -1123,6 +1126,8 @@ static int aspeed_espi_mmbi_remove(struct platform_device *pdev)
 	dev_dbg(priv->dev, "MMBI: Removing MMBI device\n");
 
 	for (i = 0; i < MAX_NO_OF_SUPPORTED_CHANNELS; i++) {
+		if (!priv->chan[i].enabled)
+			continue;
 		for (j = 0; priv->chan[i].supported_protocols[j] != 0; j++)
 			misc_deregister(&priv->chan[i].protocol[j].miscdev);
 	}

@@ -409,7 +409,9 @@ static int check_resolved_cores(struct peci_cputemp *priv)
 {
 	struct peci_rd_pci_cfg_local_msg msg;
 	struct peci_rd_end_pt_cfg_msg re_msg;
-	int ret;
+	int ret, i;
+	u8  pkg_cfg[4];
+	u32 core_count;
 
 	/* Get the RESOLVED_CORES register value */
 	switch (priv->gen_info->model) {
@@ -447,6 +449,21 @@ static int check_resolved_cores(struct peci_cputemp *priv)
 		}
 
 		priv->core_mask |= le32_to_cpup((__le32 *)re_msg.data);
+		break;
+	case INTEL_FAM6_RAPTORLAKE_S:
+		ret = peci_client_read_package_config(priv->mgr,
+						      PECI_MBX_INDEX_CPU_ID, 6,
+						      pkg_cfg);
+		if (ret)
+			return ret;
+
+		core_count = le32_to_cpup((__le32 *)pkg_cfg);
+		core_count >>= 16;
+
+		priv->core_mask = 0;
+		for (i = 0; i < core_count; i++)
+			priv->core_mask |= BIT_ULL(i);
+
 		break;
 	case INTEL_FAM6_SAPPHIRERAPIDS:
 		re_msg.addr = priv->mgr->client->addr;

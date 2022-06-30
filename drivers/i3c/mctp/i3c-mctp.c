@@ -28,6 +28,7 @@
 #define RX_RING_COUNT				16
 #define I3C_MCTP_MIN_TRANSFER_SIZE		69
 #define I3C_MCTP_IBI_PAYLOAD_SIZE		2
+#define I3C_MCTP_MIN_PACKET_SIZE		5
 
 /* MCTP header definitions */
 #define MCTP_HDR_SRC_EID_OFFSET			2
@@ -222,6 +223,12 @@ static ssize_t i3c_mctp_write(struct file *file, const char __user *buf, size_t 
 	struct i3c_mctp_packet *tx_packet;
 	int ret;
 
+	if (count < I3C_MCTP_MIN_PACKET_SIZE)
+		return -EINVAL;
+
+	if (count > sizeof(tx_packet->data))
+		return -ENOSPC;
+
 	tx_packet = i3c_mctp_packet_alloc(GFP_KERNEL);
 	if (!tx_packet)
 		return -ENOMEM;
@@ -250,6 +257,12 @@ static ssize_t i3c_mctp_read(struct file *file, char __user *buf, size_t count, 
 	struct i3c_mctp *priv = file->private_data;
 	struct i3c_mctp_client *client = priv->default_client;
 	struct i3c_mctp_packet *rx_packet;
+
+	if (count < I3C_MCTP_MIN_PACKET_SIZE)
+		return -EINVAL;
+
+	if (count > sizeof(rx_packet->data))
+		count = sizeof(rx_packet->data);
 
 	rx_packet = ptr_ring_consume(&client->rx_queue);
 	if (!rx_packet)

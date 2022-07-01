@@ -2,6 +2,7 @@
 /* Copyright (C) 2022 Intel Corporation.*/
 
 #include <linux/cdev.h>
+#include <linux/i2c.h>
 #include <linux/idr.h>
 #include <linux/module.h>
 #include <linux/poll.h>
@@ -9,6 +10,7 @@
 #include <linux/workqueue.h>
 
 #include <linux/i3c/device.h>
+#include <linux/i3c/master.h>
 
 #define I3C_TARGET_MCTP_MINORS	32
 #define RX_RING_COUNT		16
@@ -38,6 +40,18 @@ struct mctp_packet {
 	u8 *data;
 	u16 count;
 };
+
+static u8 i3c_pec_calculate(u8 addr, const u8 *data, size_t count)
+{
+	u8 pec;
+
+	/*
+	 * MCTP over I3C PEC calulcaton is done with same algorithm SMBus PEC does.
+	 * Target device address (with RnW bit) is also included to PEC calculation.
+	 */
+	pec = i2c_smbus_pec(0x00, &addr, sizeof(addr));
+	return i2c_smbus_pec(pec, (u8 *)data, count);
+}
 
 static void *i3c_target_mctp_packet_alloc(u16 count)
 {
@@ -108,7 +122,19 @@ i3c_target_mctp_rx_packet_enqueue(struct i3c_device *i3cdev, const u8 *data, siz
 	struct i3c_target_mctp *priv = dev_get_drvdata(i3cdev_to_dev(i3cdev));
 	struct mctp_client *client;
 	struct mctp_packet *packet;
+	size_t len;
 	int ret;
+	u8 addr;
+	u8 pec;
+
+	len = count - 1; /* PEC is the last byte */
+
+	addr = i3cdev->desc->info.dyn_addr << 1;
+	pec = i3c_pec_calculate(addr, data, len);
+	if (pec != data[count - 1]) {
+		dev_warn(i3cdev_to_dev(i3cdev), "PEC verification failed for incoming message\n");
+		return;
+	}
 
 	spin_lock(&priv->client_lock);
 	client = priv->client;
@@ -119,11 +145,11 @@ i3c_target_mctp_rx_packet_enqueue(struct i3c_device *i3cdev, const u8 *data, siz
 	if (!client)
 		return;
 
-	packet = i3c_target_mctp_packet_alloc(count);
+	packet = i3c_target_mctp_packet_alloc(len);
 	if (!packet)
 		goto err;
 
-	memcpy(packet->data, data, count);
+	memcpy(packet->data, data, len);
 
 	ret = ptr_ring_produce(&client->rx_queue, packet);
 	if (ret)
@@ -222,13 +248,15 @@ err_free:
 static ssize_t i3c_target_mctp_write(struct file *file, const char __user *buf,
 				     size_t count, loff_t *ppos)
 {
+	const size_t total_count = count + 1; /* One extra byte for PEC */
 	struct mctp_client *client = file->private_data;
 	struct i3c_target_mctp *priv = client->priv;
 	struct i3c_priv_xfer xfers[1] = {};
 	u8 *tx_data;
 	int ret;
+	u8 addr;
 
-	tx_data = kzalloc(count, GFP_KERNEL);
+	tx_data = kzalloc(total_count, GFP_KERNEL);
 	if (!tx_data)
 		return -ENOMEM;
 
@@ -237,8 +265,11 @@ static ssize_t i3c_target_mctp_write(struct file *file, const char __user *buf,
 		goto out_packet;
 	}
 
+	addr = (priv->i3cdev->desc->info.dyn_addr << 1) | 0x01;
+	tx_data[total_count - 1] = i3c_pec_calculate(addr, tx_data, count);
+
 	xfers[0].data.out = tx_data;
-	xfers[0].len = count;
+	xfers[0].len = total_count;
 
 	ret = i3c_device_do_priv_xfers(priv->i3cdev, xfers, ARRAY_SIZE(xfers));
 	if (ret)

@@ -156,7 +156,8 @@
 #define INTR_TARGET_MASK		(INTR_READ_REQ_RECV_STAT |	\
 					INTR_RESP_READY_STAT |		\
 					INTR_IBI_UPDATED_STAT  |	\
-					INTR_TRANSFER_ERR_STAT)
+					INTR_TRANSFER_ERR_STAT |	\
+					INTR_DYN_ADDR_ASSGN_STAT)
 
 #define QUEUE_STATUS_LEVEL		0x4c
 #define QUEUE_STATUS_IBI_STATUS_CNT(x)	(((x) & GENMASK(28, 24)) >> 24)
@@ -1999,6 +2000,13 @@ static void dw_i3c_target_handle_response_ready(struct dw_i3c_master *master)
 	}
 }
 
+static void dw_i3c_target_update_dyn_addr(struct dw_i3c_master *master, u8 dyn_addr)
+{
+	struct i3c_dev_desc *desc = master->base.this;
+
+	desc->info.dyn_addr = dyn_addr;
+}
+
 static irqreturn_t dw_i3c_master_irq_handler(int irq, void *dev_id)
 {
 	struct dw_i3c_master *master = dev_id;
@@ -2028,6 +2036,15 @@ static irqreturn_t dw_i3c_master_irq_handler(int irq, void *dev_id)
 
 		if (status & INTR_RESP_READY_STAT)
 			dw_i3c_target_handle_response_ready(master);
+
+		if (status & INTR_DYN_ADDR_ASSGN_STAT) {
+			u32 reg;
+
+			reg = readl(master->regs + DEVICE_ADDR);
+			if (reg & DEV_ADDR_DYNAMIC_ADDR_VALID)
+				dw_i3c_target_update_dyn_addr(master, DEV_ADDR_DYNAMIC_GET(reg));
+			writel(INTR_DYN_ADDR_ASSGN_STAT, master->regs + INTR_STATUS);
+		}
 	}
 
 	spin_lock(&master->xferqueue.lock);

@@ -28,7 +28,6 @@
 #define RX_RING_COUNT				16
 #define I3C_MCTP_MIN_TRANSFER_SIZE		69
 #define I3C_MCTP_IBI_PAYLOAD_SIZE		2
-#define I3C_MCTP_MIN_PACKET_SIZE		5
 
 /* MCTP header definitions */
 #define MCTP_HDR_SRC_EID_OFFSET			2

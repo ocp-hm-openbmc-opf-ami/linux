@@ -12,6 +12,8 @@
 #include <linux/i3c/device.h>
 #include <linux/i3c/master.h>
 
+#include <linux/i3c/mctp/i3c-mctp.h>
+
 #define I3C_TARGET_MCTP_MINORS	32
 #define RX_RING_COUNT		16
 
@@ -126,6 +128,10 @@ i3c_target_mctp_rx_packet_enqueue(struct i3c_device *i3cdev, const u8 *data, siz
 	int ret;
 	u8 addr;
 	u8 pec;
+
+	/* One byte for PEC */
+	if (count < (I3C_MCTP_MIN_PACKET_SIZE + 1) || count > (I3C_MCTP_PACKET_SIZE + 1))
+		return;
 
 	len = count - 1; /* PEC is the last byte */
 
@@ -255,6 +261,12 @@ static ssize_t i3c_target_mctp_write(struct file *file, const char __user *buf,
 	u8 *tx_data;
 	int ret;
 	u8 addr;
+
+	if (count < I3C_MCTP_MIN_PACKET_SIZE)
+		return -EINVAL;
+
+	if (count > I3C_MCTP_PACKET_SIZE)
+		return -ENOSPC;
 
 	tx_data = kzalloc(total_count, GFP_KERNEL);
 	if (!tx_data)

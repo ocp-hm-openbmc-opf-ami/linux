@@ -18,6 +18,8 @@
 #define MCTP_MSG_HDR_VENDOR_OFFSET	1
 #define MCTP_MSG_HDR_OPCODE_OFFSET	4
 
+#define I3C_MCTP_MIN_PACKET_SIZE	5
+
 struct i3c_mctp_client;
 
 struct mctp_protocol_hdr {

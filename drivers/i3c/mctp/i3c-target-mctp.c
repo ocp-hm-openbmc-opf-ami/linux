@@ -17,6 +17,10 @@
 #define I3C_TARGET_MCTP_MINORS	32
 #define RX_RING_COUNT		16
 
+#define I3C_TARGET_IBI_PLD_SIZE	2
+
+#define I3C_TARGET_MCTP_MDB	0xAE
+
 static struct class *i3c_target_mctp_class;
 static dev_t i3c_target_mctp_devt;
 static DEFINE_IDA(i3c_target_mctp_ida);
@@ -260,6 +264,7 @@ static ssize_t i3c_target_mctp_write(struct file *file, const char __user *buf,
 	struct i3c_target_mctp *priv = client->priv;
 	struct i3c_priv_xfer xfers[1] = {};
 	u8 *tx_data;
+	u8 ibi_payload[I3C_TARGET_IBI_PLD_SIZE] = {I3C_TARGET_MCTP_MDB, 0xAE};
 	int ret;
 	u8 addr;
 
@@ -284,18 +289,12 @@ static ssize_t i3c_target_mctp_write(struct file *file, const char __user *buf,
 	xfers[0].data.out = tx_data;
 	xfers[0].len = total_count;
 
-	ret = i3c_device_do_priv_xfers(priv->i3cdev, xfers, ARRAY_SIZE(xfers));
+	ret = i3c_device_put_read_data(priv->i3cdev, xfers, ARRAY_SIZE(xfers),
+				       &ibi_payload[0], ARRAY_SIZE(ibi_payload));
 	if (ret)
 		goto out_packet;
 	ret = count;
 
-	/*
-	 * TODO: Add support for IBI generation - it should be done only if IBI
-	 * are enabled (the Active Controller may disabled them using CCC for
-	 * that). Otherwise (if IBIs are disabled), we should make sure that when
-	 * Active Controller issues GETSTATUS CCC the return value indicates
-	 * that data is ready.
-	 */
 out_packet:
 	kfree(tx_data);
 	return ret;

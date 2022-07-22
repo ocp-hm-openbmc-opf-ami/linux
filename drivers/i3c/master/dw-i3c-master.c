@@ -6,6 +6,7 @@
  */
 
 #include <linux/bitops.h>
+#include <linux/bitfield.h>
 #include <linux/clk.h>
 #include <linux/completion.h>
 #include <linux/err.h>
@@ -26,6 +27,9 @@
 #define DEVICE_CTRL			0x0
 #define DEV_CTRL_ENABLE			BIT(31)
 #define DEV_CTRL_RESUME			BIT(30)
+#define DEV_CTRL_IBI_TRGT_MDB_MASK	GENMASK(23, 16)
+#define DEV_CTRL_IBI_TRGT_MDB(x)	((x) << 16)
+#define DEV_CTRL_IBI_PAYLOAD_EN		BIT(9)
 #define DEV_CTRL_HOT_JOIN_NACK		BIT(8)
 #define DEV_CTRL_I2C_SLAVE_PRESENT	BIT(7)
 #define DEV_CTRL_IBI_DATA_EN		BIT(1)
@@ -50,6 +54,8 @@
 #define COMMAND_PORT_ARG_DATA_LEN(x)	(((x) << 16) & GENMASK(31, 16))
 #define COMMAND_PORT_ARG_DATA_LEN_MAX	65536
 #define COMMAND_PORT_TRANSFER_ARG	0x01
+
+#define COMMAND_PORT_SLAVE_DATA_LEN	GENMASK(31, 16)
 
 #define COMMAND_PORT_SDA_DATA_BYTE_3(x)	(((x) << 24) & GENMASK(31, 24))
 #define COMMAND_PORT_SDA_DATA_BYTE_2(x)	(((x) << 16) & GENMASK(23, 16))
@@ -289,6 +295,8 @@
 
 #define DW_I3C_TIMING_MIN 0x0
 #define DW_I3C_TIMING_MAX 0xffffffff
+
+#define AST2600_I3C_IBI_MAX_PAYLOAD	255
 
 struct dw_i3c_master_caps {
 	u8 cmdfifodepth;
@@ -1097,6 +1105,8 @@ static int dw_i3c_target_bus_init(struct i3c_master_controller *m)
 	reg = readl(master->regs + SLV_EVENT_CTRL);
 	reg &= ~SLV_EVENT_CTRL_HJ_EN;
 	writel(reg, master->regs + SLV_EVENT_CTRL);
+	writel(readl(master->regs + DEVICE_CTRL) | DEV_CTRL_IBI_PAYLOAD_EN,
+	       master->regs + DEVICE_CTRL);
 
 	dw_i3c_master_enable(master);
 
@@ -1573,20 +1583,42 @@ static int dw_i3c_target_generate_ibi(struct i3c_dev_desc *dev, const u8 *data, 
 {
 	struct i3c_master_controller *m = i3c_dev_get_master(dev);
 	struct dw_i3c_master *master = to_dw_i3c_master(m);
-	u32 reg;
-
-	if (data || len != 0)
-		return -EOPNOTSUPP;
+	u32 reg, thld_ctrl;
 
 	reg = readl(master->regs + SLV_EVENT_CTRL);
 	if ((reg & SLV_EVENT_CTRL_SIR_EN) == 0)
 		return -EPERM;
 
+	if (len > AST2600_I3C_IBI_MAX_PAYLOAD) {
+		dev_err(master->dev,
+			"input length %d exceeds max ibi payload size %d\n",
+			len, AST2600_I3C_IBI_MAX_PAYLOAD);
+		return -E2BIG;
+	}
+
 	init_completion(&master->ibi.target.comp);
+
+	reg = readl(master->regs + DEVICE_CTRL);
+	reg &= ~DEV_CTRL_IBI_TRGT_MDB_MASK;
+	reg |= DEV_CTRL_IBI_TRGT_MDB(data[0]);
+	writel(reg, master->regs + DEVICE_CTRL);
+
+	dw_i3c_master_wr_tx_fifo(master, data, len);
+
+	reg = FIELD_PREP(COMMAND_PORT_SLAVE_DATA_LEN, len);
+	writel(reg, master->regs + COMMAND_QUEUE_PORT);
+
+	thld_ctrl = readl(master->regs + QUEUE_THLD_CTRL);
+	thld_ctrl &= ~QUEUE_THLD_CTRL_RESP_BUF_MASK;
+	thld_ctrl |= QUEUE_THLD_CTRL_RESP_BUF(1);
+	writel(thld_ctrl, master->regs + QUEUE_THLD_CTRL);
+
 	writel(1, master->regs + SLV_INTR_REQ);
 
 	if (!wait_for_completion_timeout(&master->ibi.target.comp, XFER_TIMEOUT)) {
 		pr_warn("timeout waiting for completion\n");
+		writel(RESET_CTRL_RX_FIFO | RESET_CTRL_TX_FIFO |
+		       RESET_CTRL_RESP_QUEUE | RESET_CTRL_CMD_QUEUE, master->regs + RESET_CTRL);
 		return -EINVAL;
 	}
 

@@ -179,6 +179,8 @@ peci_sensor_get_ctx(s32 attribute, struct peci_sensor_conf sensor_conf_list[],
 
 #define PECI_PCS_PPL2_TIME_WINDOW 10 /* PPL2 Time Window value in ms */
 
+#define PECI_PCS_PPL_MAX_VALUE 0x7FFF /* Maximum PPL1/PPL2 Limit value */
+
 /**
  * union peci_pkg_power_sku_unit - PECI Package Power Unit PCS
  * This register coresponds to the MSR@606h - MSR_RAPL_POWER_UNIT

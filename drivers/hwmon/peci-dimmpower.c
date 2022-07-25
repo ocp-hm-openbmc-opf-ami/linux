@@ -226,7 +226,8 @@ peci_dimmpower_set_power_limit(void *ctx, struct peci_sensor_conf *sensor_conf,
 	/* Enable or disable power limitation */
 	if (val > 0) {
 		power_limit.bits.pp_pwr_lim =
-			peci_pcs_munits_to_xn(val, priv->units.bits.pwr_unit);
+			min(peci_pcs_munits_to_xn(val, priv->units.bits.pwr_unit),
+			    (u32)PECI_PCS_PPL_MAX_VALUE);
 		power_limit.bits.pwr_lim_ctrl_en = 1u;
 		power_limit.bits.ctrl_time_win = priv->dpl_time_window;
 	} else {

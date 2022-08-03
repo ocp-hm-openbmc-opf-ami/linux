@@ -271,6 +271,7 @@
 #define DEV_ADDR_TABLE_MR_REJECT	BIT(14)
 #define DEV_ADDR_TABLE_SIR_REJECT	BIT(13)
 #define DEV_ADDR_TABLE_IBI_WITH_DATA	BIT(12)
+#define DEV_ADDR_TABLE_IBI_PEC_EN	BIT(11)
 #define DEV_ADDR_TABLE_DYNAMIC_ADDR(x)	(((x) << 16) & GENMASK(23, 16))
 #define DEV_ADDR_TABLE_DYNAMIC_ADDR_GET(x)	(((x) & GENMASK(23, 16)) >> 16)
 #define DEV_ADDR_TABLE_STATIC_ADDR(x)	((x) & GENMASK(6, 0))
@@ -1899,6 +1900,7 @@ static int dw_i3c_master_enable_ibi(struct i3c_dev_desc *dev)
 	reg &= ~DEV_ADDR_TABLE_SIR_REJECT;
 	if (dev->info.bcr & I3C_BCR_IBI_PAYLOAD)
 		reg |= DEV_ADDR_TABLE_IBI_WITH_DATA;
+	reg |= DEV_ADDR_TABLE_IBI_PEC_EN;
 	writel(reg, master->regs + dat_loc);
 
 	spin_unlock_irq(&master->ibi.master.lock);
@@ -1914,6 +1916,7 @@ static int dw_i3c_master_enable_ibi(struct i3c_dev_desc *dev)
 		reg = readl(master->regs + dat_loc);
 		reg |= DEV_ADDR_TABLE_SIR_REJECT;
 		reg &= ~DEV_ADDR_TABLE_IBI_WITH_DATA;
+		reg &= ~DEV_ADDR_TABLE_IBI_PEC_EN;
 		writel(reg, master->regs + dat_loc);
 		spin_unlock_irq(&master->ibi.master.lock);
 	}
@@ -1949,6 +1952,7 @@ static int dw_i3c_master_disable_ibi(struct i3c_dev_desc *dev)
 	reg = readl(master->regs + dat_loc);
 	reg |= DEV_ADDR_TABLE_SIR_REJECT;
 	reg &= ~DEV_ADDR_TABLE_IBI_WITH_DATA;
+	reg &= ~DEV_ADDR_TABLE_IBI_PEC_EN;
 	writel(reg, master->regs + dat_loc);
 	spin_unlock_irq(&master->ibi.master.lock);
 
@@ -2091,8 +2095,13 @@ static void dw_i3c_master_demux_ibis(struct dw_i3c_master *master)
 			dev_warn_once(master->dev, "ibi from unrecognized slave %02lx\n",
 				      IBI_QUEUE_IBI_ADDR(status));
 
-		if (status & IBI_QUEUE_STATUS_PEC_ERR)
-			dev_warn(master->dev, "ibi crc/pec error\n");
+		/*
+		 * PEC error check is remove intentionally due to AST2600 HW issue.
+		 * PEC byte in IBI payload can not be checked on this hadrware.
+		 * Thus, PEC error status should be considered as valid and the
+		 * payload should be passed to IBI handler.
+		 * Please see ASPEED's errata #67 for further details
+		 */
 
 		if (IBI_TYPE_SIR(status))
 			dw_i3c_master_sir_handler(master, status);

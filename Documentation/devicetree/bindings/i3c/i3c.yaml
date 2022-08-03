@@ -63,6 +63,12 @@ properties:
     description: |
       If it is not specified, by default the initial I3C device role will be "primary".
 
+  is-mng:
+    type: boolean
+    description: |
+      The field is needed for AST2600 I3C controller in order to define whether the device is
+      on I3C MNG link.
+
   pid:
     $ref: '/schemas/types.yaml#/definitions/uint64'
     description: |

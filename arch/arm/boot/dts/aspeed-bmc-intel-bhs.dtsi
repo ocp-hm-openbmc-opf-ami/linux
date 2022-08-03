@@ -532,6 +532,7 @@
 &i3c2 {
 	/* I3C_MNG_LVC18 */
 	status = "okay";
+	is-mng;
 	i3c-scl-hz = <10000000>;
 	sda-tx-hold-ns = <30>;
 };

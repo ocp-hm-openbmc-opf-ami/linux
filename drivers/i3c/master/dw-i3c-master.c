@@ -292,6 +292,8 @@
 #define I3C_BUS_I3C_PP_TLOW_MIN_NS	25
 #define I3C_BUS_I3C_PP_THIGH_MIN_NS	25
 
+#define I3C_MCTP_MDB			0xAE
+
 #define XFER_TIMEOUT (msecs_to_jiffies(1000))
 
 #define DW_I3C_TIMING_MIN 0x0
@@ -2046,6 +2048,7 @@ static void dw_i3c_master_sir_handler(struct dw_i3c_master *master,
 	struct dw_i3c_i2c_dev_data *data;
 	struct i3c_ibi_slot *slot;
 	struct i3c_dev_desc *dev;
+	u8 mdb = I3C_MCTP_MDB;
 	u8 *buf;
 
 	dev = dw_get_i3c_dev_by_addr(master, addr);
@@ -2065,9 +2068,14 @@ static void dw_i3c_master_sir_handler(struct dw_i3c_master *master,
 	memcpy(buf, &ibi_status, sizeof(ibi_status));
 	buf += sizeof(ibi_status);
 
+	if (of_property_read_bool(master->dev->of_node, "is-mng")) {
+		memcpy(buf, &mdb, sizeof(mdb));
+		buf += sizeof(mdb);
+	}
+
 	dw_i3c_master_read_ibi_fifo(master, buf, length);
 
-	slot->len = length + sizeof(ibi_status);
+	slot->len = length + sizeof(ibi_status) + sizeof(mdb);
 
 	i3c_master_queue_ibi(dev, slot);
 	return;

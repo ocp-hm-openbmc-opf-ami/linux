@@ -625,7 +625,8 @@ static bool pmbus_check_register(struct i2c_client *client,
 		rv = pmbus_check_status_cml(client);
 	if (rv < 0 && (data->flags & PMBUS_READ_STATUS_AFTER_FAILED_CHECK))
 		data->read_status(client, -1);
-	pmbus_clear_fault_page(client, -1);
+
+	pmbus_clear_fault_page(client, page);
 	return rv >= 0;
 }
 
@@ -642,7 +643,7 @@ static bool pmbus_check_status_register(struct i2c_client *client, int page)
 			status = -EIO;
 	}
 
-	pmbus_clear_fault_page(client, -1);
+	pmbus_clear_fault_page(client, page);
 	return status >= 0;
 }
 
@@ -696,7 +697,8 @@ static int pmbus_get_status(struct i2c_client *client, int page, int reg)
 		break;
 	}
 	if (status < 0)
-		pmbus_clear_faults(client);
+		pmbus_clear_fault_page(client, page);
+
 	return status;
 }
 

@@ -29,6 +29,7 @@ struct i3c_target_mctp {
 	int id;
 	struct mctp_client *client;
 	spinlock_t client_lock; /* to protect client access */
+	struct device *dev;
 };
 
 struct mctp_client {
@@ -337,7 +338,7 @@ static int i3c_target_mctp_probe(struct i3c_device *i3cdev)
 {
 	struct device *parent = i3cdev_to_dev(i3cdev);
 	struct i3c_target_mctp *priv;
-	struct device *dev;
+	dev_t devt;
 	int ret;
 
 	priv = devm_kzalloc(parent, sizeof(*priv), GFP_KERNEL);
@@ -354,16 +355,17 @@ static int i3c_target_mctp_probe(struct i3c_device *i3cdev)
 
 	cdev_init(&priv->cdev, &i3c_target_mctp_fops);
 	priv->cdev.owner = THIS_MODULE;
-	ret = cdev_add(&priv->cdev, i3c_target_mctp_devt, 1);
+	devt = MKDEV(MAJOR(i3c_target_mctp_devt), priv->id);
+	ret = cdev_add(&priv->cdev, devt, 1);
 	if (ret) {
 		ida_free(&i3c_target_mctp_ida, priv->id);
 		return ret;
 	}
 
-	dev = device_create(i3c_target_mctp_class, parent, i3c_target_mctp_devt,
-			    NULL, "i3c-mctp-target-%d", priv->id);
-	if (IS_ERR(dev)) {
-		ret = PTR_ERR(dev);
+	priv->dev = device_create(i3c_target_mctp_class, parent, devt, NULL,
+				  "i3c-mctp-target-%d", priv->id);
+	if (IS_ERR(priv->dev)) {
+		ret = PTR_ERR(priv->dev);
 		goto err;
 	}
 
@@ -383,7 +385,7 @@ static void i3c_target_mctp_remove(struct i3c_device *i3cdev)
 {
 	struct i3c_target_mctp *priv = dev_get_drvdata(i3cdev_to_dev(i3cdev));
 
-	device_destroy(i3c_target_mctp_class, i3c_target_mctp_devt);
+	device_destroy(i3c_target_mctp_class, priv->dev->devt);
 	cdev_del(&priv->cdev);
 	ida_free(&i3c_target_mctp_ida, priv->id);
 }

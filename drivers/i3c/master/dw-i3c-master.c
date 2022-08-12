@@ -119,6 +119,7 @@
 
 #define SLV_EVENT_CTRL			0x38
 #define SLV_EVENT_CTRL_SIR_EN		BIT(0)
+#define SLV_EVENT_CTRL_HJ_EN		BIT(3)
 
 #define INTR_STATUS			0x3c
 #define INTR_STATUS_EN			0x40
@@ -1076,6 +1077,10 @@ static int dw_i3c_target_bus_init(struct i3c_master_controller *m)
 
 	reg = readl(master->regs + BUS_FREE_TIMING) | BUS_AVAIL_TIME(MAX_BUS_AVAIL_CNT);
 	writel(reg, master->regs + BUS_FREE_TIMING);
+
+	reg = readl(master->regs + SLV_EVENT_CTRL);
+	reg &= ~SLV_EVENT_CTRL_HJ_EN;
+	writel(reg, master->regs + SLV_EVENT_CTRL);
 
 	dw_i3c_master_enable(master);
 

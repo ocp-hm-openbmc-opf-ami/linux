@@ -2279,7 +2279,7 @@ static int of_populate_i3c_bus(struct i3c_master_controller *master)
 	}
 
 	for_each_available_child_of_node(i3cbus_np, node) {
-		if (node->full_name && of_node_cmp(node->full_name, "hub@0,0")) {
+		if (node->full_name && !strstr(node->full_name, "@0,0")) {
 			ret = of_i3c_master_add_dev(master, node);
 			if (ret) {
 				of_node_put(node);

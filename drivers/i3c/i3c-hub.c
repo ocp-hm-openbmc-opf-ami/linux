@@ -97,7 +97,9 @@
 
 /* Controller Port Control/Status Registers */
 #define I3C_HUB_CP_MUX_SET				0x38
+#define  CONTROLLER_PORT_MUX_REQ			BIT(0)
 #define I3C_HUB_CP_MUX_STS				0x39
+#define  CONTROLLER_PORT_MUX_CONNECTION_STATUS		BIT(0)
 
 /* Target Ports Control Registers */
 #define I3C_HUB_TP_SMBUS_AGNT_TRANS_START		0x50
@@ -134,6 +136,15 @@
 
 /* Special Function Registers */
 #define I3C_HUB_LDO_AND_CPSEL_STS			0x79
+#define  CP_SDA1_LEVEL					BIT(7)
+#define  CP_SCL1_LEVEL					BIT(6)
+#define  CP_SEL_PIN_INPUT_CODE_MASK			GENMASK(5, 4)
+#define  CP_SEL_PIN_INPUT_CODE_GET(x)			(((x) & CP_SEL_PIN_INPUT_CODE_MASK) >> 4)
+#define  VCCIO1_PWR_GOOD				BIT(3)
+#define  VCCIO0_PWR_GOOD				BIT(2)
+#define  CP1_VCCIO_PWR_GOOD				BIT(1)
+#define  CP0_VCCIO_PWR_GOOD				BIT(0)
+
 #define I3C_HUB_BUS_RESET_SCL_TIMEOUT			0x7A
 #define I3C_HUB_ONCHIP_TD_PROTO_ERR_FLG			0x7B
 #define I3C_HUB_DEV_CMD					0x7C
@@ -524,6 +535,14 @@ static int i3c_hub_hw_configure_tp(struct device *dev)
 	if (ret)
 		return ret;
 
+	/* Request for HUB Network connection in case any TP is configured in I3C mode */
+	if (i3c_val) {
+		ret = regmap_write(priv->regmap, I3C_HUB_CP_MUX_SET, CONTROLLER_PORT_MUX_REQ);
+		if (ret)
+			return ret;
+		/* TODO: verify if connection is done */
+	}
+
 	return regmap_update_bits(priv->regmap, I3C_HUB_TP_PULLUP_EN, pullup_mask, pullup_val);
 }
 
@@ -568,6 +587,46 @@ static const struct i3c_device_id i3c_hub_ids[] = {
 	I3C_CLASS(I3C_DCR_HUB, NULL),
 	{ },
 };
+
+static int i3c_hub_read_id(struct device *dev)
+{
+	struct i3c_hub *priv = dev_get_drvdata(dev);
+	u32 reg_val;
+	int ret;
+
+	ret = regmap_read(priv->regmap, I3C_HUB_LDO_AND_CPSEL_STS, &reg_val);
+	if (ret) {
+		dev_err(dev, "Failed to read status register\n");
+		return -1;
+	}
+
+	return CP_SEL_PIN_INPUT_CODE_GET(reg_val);
+}
+
+static struct device_node *i3c_hub_get_dt_hub_node(struct device_node *node, int id)
+{
+	struct device_node *hub_node_no_id = NULL;
+	struct device_node *hub_node;
+	u32 hub_id;
+
+	for_each_available_child_of_node(node, hub_node) {
+		if (strstr(hub_node->name, "hub")) {
+			if (!of_property_read_u32(hub_node, "id", &hub_id)) {
+				if (hub_id == (u32)id)
+					return hub_node;
+			} else {
+				/*
+				 * Just keep reference to first HUB node with no ID in case no ID
+				 * matching
+				 */
+				if (!hub_node_no_id)
+					hub_node_no_id = hub_node;
+			}
+		}
+	}
+
+	return hub_node_no_id;
+}
 
 static int fops_access_reg_get(void *ctx, u64 *val)
 {
@@ -884,11 +943,12 @@ static int i3c_hub_probe(struct i3c_device *i3cdev)
 		.val_bits = 8,
 	};
 	struct device *dev = &i3cdev->dev;
-	struct device_node *node;
+	struct device_node *node = NULL;
 	struct regmap *regmap;
 	struct i3c_hub *priv;
 	char hub_id[32];
 	int ret;
+	int id;
 
 	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
@@ -906,28 +966,27 @@ static int i3c_hub_probe(struct i3c_device *i3cdev)
 
 	i3c_hub_of_default_configuration(dev);
 
-	/* TBD: Support for multiple HUBs. */
-	/* Just get first hub node from DT */
-	node = of_node_get(dev->of_node);
-	if (!node)
-		node = of_get_child_by_name(dev->parent->of_node, "hub");
-
-	if (!node) {
-		dev_warn(dev, "Failed to find DT entry for the driver. Running with defaults.\n");
-	} else {
-		i3c_hub_of_get_conf_static(dev, node);
-		i3c_hub_of_get_conf_runtime(dev, node);
-		of_node_put(node);
-	}
-
 	regmap = devm_regmap_init_i3c(i3cdev, &i3c_hub_regmap_config);
 	if (IS_ERR(regmap)) {
 		ret = PTR_ERR(regmap);
 		dev_err(dev, "Failed to register I3C HUB regmap\n");
 		goto error;
 	}
-
 	priv->regmap = regmap;
+
+	id = i3c_hub_read_id(dev);
+	if (id >= 0)
+		/* Find hub node in DT matching HW ID or just first without ID provided in DT */
+		node = i3c_hub_get_dt_hub_node(dev->parent->of_node, id);
+
+	if (!node) {
+		dev_warn(dev, "Failed to find DT entry for the driver. Running with hardware defaults.\n");
+	} else {
+		of_node_get(node);
+		i3c_hub_of_get_conf_static(dev, node);
+		i3c_hub_of_get_conf_runtime(dev, node);
+		of_node_put(node);
+	}
 
 	/* Unlock access to protected registers */
 	ret = regmap_write(priv->regmap, I3C_HUB_PROTECTION_CODE, REGISTERS_UNLOCK_CODE);

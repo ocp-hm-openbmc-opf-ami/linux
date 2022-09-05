@@ -934,6 +934,10 @@ static void i3c_hub_delayed_work(struct work_struct *work)
 				dev_warn(dev, "Failed to close Target Port");
 		}
 	}
+
+	ret = i3c_master_do_daa(priv->controller);
+	if (ret)
+		dev_warn(dev, "Failed to run DAA");
 }
 
 static int i3c_hub_probe(struct i3c_device *i3cdev)

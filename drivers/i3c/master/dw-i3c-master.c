@@ -116,10 +116,17 @@
 #define RESET_CTRL_RESP_QUEUE		BIT(2)
 #define RESET_CTRL_CMD_QUEUE		BIT(1)
 #define RESET_CTRL_SOFT			BIT(0)
+#define RESET_CTRL_QUEUES		(RESET_CTRL_IBI_QUEUE |	\
+					 RESET_CTRL_RX_FIFO |	\
+					 RESET_CTRL_TX_FIFO |	\
+					 RESET_CTRL_RESP_QUEUE |\
+					 RESET_CTRL_CMD_QUEUE)
 
 #define SLV_EVENT_CTRL			0x38
 #define SLV_EVENT_CTRL_SIR_EN		BIT(0)
 #define SLV_EVENT_CTRL_HJ_EN		BIT(3)
+#define SLV_EVENT_CTRL_MRL_UPD		BIT(6)
+#define SLV_EVENT_CTRL_MWL_UPD		BIT(7)
 
 #define INTR_STATUS			0x3c
 #define INTR_STATUS_EN			0x40
@@ -158,7 +165,8 @@
 					INTR_RESP_READY_STAT |		\
 					INTR_IBI_UPDATED_STAT  |	\
 					INTR_TRANSFER_ERR_STAT |	\
-					INTR_DYN_ADDR_ASSGN_STAT)
+					INTR_DYN_ADDR_ASSGN_STAT |	\
+					INTR_CCC_UPDATED_STAT)
 
 #define QUEUE_STATUS_LEVEL		0x4c
 #define QUEUE_STATUS_IBI_STATUS_CNT(x)	(((x) & GENMASK(28, 24)) >> 24)
@@ -170,6 +178,8 @@
 #define DATA_BUFFER_STATUS_LEVEL_TX(x)	((x) & GENMASK(7, 0))
 
 #define PRESENT_STATE			0x54
+#define PRESENT_STATE_CM_ST_STS(x)	(((x) & GENMASK(13, 8)) >> 8)
+#define CM_ST_STS_HALT			0x6
 #define CCC_DEVICE_STATUS		0x58
 #define DEVICE_ADDR_TABLE_POINTER	0x5c
 #define DEVICE_ADDR_TABLE_DEPTH(x)	(((x) & GENMASK(31, 16)) >> 16)
@@ -436,6 +446,12 @@ static void dw_i3c_master_disable(struct dw_i3c_master *master)
 static void dw_i3c_master_enable(struct dw_i3c_master *master)
 {
 	writel(readl(master->regs + DEVICE_CTRL) | DEV_CTRL_ENABLE | DEV_CTRL_IBI_DATA_EN,
+	       master->regs + DEVICE_CTRL);
+}
+
+static void dw_i3c_master_resume(struct dw_i3c_master *master)
+{
+	writel(readl(master->regs + DEVICE_CTRL) | DEV_CTRL_RESUME,
 	       master->regs + DEVICE_CTRL);
 }
 
@@ -1982,16 +1998,41 @@ static void dw_i3c_master_demux_ibis(struct dw_i3c_master *master)
 	spin_unlock(&master->ibi.master.lock);
 }
 
+static void dw_i3c_target_event_handler(struct dw_i3c_master *master)
+{
+	u32 event = readl(master->regs + SLV_EVENT_CTRL);
+	u32 cm_state =
+		PRESENT_STATE_CM_ST_STS(readl(master->regs + PRESENT_STATE));
+
+	if (cm_state == CM_ST_STS_HALT) {
+		dev_dbg(master->dev, "slave in halt state\n");
+		dw_i3c_master_resume(master);
+	}
+
+	if (event & SLV_EVENT_CTRL_MRL_UPD)
+		dev_dbg(master->dev, "isr: master set mrl=%d\n",
+			readl(master->regs + SLV_MAX_LEN) >> 16);
+
+	if (event & SLV_EVENT_CTRL_MWL_UPD)
+		dev_dbg(master->dev, "isr: master set mwl=%ld\n",
+			readl(master->regs + SLV_MAX_LEN) & GENMASK(15, 0));
+
+	writel(event, master->regs + SLV_EVENT_CTRL);
+}
+
 static void dw_i3c_target_handle_response_ready(struct dw_i3c_master *master)
 {
 	struct i3c_dev_desc *desc = master->base.this;
 	u32 reg = readl(master->regs + QUEUE_STATUS_LEVEL);
 	u32 nresp = QUEUE_STATUS_LEVEL_RESP(reg);
-	int i;
+	int i, has_error = 0;
 
 	for (i = 0; i < nresp; i++) {
 		u32 resp = readl(master->regs + RESPONSE_QUEUE_PORT);
+		u8 error = RESPONSE_PORT_ERR_STATUS(resp);
 		u32 nbytes = RESPONSE_PORT_DATA_LEN(resp);
+		if (error)
+			has_error = 1;
 
 		if (nbytes > master->target_rx.max_len) {
 			dev_warn(master->dev, "private write data length is larger than max\n");
@@ -2002,6 +2043,11 @@ static void dw_i3c_target_handle_response_ready(struct dw_i3c_master *master)
 
 		if (desc->target_info.read_handler)
 			desc->target_info.read_handler(desc->dev, master->target_rx.buf, nbytes);
+	}
+
+	if (has_error) {
+		writel(RESET_CTRL_QUEUES, master->regs + RESET_CTRL);
+		dw_i3c_master_resume(master);
 	}
 }
 
@@ -2049,6 +2095,11 @@ static irqreturn_t dw_i3c_master_irq_handler(int irq, void *dev_id)
 			if (reg & DEV_ADDR_DYNAMIC_ADDR_VALID)
 				dw_i3c_target_update_dyn_addr(master, DEV_ADDR_DYNAMIC_GET(reg));
 			writel(INTR_DYN_ADDR_ASSGN_STAT, master->regs + INTR_STATUS);
+		}
+
+		if (status & INTR_CCC_UPDATED_STAT) {
+			writel(INTR_CCC_UPDATED_STAT, master->regs + INTR_STATUS);
+			dw_i3c_target_event_handler(master);
 		}
 	}
 

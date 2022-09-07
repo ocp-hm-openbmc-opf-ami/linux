@@ -3134,6 +3134,27 @@ int i3c_dev_generate_ibi_locked(struct i3c_dev_desc *dev, const u8 *data, int le
 	return master->target_ops->generate_ibi(dev, data, len);
 }
 
+int i3c_dev_put_read_data_locked(struct i3c_dev_desc *dev, struct i3c_priv_xfer *xfers,
+				 int nxfers, const u8 *ibi_data, int ibi_len)
+{
+	struct i3c_master_controller *master;
+
+	if (!dev)
+		return -ENOENT;
+
+	master = i3c_dev_get_master(dev);
+	if (!master)
+		return -EINVAL;
+
+	if (!master->target)
+		return -EINVAL;
+
+	if (!master->target_ops->put_read_data)
+		return -EOPNOTSUPP;
+
+	return master->target_ops->put_read_data(dev, xfers, nxfers, ibi_data, ibi_len);
+}
+
 int i3c_dev_disable_ibi_locked(struct i3c_dev_desc *dev)
 {
 	struct i3c_master_controller *master;

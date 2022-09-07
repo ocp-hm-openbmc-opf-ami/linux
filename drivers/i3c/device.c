@@ -74,6 +74,40 @@ int i3c_device_generate_ibi(struct i3c_device *dev, const u8 *data, int len)
 EXPORT_SYMBOL_GPL(i3c_device_generate_ibi);
 
 /**
+ * i3c_device_put_read_data() - put read data and optionally notify primary master
+ *
+ * @dev: target device
+ * @xfers: array of transfers
+ * @nxfers: number of transfers
+ * @ibi_data: IBI payload
+ * @ibi_len: IBI payload length in bytes
+ *
+ * Put read data into the target buffer and optionally notify primary master
+ *
+ * Return: 0 in case of success, a negative error code otherwise.
+ */
+int i3c_device_put_read_data(struct i3c_device *dev, struct i3c_priv_xfer *xfers, int nxfers,
+			     const u8 *ibi_data, int ibi_len)
+{
+	int ret, i;
+
+	if (nxfers < 1)
+		return 0;
+
+	for (i = 0; i < nxfers; i++) {
+		if (!xfers[i].len || !xfers[i].data.in)
+			return -EINVAL;
+	}
+
+	i3c_bus_normaluse_lock(dev->bus);
+	ret = i3c_dev_put_read_data_locked(dev->desc, xfers, nxfers, ibi_data, ibi_len);
+	i3c_bus_normaluse_unlock(dev->bus);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(i3c_device_put_read_data);
+
+/**
  * i3c_device_get_info() - get I3C device information
  *
  * @dev: device we want information on

@@ -1633,6 +1633,80 @@ static int dw_i3c_target_generate_ibi(struct i3c_dev_desc *dev, const u8 *data, 
 	return 0;
 }
 
+static int dw_i3c_target_put_read_data(struct i3c_dev_desc *dev, struct i3c_priv_xfer *i3c_xfers,
+				       int i3c_nxfers, const u8 *ibi_data, int ibi_len)
+{
+	struct i3c_master_controller *m = i3c_dev_get_master(dev);
+	struct dw_i3c_master *master = to_dw_i3c_master(m);
+	struct dw_i3c_xfer *xfer;
+	u32 reg, thld_ctrl;
+	int i, ibi_notify;
+
+	if (!i3c_nxfers)
+		return 0;
+
+	xfer = dw_i3c_master_alloc_xfer(master, i3c_nxfers);
+	if (!xfer)
+		return -ENOMEM;
+
+	ibi_notify = ibi_data && ibi_len <= AST2600_I3C_IBI_MAX_PAYLOAD;
+	reg = readl(master->regs + SLV_EVENT_CTRL);
+	if ((reg & SLV_EVENT_CTRL_SIR_EN) == 0)
+		ibi_notify = 0;
+
+	if (ibi_notify) {
+		init_completion(&master->ibi.target.comp);
+
+		reg = readl(master->regs + DEVICE_CTRL);
+		reg &= ~DEV_CTRL_IBI_TRGT_MDB_MASK;
+		reg |= DEV_CTRL_IBI_TRGT_MDB(ibi_data[0]);
+		writel(reg, master->regs + DEVICE_CTRL);
+
+		dw_i3c_master_wr_tx_fifo(master, ibi_data, ibi_len);
+
+		reg = FIELD_PREP(COMMAND_PORT_SLAVE_DATA_LEN, ibi_len);
+		writel(reg, master->regs + COMMAND_QUEUE_PORT);
+
+		thld_ctrl = readl(master->regs + QUEUE_THLD_CTRL);
+		thld_ctrl &= ~QUEUE_THLD_CTRL_RESP_BUF_MASK;
+		thld_ctrl |= QUEUE_THLD_CTRL_RESP_BUF(1);
+		writel(thld_ctrl, master->regs + QUEUE_THLD_CTRL);
+	}
+
+	for (i = 0; i < i3c_nxfers; i++) {
+		struct dw_i3c_cmd *cmd = &xfer->cmds[i];
+
+		if (!i3c_xfers[i].rnw) {
+			cmd->tx_buf = i3c_xfers[i].data.out;
+			cmd->tx_len = i3c_xfers[i].len;
+			cmd->cmd_lo = 0 | (i << 3) | (cmd->tx_len << 16);
+
+			dw_i3c_master_wr_tx_fifo(master, cmd->tx_buf, cmd->tx_len);
+			writel(cmd->cmd_lo, master->regs + COMMAND_QUEUE_PORT);
+		}
+	}
+
+	if (ibi_notify) {
+		writel(1, master->regs + SLV_INTR_REQ);
+		if (!wait_for_completion_timeout(&master->ibi.target.comp,
+						 XFER_TIMEOUT)) {
+			dev_err(master->dev, "send sir timeout\n");
+			writel(RESET_CTRL_QUEUES, master->regs + RESET_CTRL);
+		}
+
+		reg = readl(master->regs + SLV_INTR_REQ);
+		if (SLV_INTR_REQ_IBI_STS(reg) != IBI_STS_ACCEPTED) {
+			reg = readl(master->regs + SLV_EVENT_CTRL);
+			if ((reg & SLV_EVENT_CTRL_SIR_EN) == 0)
+				pr_warn("sir is disabled by master\n");
+		}
+	}
+
+	dw_i3c_master_free_xfer(xfer);
+
+	return 0;
+}
+
 static int dw_i3c_master_reattach_i3c_dev(struct i3c_dev_desc *dev,
 					  u8 old_dyn_addr)
 {
@@ -2194,6 +2268,7 @@ static const struct i3c_target_ops dw_mipi_i3c_target_ops = {
 	.bus_cleanup = dw_i3c_target_bus_cleanup,
 	.priv_xfers = dw_i3c_target_priv_xfers,
 	.generate_ibi = dw_i3c_target_generate_ibi,
+	.put_read_data = dw_i3c_target_put_read_data,
 };
 
 static const struct i3c_master_controller_ops dw_mipi_i3c_ops = {

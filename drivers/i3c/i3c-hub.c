@@ -513,11 +513,11 @@ static int i3c_hub_hw_configure_tp(struct device *dev)
 		}
 	}
 
-	ret = regmap_update_bits(priv->regmap, I3C_HUB_TP_NET_CON_CONF, i3c_mask, i3c_val);
+	ret = regmap_update_bits(priv->regmap, I3C_HUB_TP_IO_MODE_CONF, smbus_mask, smbus_val);
 	if (ret)
 		return ret;
 
-	ret = regmap_update_bits(priv->regmap, I3C_HUB_TP_IO_MODE_CONF, smbus_mask, smbus_val);
+	ret = regmap_update_bits(priv->regmap, I3C_HUB_TP_PULLUP_EN, pullup_mask, pullup_val);
 	if (ret)
 		return ret;
 
@@ -529,12 +529,6 @@ static int i3c_hub_hw_configure_tp(struct device *dev)
 	if (ret)
 		return ret;
 
-	/* Enable TP here in case TP was configured */
-	ret = regmap_update_bits(priv->regmap, I3C_HUB_TP_ENABLE, i3c_mask | smbus_mask | gpio_mask,
-				 i3c_val | smbus_val | gpio_val);
-	if (ret)
-		return ret;
-
 	/* Request for HUB Network connection in case any TP is configured in I3C mode */
 	if (i3c_val) {
 		ret = regmap_write(priv->regmap, I3C_HUB_CP_MUX_SET, CONTROLLER_PORT_MUX_REQ);
@@ -543,18 +537,24 @@ static int i3c_hub_hw_configure_tp(struct device *dev)
 		/* TODO: verify if connection is done */
 	}
 
-	return regmap_update_bits(priv->regmap, I3C_HUB_TP_PULLUP_EN, pullup_mask, pullup_val);
+	/* Enable TP here in case TP was configured */
+	ret = regmap_update_bits(priv->regmap, I3C_HUB_TP_ENABLE, i3c_mask | smbus_mask | gpio_mask,
+				 i3c_val | smbus_val | gpio_val);
+	if (ret)
+		return ret;
+
+	return regmap_update_bits(priv->regmap, I3C_HUB_TP_NET_CON_CONF, i3c_mask, i3c_val);
 }
 
 static int i3c_hub_configure_hw(struct device *dev)
 {
 	int ret;
 
-	ret = i3c_hub_hw_configure_pullup(dev);
+	ret = i3c_hub_hw_configure_ldo(dev);
 	if (ret)
 		return ret;
 
-	ret = i3c_hub_hw_configure_ldo(dev);
+	ret = i3c_hub_hw_configure_pullup(dev);
 	if (ret)
 		return ret;
 

@@ -103,6 +103,16 @@ static int get_bios_reset_cfg(struct peci_cputemp *priv)
 	int ret;
 
 	switch (priv->gen_info->model) {
+	case INTEL_FAM6_GRANITERAPIDS:
+		re_msg.addr = priv->mgr->client->addr;
+		re_msg.msg_type = PECI_ENDPTCFG_TYPE_LOCAL_PCI;
+		re_msg.params.pci_cfg.seg = 0;
+		re_msg.params.pci_cfg.bus = 30;
+		re_msg.params.pci_cfg.device = 5;
+		re_msg.params.pci_cfg.function = 0;
+		re_msg.params.pci_cfg.reg = 0x198;
+		re_msg.rx_len = 4;
+		break;
 	case INTEL_FAM6_SAPPHIRERAPIDS:
 		re_msg.addr = priv->mgr->client->addr;
 		re_msg.msg_type = PECI_ENDPTCFG_TYPE_LOCAL_PCI;
@@ -403,6 +413,41 @@ static int check_resolved_cores(struct peci_cputemp *priv)
 
 	/* Get the RESOLVED_CORES register value */
 	switch (priv->gen_info->model) {
+	case INTEL_FAM6_GRANITERAPIDS:
+		re_msg.addr = priv->mgr->client->addr;
+		re_msg.msg_type = PECI_ENDPTCFG_TYPE_LOCAL_PCI;
+		re_msg.params.pci_cfg.seg = 0;
+		re_msg.params.pci_cfg.bus = 30;
+		re_msg.params.pci_cfg.device = 5;
+		re_msg.params.pci_cfg.function = 0;
+		re_msg.params.pci_cfg.reg = 0x48c;
+		re_msg.rx_len = 4;
+
+		ret = peci_command(priv->mgr->client->adapter,
+				   PECI_CMD_RD_END_PT_CFG, sizeof(re_msg),
+				   &re_msg);
+		if (ret || re_msg.cc != PECI_DEV_CC_SUCCESS)
+			ret = -EAGAIN;
+		if (ret)
+			return ret;
+
+		priv->core_mask = le32_to_cpup((__le32 *)re_msg.data);
+		priv->core_mask <<= 32;
+
+		re_msg.params.pci_cfg.reg = 0x488;
+
+		ret = peci_command(priv->mgr->client->adapter,
+				   PECI_CMD_RD_END_PT_CFG, sizeof(re_msg),
+				   &re_msg);
+		if (ret || re_msg.cc != PECI_DEV_CC_SUCCESS)
+			ret = -EAGAIN;
+		if (ret) {
+			priv->core_mask = 0;
+			return ret;
+		}
+
+		priv->core_mask |= le32_to_cpup((__le32 *)re_msg.data);
+		break;
 	case INTEL_FAM6_SAPPHIRERAPIDS:
 		re_msg.addr = priv->mgr->client->addr;
 		re_msg.msg_type = PECI_ENDPTCFG_TYPE_LOCAL_PCI;
@@ -524,6 +569,7 @@ static int create_module_temp_info(struct peci_cputemp *priv)
 	u8 model = priv->gen_info->model;
 	int ret, i;
 
+	/* INTEL_FAM6_GRANITERAPIDS does not support module temp */
 	ret = check_resolved_cores(priv);
 	if (ret && model != INTEL_FAM6_SAPPHIRERAPIDS)
 		return ret;

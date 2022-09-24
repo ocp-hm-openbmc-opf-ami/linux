@@ -21,6 +21,7 @@
 #define INTEL_FAM6_ICELAKE_X		0x6A
 #define INTEL_FAM6_ICELAKE_XD		0x6C
 #define INTEL_FAM6_SAPPHIRERAPIDS	0x8F
+#define INTEL_FAM6_GRANITERAPIDS	0xAD
 #endif
 
 #define INTEL_FAM6             6 /* P6 (Pentium Pro and later) */
@@ -53,8 +54,13 @@
 #define CHAN_RANK_MAX_ON_SPR   8  /* Max number of channel ranks on Sapphire Rapids */
 #define DIMM_IDX_MAX_ON_SPR    2  /* Max DIMM index per channel on Sapphire Rapids */
 
-#define CORE_MASK_BITS_MAX     CORE_MASK_BITS_ON_SPR
-#define CHAN_RANK_MAX          CHAN_RANK_MAX_ON_HSX
+#define CORE_MASK_BITS_ON_GNR  64 /* X1 now, will update to 128 for X2 and X3 */
+#define CHAN_RANK_MAX_ON_GNR   12 /* Max number of channel ranks on Granite Rapids */
+#define DIMM_IDX_MAX_ON_GNR    2  /* Max DIMM index per channel on Granite Rapids */
+
+#define CORE_MASK_BITS_HIGH    64 /* bits per core mask */
+#define CORE_MASK_BITS_MAX     CORE_MASK_BITS_ON_GNR
+#define CHAN_RANK_MAX          CHAN_RANK_MAX_ON_GNR
 #define DIMM_IDX_MAX           DIMM_IDX_MAX_ON_HSX
 #define DIMM_NUMS_MAX          (CHAN_RANK_MAX * DIMM_IDX_MAX)
 

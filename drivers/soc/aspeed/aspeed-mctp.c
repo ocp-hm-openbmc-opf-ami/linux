@@ -1487,6 +1487,20 @@ static void aspeed_mctp_channels_init(struct aspeed_mctp *priv)
 	aspeed_mctp_tx_chan_init(&priv->tx);
 }
 
+static void aspeed_mctp_mtu_init(struct aspeed_mctp *priv)
+{
+	regmap_update_bits(priv->map, ASPEED_MCTP_ENGINE_CTRL, RX_MAX_PAYLOAD_SIZE_MASK, 0);
+
+	/*
+	 * XXX: HW sets EOM bit in first packet of multipacket frame if its
+	 * content size is equal or greater MTU, what causes such frames cannot be
+	 * send correctly by aspeed controller.
+	 * According to recomendation TX MTU size shall be set to 128 bytes, and
+	 * EOM bit shall be control by software.
+	 */
+	regmap_update_bits(priv->map, ASPEED_MCTP_ENGINE_CTRL, TX_MAX_PAYLOAD_SIZE_MASK, 1);
+}
+
 static irqreturn_t aspeed_mctp_irq_handler(int irq, void *arg)
 {
 	struct aspeed_mctp *priv = arg;
@@ -1751,6 +1765,8 @@ static int aspeed_mctp_probe(struct platform_device *pdev)
 		dev_err(priv->dev, "Failed to init DMA\n");
 		goto out_drv;
 	}
+
+	aspeed_mctp_mtu_init(priv);
 
 	aspeed_mctp_hw_reset(priv);
 

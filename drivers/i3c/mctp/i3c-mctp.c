@@ -769,8 +769,9 @@ static int i3c_mctp_probe(struct i3c_device *i3cdev)
 		ret = i3c_device_setmrl_ccc(i3cdev, &info, I3C_MCTP_MIN_TRANSFER_SIZE,
 					    ibi_payload_size);
 	if (ret && info.max_read_len < I3C_MCTP_MIN_TRANSFER_SIZE) {
-		dev_err(dev, "Failed to set MRL!, ret = %d\n", ret);
-		goto error_peci;
+		dev_info(dev, "Failed to set MRL, ret = %d, running with default: %d\n", ret,
+			 I3C_MCTP_MIN_TRANSFER_SIZE);
+		info.max_read_len = I3C_MCTP_MIN_TRANSFER_SIZE;
 	}
 	priv->max_read_len = info.max_read_len;
 
@@ -778,17 +779,14 @@ static int i3c_mctp_probe(struct i3c_device *i3cdev)
 	if (ret || info.max_write_len < I3C_MCTP_MIN_TRANSFER_SIZE)
 		ret = i3c_device_setmwl_ccc(i3cdev, &info, I3C_MCTP_MIN_TRANSFER_SIZE);
 	if (ret && info.max_write_len < I3C_MCTP_MIN_TRANSFER_SIZE) {
-		dev_err(dev, "Failed to set MWL!, ret = %d\n", ret);
-		goto error_peci;
+		dev_info(dev, "Failed to set MWL, ret = %d, running with default: %d\n", ret,
+			 I3C_MCTP_MIN_TRANSFER_SIZE);
+		info.max_write_len = I3C_MCTP_MIN_TRANSFER_SIZE;
 	}
 	priv->max_write_len = info.max_write_len;
 
 	return 0;
 
-error_peci:
-	platform_device_unregister(priv->i3c_peci);
-	i3c_device_disable_ibi(i3cdev);
-	i3c_device_free_ibi(i3cdev);
 error:
 	cdev_del(&priv->cdev);
 error_cdev:

@@ -213,7 +213,7 @@ retry:
 	rx_packet = aspeed_mctp_receive_packet(priv->peci_client, timeout);
 	if (IS_ERR(rx_packet)) {
 		if (PTR_ERR(rx_packet) != -ERESTARTSYS)
-			dev_err_ratelimited(priv->dev, "failed to receive mctp packet: %ld\n",
+			dev_dbg_ratelimited(priv->dev, "failed to receive mctp packet: %ld\n",
 					    PTR_ERR(rx_packet));
 
 		return rx_packet;
@@ -288,8 +288,8 @@ static void mctp_peci_cpu_discovery(struct peci_adapter *adapter)
 							   tx_buf);
 
 			if (IS_ERR(rx_packet)) {
-				dev_warn(priv->dev, "Device EID=%d DomainId=%d not discovered\n",
-					 cpu.eid, cpu.domain_id);
+				dev_dbg(priv->dev, "Device EID=%d DomainId=%d not discovered\n",
+					cpu.eid, cpu.domain_id);
 				continue;
 			}
 
@@ -299,8 +299,8 @@ static void mctp_peci_cpu_discovery(struct peci_adapter *adapter)
 				is_discovery_done = true;
 				priv->cpus[node_id][domain_id] = cpu;
 			} else {
-				dev_warn(priv->dev, "Incorrect node_id=%d (EID=%d DomainId=%d)\n",
-					 node_id, cpu.eid, cpu.domain_id);
+				dev_dbg(priv->dev, "Incorrect node_id=%d (EID=%d DomainId=%d)\n",
+					node_id, cpu.eid, cpu.domain_id);
 			}
 			aspeed_mctp_packet_free(rx_packet);
 		}

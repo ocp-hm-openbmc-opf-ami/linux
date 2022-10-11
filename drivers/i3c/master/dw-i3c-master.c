@@ -2159,10 +2159,11 @@ static void dw_i3c_target_handle_response_ready(struct dw_i3c_master *master)
 
 	for (i = 0; i < nresp; i++) {
 		u32 resp = readl(master->regs + RESPONSE_QUEUE_PORT);
-		u8 error = RESPONSE_PORT_ERR_STATUS(resp);
 		u32 nbytes = RESPONSE_PORT_DATA_LEN(resp);
-		if (error)
+		if (RESPONSE_PORT_ERR_STATUS(resp)) {
 			has_error = 1;
+			continue;
+		}
 
 		if (nbytes > master->target_rx.max_len) {
 			dev_warn(master->dev, "private write data length is larger than max\n");

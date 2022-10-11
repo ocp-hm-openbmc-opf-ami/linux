@@ -282,10 +282,6 @@ static int i3c_mctp_open(struct inode *inode, struct file *file)
 	struct i3c_mctp *priv = container_of(inode->i_cdev, struct i3c_mctp, cdev);
 
 	spin_lock(&priv->device_file_lock);
-	if (priv->device_open) {
-		spin_unlock(&priv->device_file_lock);
-		return -EBUSY;
-	}
 	priv->device_open++;
 	spin_unlock(&priv->device_file_lock);
 

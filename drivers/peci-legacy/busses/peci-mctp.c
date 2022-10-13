@@ -273,36 +273,37 @@ static void mctp_peci_cpu_discovery(struct peci_adapter *adapter)
 		if (ret)
 			continue;
 
-		for (domain_id = 0; domain_id < DOMAIN_OFFSET_MAX; domain_id++) {
-			ret = aspeed_mctp_get_eid(priv->peci_client,
-						  cpu.bdf, domain_id,
-						  &cpu.eid);
+		rx_packet = mctp_peci_send_receive(adapter, &cpu,
+						   PECI_RDENDPTCFG_PCI_WRITE_LEN,
+						   PECI_RDENDPTCFG_READ_LEN_BASE + 4,
+						   tx_buf);
 
-			/* No entries for specific BDF/domain_Id. */
-			if (ret)
-				continue;
+		if (IS_ERR(rx_packet)) {
+			dev_dbg(priv->dev, "Device EID=%d not discovered\n",
+				cpu.eid);
+			continue;
+		}
 
-			rx_packet = mctp_peci_send_receive(adapter, &cpu,
-							   PECI_RDENDPTCFG_PCI_WRITE_LEN,
-							   PECI_RDENDPTCFG_READ_LEN_BASE + 4,
-							   tx_buf);
+		rx_buf = (u8 *)(rx_packet->data.payload) + sizeof(struct mctp_peci_vdm_hdr);
+		node_id = rx_buf[1] & CPUNODEID_CFG_LCLNODEID_MASK;
+		aspeed_mctp_packet_free(rx_packet);
 
-			if (IS_ERR(rx_packet)) {
-				dev_dbg(priv->dev, "Device EID=%d DomainId=%d not discovered\n",
-					cpu.eid, cpu.domain_id);
-				continue;
-			}
+		if (node_id < PECI_OFFSET_MAX) {
+			for (domain_id = 0; domain_id < DOMAIN_OFFSET_MAX; domain_id++) {
+				ret = aspeed_mctp_get_eid(priv->peci_client,
+							  cpu.bdf, domain_id,
+							  &cpu.eid);
 
-			rx_buf = (u8 *)(rx_packet->data.payload) + sizeof(struct mctp_peci_vdm_hdr);
-			node_id = rx_buf[1] & CPUNODEID_CFG_LCLNODEID_MASK;
-			if (node_id < PECI_OFFSET_MAX) {
+				/* No entries for specific BDF/domain_Id. */
+				if (ret)
+					continue;
+
 				is_discovery_done = true;
 				priv->cpus[node_id][domain_id] = cpu;
-			} else {
-				dev_dbg(priv->dev, "Incorrect node_id=%d (EID=%d DomainId=%d)\n",
-					node_id, cpu.eid, cpu.domain_id);
 			}
-			aspeed_mctp_packet_free(rx_packet);
+		} else {
+			dev_dbg(priv->dev, "Incorrect node_id=%d (EID=%d)\n",
+				node_id, cpu.eid);
 		}
 	}
 	priv->is_discovery_done = is_discovery_done;

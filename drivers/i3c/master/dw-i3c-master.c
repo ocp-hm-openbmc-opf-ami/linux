@@ -1127,7 +1127,6 @@ static void dw_i3c_target_bus_cleanup(struct i3c_master_controller *m)
 static int dw_i3c_master_bus_init(struct i3c_master_controller *m)
 {
 	struct dw_i3c_master *master = to_dw_i3c_master(m);
-	u32 interrupt_mask = INTR_MASTER_MASK;
 	struct i3c_device_info info = { };
 	u32 thld_ctrl;
 	int ret;
@@ -1153,12 +1152,11 @@ static int dw_i3c_master_bus_init(struct i3c_master_controller *m)
 		thld_ctrl &= ~(QUEUE_THLD_CTRL_IBI_STA_MASK | QUEUE_THLD_CTRL_IBI_DAT_MASK);
 		thld_ctrl |= QUEUE_THLD_CTRL_IBI_STA(1) | QUEUE_THLD_CTRL_IBI_DAT(1);
 		writel(thld_ctrl, master->regs + QUEUE_THLD_CTRL);
-		interrupt_mask |= INTR_IBI_THLD_STAT;
 	}
 
 	writel(INTR_ALL, master->regs + INTR_STATUS);
-	writel(interrupt_mask, master->regs + INTR_STATUS_EN);
-	writel(interrupt_mask, master->regs + INTR_SIGNAL_EN);
+	writel(INTR_MASTER_MASK, master->regs + INTR_STATUS_EN);
+	writel(INTR_MASTER_MASK, master->regs + INTR_SIGNAL_EN);
 
 
 	ret = i3c_master_get_free_addr(m, 0);
@@ -1175,6 +1173,7 @@ static int dw_i3c_master_bus_init(struct i3c_master_controller *m)
 	if (ret)
 		return ret;
 
+	writel(IBI_REQ_REJECT_ALL, master->regs + IBI_SIR_REQ_REJECT);
 	writel(IBI_REQ_REJECT_ALL, master->regs + IBI_MR_REQ_REJECT);
 
 	/* For now don't support Hot-Join */
@@ -1840,6 +1839,32 @@ static int dw_i3c_master_i2c_xfers(struct i2c_dev_desc *dev,
 	return ret;
 }
 
+static void dw_i3c_master_enable_ibi_irq(struct dw_i3c_master *master)
+{
+	u32 reg;
+
+	reg = readl(master->regs + INTR_STATUS_EN);
+	reg |= INTR_IBI_THLD_STAT;
+	writel(reg, master->regs + INTR_STATUS_EN);
+
+	reg = readl(master->regs + INTR_SIGNAL_EN);
+	reg |= INTR_IBI_THLD_STAT;
+	writel(reg, master->regs + INTR_SIGNAL_EN);
+}
+
+static void dw_i3c_master_disable_ibi_irq(struct dw_i3c_master *master)
+{
+	u32 reg;
+
+	reg = readl(master->regs + INTR_STATUS_EN);
+	reg &= ~INTR_IBI_THLD_STAT;
+	writel(reg, master->regs + INTR_STATUS_EN);
+
+	reg = readl(master->regs + INTR_SIGNAL_EN);
+	reg &= ~INTR_IBI_THLD_STAT;
+	writel(reg, master->regs + INTR_SIGNAL_EN);
+}
+
 static int dw_i3c_master_request_ibi(struct i3c_dev_desc *dev,
 				     const struct i3c_ibi_setup *req)
 {
@@ -1923,6 +1948,12 @@ static int dw_i3c_master_enable_ibi(struct i3c_dev_desc *dev)
 		spin_unlock_irq(&master->ibi.master.lock);
 	}
 
+	reg = readl(master->regs + IBI_SIR_REQ_REJECT);
+	if (reg == IBI_REQ_REJECT_ALL)
+		dw_i3c_master_disable_ibi_irq(master);
+	else
+		dw_i3c_master_enable_ibi_irq(master);
+
 	return ret;
 }
 
@@ -1956,6 +1987,12 @@ static int dw_i3c_master_disable_ibi(struct i3c_dev_desc *dev)
 	reg &= ~DEV_ADDR_TABLE_IBI_WITH_DATA;
 	reg &= ~DEV_ADDR_TABLE_IBI_PEC_EN;
 	writel(reg, master->regs + dat_loc);
+
+	reg = readl(master->regs + IBI_SIR_REQ_REJECT);
+	if (reg == IBI_REQ_REJECT_ALL)
+		dw_i3c_master_disable_ibi_irq(master);
+	else
+		dw_i3c_master_enable_ibi_irq(master);
 	spin_unlock_irq(&master->ibi.master.lock);
 
 	return 0;

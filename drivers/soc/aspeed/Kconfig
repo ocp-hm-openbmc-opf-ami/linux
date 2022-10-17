@@ -115,6 +115,11 @@ config ASPEED_VGA_SHAREDMEM
 	  specification, BIOS will transfer whole SMBIOS table to VGA memory,
 	  and BMC can get the table from VGA memory through this driver.
 
+
+config ASPEED_OTP
+	tristate "Aspeed OTP Driver"
+	depends on MACH_ASPEED_G6
+
 endmenu
 
 endif

@@ -13,3 +13,4 @@ obj-$(CONFIG_ASPEED_SBC)		+= aspeed-sbc.o
 obj-$(CONFIG_ASPEED_XDMA)		+= aspeed-xdma.o
 obj-$(CONFIG_ASPEED_VGA_SHAREDMEM)	+= aspeed-vga-sharedmem.o
 obj-$(CONFIG_ASPEED_MCTP)		+= aspeed-mctp.o
+obj-$(CONFIG_ASPEED_OTP)		+= aspeed-otp.o

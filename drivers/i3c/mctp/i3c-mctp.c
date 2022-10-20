@@ -711,7 +711,6 @@ EXPORT_SYMBOL_GPL(i3c_mctp_receive_packet);
 
 static int i3c_mctp_probe(struct i3c_device *i3cdev)
 {
-	int ibi_payload_size = I3C_MCTP_IBI_PAYLOAD_SIZE;
 	struct device *dev = i3cdev_to_dev(i3cdev);
 	struct i3c_device_info info;
 	struct i3c_mctp *priv;
@@ -755,7 +754,6 @@ static int i3c_mctp_probe(struct i3c_device *i3cdev)
 	if (i3c_mctp_enable_ibi(i3cdev)) {
 		INIT_DELAYED_WORK(&priv->polling_work, i3c_mctp_polling_work);
 		schedule_delayed_work(&priv->polling_work, msecs_to_jiffies(POLLING_TIMEOUT_MS));
-		ibi_payload_size = 0;
 	}
 
 	i3c_device_get_info(i3cdev, &info);
@@ -763,7 +761,7 @@ static int i3c_mctp_probe(struct i3c_device *i3cdev)
 	ret = i3c_device_getmrl_ccc(i3cdev, &info);
 	if (ret || info.max_read_len < I3C_MCTP_MIN_TRANSFER_SIZE)
 		ret = i3c_device_setmrl_ccc(i3cdev, &info, I3C_MCTP_MIN_TRANSFER_SIZE,
-					    ibi_payload_size);
+					    I3C_MCTP_IBI_PAYLOAD_SIZE);
 	if (ret && info.max_read_len < I3C_MCTP_MIN_TRANSFER_SIZE) {
 		dev_info(dev, "Failed to set MRL, ret = %d, running with default: %d\n", ret,
 			 I3C_MCTP_MIN_TRANSFER_SIZE);

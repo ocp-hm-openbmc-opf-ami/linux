@@ -293,6 +293,39 @@ static int get_mmbi_header(struct aspeed_mmbi_channel *channel,
 	return 0;
 }
 
+static void raise_missing_sci(struct aspeed_mmbi_channel *channel)
+{
+	struct host_rop hrop;
+	u32 h_rwp0, h_rwp1, b2h_rptr;
+
+	/* Rise SCI only if Host is READY (h_rdy is 1). */
+	if (read_host_rwp_val(channel, ASPEED_MMBI_HRWP0_INSTANCE0, &h_rwp0)) {
+		dev_err(channel->priv->dev, "Failed to read Host RWP\n");
+		return;
+	}
+	if (!GET_HOST_READY_BIT(h_rwp0)) {
+		// Host is not ready, no point in raising the SCI
+		return;
+	}
+
+	memcpy(&hrop, channel->hrop_vmem, sizeof(struct host_rop));
+	if (read_host_rwp_val(channel, ASPEED_MMBI_HRWP1_INSTANCE0, &h_rwp1)) {
+		dev_err(channel->priv->dev, "Failed to read Host RWP\n");
+		return;
+	}
+	b2h_rptr = GET_B2H_READ_POINTER(h_rwp1);
+
+	if (hrop.b2h_wp == b2h_rptr) {
+		// Host has read all outstanding SCI data,
+		// Do not raise another SCI.
+		return;
+	}
+
+	dev_dbg(channel->priv->dev,
+		"Host not read the data yet, so rising SCI interrupt again...\n");
+	raise_sci_interrupt(channel);
+}
+
 static void update_host_rop(struct aspeed_mmbi_channel *channel,
 			    unsigned int w_len, unsigned int r_len)
 {
@@ -477,7 +510,10 @@ static ssize_t mmbi_read(struct file *filp, char *buff, size_t count,
 
 	protocol->process_data = true;
 	if (!protocol->data_available && (filp->f_flags & O_NONBLOCK)) {
-		dev_dbg(priv->dev, "%s: Non blocking file\n", __func__);
+		// Work around: The lack of response might be cause by missing SCI
+		// (host didn't consume the last message), check the buffer state
+		// and retry if it's needed
+		raise_missing_sci(channel);
 		return -EAGAIN;
 	}
 	dev_dbg(priv->dev, "%s: count:%d, Type: %d\n", __func__, count,

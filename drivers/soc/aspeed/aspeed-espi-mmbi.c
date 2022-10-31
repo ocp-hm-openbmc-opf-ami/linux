@@ -921,6 +921,19 @@ static int mmbi_channel_init(struct aspeed_espi_mmbi *priv, struct device_node *
 
 	priv->chan[idx].priv = priv;
 
+	/*
+	 * When BMC goes for reset while host is in OS, SRAM memory will be
+	 * remapped and the content in memory will be lost. This include
+	 * host ready state which will block memory write transactions.
+	 * Ideally this reset has to be done while mapping memory(u-boot).
+	 * Since channel initialization (including descriptor) done at kernel,
+	 * So added channel reset also during driver load. Future, when staged
+	 * commands processing(IPMI commands for BIOS-BMC communication) is
+	 * enabled, this check should be moved to u-boot.
+	 */
+	if (send_bmc_reset_request(&priv->chan[idx]))
+		dev_info(dev, "MMBI channel(%d) reset failed\n", idx);
+
 	dev_info(dev, "MMBI Channel(%d) initialized successfully\n", idx);
 
 	return 0;

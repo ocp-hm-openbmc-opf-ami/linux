@@ -2454,6 +2454,11 @@ static int dw_i3c_remove(struct platform_device *pdev)
 	return 0;
 }
 
+static void dw_i3c_shutdown(struct platform_device *pdev)
+{
+	dw_i3c_remove(pdev);
+}
+
 static const struct of_device_id dw_i3c_master_of_match[] = {
 	{ .compatible = "snps,dw-i3c-master-1.00a", },
 	{},
@@ -2463,6 +2468,7 @@ MODULE_DEVICE_TABLE(of, dw_i3c_master_of_match);
 static struct platform_driver dw_i3c_driver = {
 	.probe = dw_i3c_probe,
 	.remove = dw_i3c_remove,
+	.shutdown = dw_i3c_shutdown,
 	.driver = {
 		.name = "dw-i3c-master",
 		.of_match_table = of_match_ptr(dw_i3c_master_of_match),

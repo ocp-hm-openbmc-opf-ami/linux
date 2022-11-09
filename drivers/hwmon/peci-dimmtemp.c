@@ -53,7 +53,8 @@ static inline int read_ddr_dimm_temp_config(struct peci_dimmtemp *priv,
 {
 	return peci_client_read_package_config(priv->mgr,
 					       PECI_MBX_INDEX_DDR_DIMM_TEMP,
-					       chan_rank, cfg_data);
+					       chan_rank, cfg_data,
+					       sizeof(u32));
 }
 
 static int get_dimm_temp(struct peci_dimmtemp *priv, int dimm_no)

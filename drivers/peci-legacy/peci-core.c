@@ -543,8 +543,11 @@ static int peci_cmd_rd_pkg_cfg(struct peci_adapter *adapter, uint msg_len, void 
 	 */
 	domain_id = (msg_len == sizeof(*umsg)) ? umsg->domain_id : 0;
 
-	/* Per the PECI spec, the read length must be a byte, word, or dword */
-	if (umsg->rx_len != 1 && umsg->rx_len != 2 && umsg->rx_len != 4) {
+	/* Per the PECI 4.0 spec, the read length may be a byte, word, or dword,
+	 * or qword.
+	 */
+	if (umsg->rx_len != 1 && umsg->rx_len != 2 && umsg->rx_len != 4 &&
+	    umsg->rx_len != 8) {
 		dev_dbg(&adapter->dev, "Invalid read length, rx_len: %d\n",
 			umsg->rx_len);
 		return -EINVAL;
@@ -585,9 +588,8 @@ static int peci_cmd_wr_pkg_cfg(struct peci_adapter *adapter, uint msg_len, void 
 	 * Otherwise the domain ID is 0.
 	 */
 	domain_id = (msg_len == sizeof(*umsg)) ? umsg->domain_id : 0;
-
 	/* Per the PECI spec, the write length must be a dword */
-	if (umsg->tx_len != 4) {
+	if (umsg->tx_len != 4 && umsg->tx_len != 8) {
 		dev_dbg(&adapter->dev, "Invalid write length, tx_len: %d\n",
 			umsg->tx_len);
 		return -EINVAL;
@@ -605,7 +607,7 @@ static int peci_cmd_wr_pkg_cfg(struct peci_adapter *adapter, uint msg_len, void 
 	msg->tx_buf[3] = (u8)umsg->param;        /* LSB - Config parameter */
 	msg->tx_buf[4] = (u8)(umsg->param >> 8); /* MSB - Config parameter */
 	for (i = 0; i < umsg->tx_len; i++)
-		msg->tx_buf[5 + i] = (u8)(umsg->value >> (i << 3));
+		msg->tx_buf[5 + i] = umsg->value[i];
 
 	/* Add an Assured Write Frame Check Sequence byte */
 	ret = peci_aw_fcs(msg, 8 + umsg->tx_len, &aw_fcs);

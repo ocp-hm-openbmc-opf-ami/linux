@@ -77,7 +77,8 @@ peci_dimmpower_read_dram_power_limit(struct peci_client_manager *peci_mgr,
 				     union peci_dram_power_limit *reg)
 {
 	return peci_pcs_read(peci_mgr, PECI_MBX_INDEX_DDR_RAPL_PL1,
-			     PECI_PCS_PARAM_ZERO, &reg->value);
+			     PECI_PCS_PARAM_ZERO, (u8 *)&reg->value,
+			     sizeof(reg->value));
 }
 
 static int
@@ -95,7 +96,8 @@ peci_dimmpower_get_energy_counter(struct peci_dimmpower *priv,
 	}
 
 	ret = peci_pcs_read(priv->mgr, PECI_MBX_INDEX_ENERGY_STATUS,
-			    PECI_PKG_ID_DIMM, &sensor_data->uvalue);
+			    PECI_PKG_ID_DIMM, (u8 *)&sensor_data->uvalue,
+			    sizeof(sensor_data->uvalue));
 	if (ret) {
 		dev_dbg(priv->dev, "not able to read dimm energy\n");
 		goto unlock;
@@ -245,7 +247,9 @@ peci_dimmpower_set_power_limit(void *ctx, struct peci_sensor_conf *sensor_conf,
 	}
 
 	ret = peci_pcs_write(priv->mgr, PECI_MBX_INDEX_DDR_RAPL_PL1,
-			     PECI_PCS_PARAM_ZERO, power_limit.value);
+			     PECI_PCS_PARAM_ZERO,
+			     (u8 *)&power_limit.value,
+			     sizeof(power_limit.value));
 	if (ret) {
 		dev_dbg(priv->dev, "not able to write power limit\n");
 		return ret;
@@ -280,7 +284,8 @@ peci_dimmpower_read_max_power(void *ctx, struct peci_sensor_conf *sensor_conf,
 	}
 
 	ret = peci_pcs_read(priv->mgr, PECI_MBX_INDEX_DDR_PWR_INFO_LOW,
-			    PECI_PCS_PARAM_ZERO, &power_info.value);
+			    PECI_PCS_PARAM_ZERO, (u8 *)&power_info.value,
+			    sizeof(power_info.value));
 	if (ret) {
 		dev_dbg(priv->dev, "not able to read power info\n");
 		goto unlock;

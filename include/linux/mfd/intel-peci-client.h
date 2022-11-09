@@ -5,6 +5,7 @@
 #define __LINUX_MFD_INTEL_PECI_CLIENT_H
 
 #include <linux/peci-legacy.h>
+#include <uapi/linux/peci-ioctl.h>
 
 #if IS_ENABLED(CONFIG_X86)
 #include <asm/intel-family.h>
@@ -109,6 +110,7 @@ struct peci_client_manager {
  * @index: encoding index for the requested service
  * @param: parameter to specify the exact data being requested
  * @data: data buffer to store the result
+ * @data_len: number of bytes to read from the config register
  * Context: can sleep
  *
  * A generic PECI command that provides read access to the
@@ -121,7 +123,7 @@ struct peci_client_manager {
  */
 static inline int
 peci_client_read_package_config(struct peci_client_manager *priv,
-				u8 index, u16 param, u8 *data)
+				u8 index, u16 param, u8 *data, u8 data_len)
 {
 	struct peci_rd_pkg_cfg_msg msg;
 	int ret;
@@ -129,8 +131,11 @@ peci_client_read_package_config(struct peci_client_manager *priv,
 	msg.addr = priv->client->addr;
 	msg.index = index;
 	msg.param = param;
-	msg.rx_len = 4;
+	msg.rx_len = data_len;
 	msg.domain_id = priv->client->domain_id;
+
+	if (!data || data_len > PECI_RDPKGCFG_PKGCFG_LEN)
+		return -EINVAL;
 
 	ret = peci_command(priv->client->adapter, PECI_CMD_RD_PKG_CFG, sizeof(msg), &msg);
 	if (msg.cc != PECI_DEV_CC_SUCCESS)
@@ -138,7 +143,7 @@ peci_client_read_package_config(struct peci_client_manager *priv,
 	if (ret)
 		return ret;
 
-	memcpy(data, msg.pkg_config, 4);
+	memcpy(data, msg.pkg_config, data_len);
 
 	return 0;
 }
@@ -149,13 +154,14 @@ peci_client_read_package_config(struct peci_client_manager *priv,
  * @index: encoding index for the requested service
  * @param: parameter to specify the exact data being requested
  * @data: data to write
+ * @data_len: number of bytes to write from @data
  * Context: can sleep
  *
  * Return: zero on success, else a negative error code.
  */
 static inline int
 peci_client_write_package_config(struct peci_client_manager *priv,
-				 u8 index, u16 param, u32 data)
+				 u8 index, u16 param, u8 *data, u8 data_len)
 {
 	struct peci_wr_pkg_cfg_msg msg;
 	int ret;
@@ -163,8 +169,10 @@ peci_client_write_package_config(struct peci_client_manager *priv,
 	msg.addr = priv->client->addr;
 	msg.index = index;
 	msg.param = param;
-	msg.tx_len = 4u;
-	msg.value = data;
+	msg.tx_len = data_len;
+	if (!data || data_len > PECI_WRPKGCFG_MAX_WRITE_LEN)
+		return -EINVAL;
+	memcpy(msg.value, data, data_len);
 	msg.domain_id = priv->client->domain_id;
 
 	ret = peci_command(priv->client->adapter, PECI_CMD_WR_PKG_CFG, sizeof(msg), &msg);

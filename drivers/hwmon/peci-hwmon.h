@@ -397,25 +397,37 @@ static inline u32 peci_pcs_munits_to_xn(u32 mu_value, u8 n)
  * @index: PCS index
  * @parameter: PCS parameter
  * @reg: Pointer to the variable read value is going to be put
+ * @data_len: Number of bytes to read into @reg
  *
  * Return: 0 if succeeded,
  *	-EINVAL if there are null pointers among arguments,
  *	other values in case other errors.
  */
 static inline int peci_pcs_read(struct peci_client_manager *peci_mgr, u8 index,
-				u16 parameter, u32 *reg)
+				u16 parameter, u8 *reg, u8 data_len)
 {
-	u32 pcs_reg;
+	u8 pcs_reg[PECI_RDPKGCFG_PKGCFG_LEN] = { 0 };
 	int ret;
 
-	if (!reg)
+	if (!reg || data_len > PECI_RDPKGCFG_PKGCFG_LEN)
 		return -EINVAL;
 
 	ret = peci_client_read_package_config(peci_mgr, index, parameter,
-					      (u8 *)&pcs_reg);
-	if (!ret)
-		*reg = le32_to_cpup((__le32 *)&pcs_reg);
+					      pcs_reg, data_len);
 
+	if (!ret) {
+		if (data_len <= sizeof(u32)) {
+			u32 pkgcfg_reg = le32_to_cpup((__le32 *)pcs_reg);
+
+			memcpy(reg, &pkgcfg_reg, data_len);
+		} else if (data_len == sizeof(u64)) {
+			u64 pkgcfg_reg = le64_to_cpup((__le64 *)pcs_reg);
+
+			memcpy(reg, &pkgcfg_reg, data_len);
+		} else {
+			return -EINVAL;
+		}
+	}
 	return ret;
 }
 
@@ -429,11 +441,12 @@ static inline int peci_pcs_read(struct peci_client_manager *peci_mgr, u8 index,
  * Return: 0 if succeeded, other values in case an error.
  */
 static inline int peci_pcs_write(struct peci_client_manager *peci_mgr, u8 index,
-				 u16 parameter, u32 reg)
+				 u16 parameter, u8 *reg, u8 data_len)
 {
 	int ret;
 
-	ret = peci_client_write_package_config(peci_mgr, index, parameter, reg);
+	ret = peci_client_write_package_config(peci_mgr, index, parameter, reg,
+					       data_len);
 
 	return ret;
 }
@@ -614,7 +627,8 @@ static inline int peci_pcs_get_units(struct peci_client_manager *peci_mgr,
 
 	if (!(*valid)) {
 		ret = peci_pcs_read(peci_mgr, PECI_MBX_INDEX_TDP_UNITS,
-				    PECI_PCS_PARAM_ZERO, &units->value);
+				    PECI_PCS_PARAM_ZERO, (u8 *)&units->value,
+				    sizeof(units->value));
 		if (!ret)
 			*valid = true;
 	}

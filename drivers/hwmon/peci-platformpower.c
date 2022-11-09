@@ -163,7 +163,8 @@ peci_platformpower_read_platf_pwr_info_low(struct peci_client_manager *peci_mgr,
 					   *reg)
 {
 	return peci_pcs_read(peci_mgr, PECI_MBX_INDEX_TDP,
-			     PECI_PKG_ID_PLATFORM, &reg->value);
+			     PECI_PKG_ID_PLATFORM, (u8 *)&reg->value,
+			     sizeof(reg->value));
 }
 
 /**
@@ -179,7 +180,8 @@ peci_platformpower_read_platf_pwr_lim_low(struct peci_client_manager *peci_mgr,
 					  *reg)
 {
 	return peci_pcs_read(peci_mgr, PECI_MBX_INDEX_PKG_PSYS_PWR_LIM1,
-			     PECI_PCS_PARAM_ZERO, &reg->value);
+			     PECI_PCS_PARAM_ZERO, (u8 *)&reg->value,
+			     sizeof(reg->value));
 }
 
 /**
@@ -205,7 +207,8 @@ peci_platformpower_get_energy_counter(struct peci_platformpower *priv,
 	}
 
 	ret = peci_pcs_read(priv->mgr, PECI_MBX_INDEX_ENERGY_COUNTER,
-			    PECI_PKG_ID_PLATFORM, &sensor_data->uvalue);
+			    PECI_PKG_ID_PLATFORM, (u8 *)&sensor_data->uvalue,
+			    sizeof(sensor_data->uvalue));
 
 	if (ret) {
 		dev_dbg(priv->dev, "not able to read package energy\n");
@@ -379,7 +382,8 @@ peci_platformpower_set_power_limit(void *ctx,
 
 	/* Read power limit 2 (PPL2). */
 	ret = peci_pcs_read(priv->mgr, PECI_MBX_INDEX_PKG_PSYS_PWR_LIM2,
-			    PECI_PCS_PARAM_ZERO, &power_limit_high.value);
+			    PECI_PCS_PARAM_ZERO, (u8 *)&power_limit_high.value,
+			    sizeof(power_limit_high.value));
 	if (ret) {
 		dev_dbg(priv->dev, "not able to read power limit 2 (PPL2)\n");
 		return ret;
@@ -430,7 +434,9 @@ peci_platformpower_set_power_limit(void *ctx,
 
 	/* Write calculated PPL1 to the CPU */
 	ret = peci_pcs_write(priv->mgr, PECI_MBX_INDEX_PKG_PSYS_PWR_LIM1,
-			     PECI_PCS_PARAM_ZERO, power_limit_low.value);
+			     PECI_PCS_PARAM_ZERO,
+			     (u8 *)&power_limit_low.value,
+			     sizeof(power_limit_low.value));
 	if (ret) {
 		dev_dbg(priv->dev, "not able to write power limit 1\n");
 		return ret;
@@ -438,7 +444,10 @@ peci_platformpower_set_power_limit(void *ctx,
 
 	/* Write calculated PPL2 to the CPU */
 	ret = peci_pcs_write(priv->mgr, PECI_MBX_INDEX_PKG_PSYS_PWR_LIM2,
-			     PECI_PCS_PARAM_ZERO, power_limit_high.value);
+			     PECI_PCS_PARAM_ZERO,
+			     (u8 *)&power_limit_high.value,
+			     sizeof(power_limit_high.value));
+
 	if (ret) {
 		dev_dbg(priv->dev, "not able to write power limit 2\n");
 		return ret;

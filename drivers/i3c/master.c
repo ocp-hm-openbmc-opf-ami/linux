@@ -482,6 +482,9 @@ static void i3c_device_publish_event(struct i3c_master_controller *master,
 	}
 }
 
+static int i3c_master_rstdaa_locked(struct i3c_master_controller *master,
+				    u8 addr);
+
 static ssize_t mode_show(struct device *dev,
 			 struct device_attribute *da,
 			 char *buf)
@@ -549,6 +552,47 @@ static ssize_t i2c_scl_frequency_show(struct device *dev,
 }
 static DEVICE_ATTR_RO(i2c_scl_frequency);
 
+static ssize_t rescan_store(struct device *dev, struct device_attribute *attr,
+			    const char *buf, size_t count)
+{
+	struct i3c_master_controller *master = dev_to_i3cmaster(dev);
+	struct i3c_bus *bus = i3c_master_get_bus(master);
+	bool res;
+	int ret;
+
+	ret = kstrtobool(buf, &res);
+	if (ret)
+		return ret;
+
+	if (!res)
+		return count;
+
+	i3c_device_publish_event(master, i3c_event_prepare_for_rescan);
+
+	i3c_bus_maintenance_lock(bus);
+
+	ret = i3c_master_rstdaa_locked(master, I3C_BROADCAST_ADDR);
+	if (ret && ret != I3C_ERROR_M2) {
+		dev_dbg(&master->dev,
+			"Failed to run RSTDAA for rescan, ret=%d\n", ret);
+		return ret;
+	}
+
+	i3c_bus_maintenance_unlock(bus);
+
+	ret = i3c_master_do_daa(master);
+	if (ret) {
+		dev_dbg(&master->dev, "Failed to run DAA for rescan, ret=%d\n",
+			ret);
+		return ret;
+	}
+
+	i3c_device_publish_event(master, i3c_event_rescan_done);
+
+	return count;
+}
+static DEVICE_ATTR_WO(rescan);
+
 static struct attribute *i3c_masterdev_attrs[] = {
 	&dev_attr_mode.attr,
 	&dev_attr_current_master.attr,
@@ -559,6 +603,7 @@ static struct attribute *i3c_masterdev_attrs[] = {
 	&dev_attr_pid.attr,
 	&dev_attr_dynamic_address.attr,
 	&dev_attr_hdrcap.attr,
+	&dev_attr_rescan.attr,
 	NULL,
 };
 ATTRIBUTE_GROUPS(i3c_masterdev);

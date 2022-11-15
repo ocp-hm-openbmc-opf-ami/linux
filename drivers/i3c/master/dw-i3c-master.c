@@ -2263,11 +2263,17 @@ static irqreturn_t dw_i3c_master_irq_handler(int irq, void *dev_id)
 		}
 	}
 
-	spin_lock(&master->xferqueue.lock);
-	dw_i3c_master_end_xfer_locked(master, status);
-	if (status & INTR_TRANSFER_ERR_STAT)
-		writel(INTR_TRANSFER_ERR_STAT, master->regs + INTR_STATUS);
-	spin_unlock(&master->xferqueue.lock);
+	/*
+	 * In some cases (e.g. > 1 command being processed),
+	 * AST2600 HW can set INTR_TRANSFER_ERR_STAT without INTR_RESP_READY_STAT
+	 */
+	if (status & (INTR_RESP_READY_STAT | INTR_TRANSFER_ERR_STAT)) {
+		spin_lock(&master->xferqueue.lock);
+		dw_i3c_master_end_xfer_locked(master, status);
+		if (status & INTR_TRANSFER_ERR_STAT)
+			writel(INTR_TRANSFER_ERR_STAT, master->regs + INTR_STATUS);
+		spin_unlock(&master->xferqueue.lock);
+	}
 
 	if (status & INTR_IBI_THLD_STAT)
 		dw_i3c_master_demux_ibis(master);

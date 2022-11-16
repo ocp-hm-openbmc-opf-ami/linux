@@ -467,6 +467,14 @@ void wake_up_device(struct aspeed_mmbi_channel *channel)
 						req_data_len +
 						sizeof(struct mmbi_header));
 			}
+			/*
+			 * Raise the missing SCI's by checking pointer for host
+			 * read acknowledgment. This will work around the Missing
+			 * SCI bug on host side.
+			 */
+			dev_warn(channel->priv->dev,
+				 "%s: Check and raise missing SCI\n", __func__);
+			raise_missing_sci(channel);
 		}
 	}
 }
@@ -599,6 +607,14 @@ static ssize_t mmbi_read(struct file *filp, char *buff, size_t count,
 
 	dev_dbg(priv->dev, "%s: Return length: %d\n", __func__, ret);
 err_out:
+	/*
+	 * Raise the missing SCI's by checking pointer for host
+	 * read acknowledgment. This will work around the Missing
+	 * SCI bug on host side. *
+	 */
+	dev_warn(priv->dev, "%s: Check and raise missing SCI\n", __func__);
+	raise_missing_sci(channel);
+
 	protocol->data_available = false;
 
 	wake_up_device(channel);

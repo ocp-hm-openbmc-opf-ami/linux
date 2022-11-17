@@ -249,7 +249,9 @@ static int __peci_xfer(struct peci_adapter *adapter, struct peci_xfer_msg *msg,
 		timeout += usecs_to_jiffies(total_retry_timeout_us);
 
 	for (;;) {
+		mutex_lock(&core_lock);
 		ret = adapter->xfer(adapter, msg);
+		mutex_unlock(&core_lock);
 
 		if (!do_retry || ret || !msg->rx_buf)
 			break;

@@ -126,7 +126,7 @@ static void i3c_target_mctp_client_put(struct mctp_client *client)
 static void
 i3c_target_mctp_rx_packet_enqueue(struct i3c_device *i3cdev, const u8 *data, size_t count)
 {
-	struct i3c_target_mctp *priv = dev_get_drvdata(i3cdev_to_dev(i3cdev));
+	struct i3c_target_mctp *priv = i3cdev_get_drvdata(i3cdev);
 	struct mctp_client *client;
 	struct mctp_packet *packet;
 	size_t len;
@@ -382,7 +382,7 @@ err:
 
 static void i3c_target_mctp_remove(struct i3c_device *i3cdev)
 {
-	struct i3c_target_mctp *priv = dev_get_drvdata(i3cdev_to_dev(i3cdev));
+	struct i3c_target_mctp *priv = i3cdev_get_drvdata(i3cdev);
 
 	device_destroy(i3c_target_mctp_class, priv->dev->devt);
 	cdev_del(&priv->cdev);

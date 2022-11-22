@@ -146,7 +146,7 @@ static struct i3c_mctp_client *i3c_mctp_find_client(struct i3c_mctp *priv,
 
 static struct i3c_mctp_packet *i3c_mctp_read_packet(struct i3c_device *i3c)
 {
-	struct i3c_mctp *priv = dev_get_drvdata(i3cdev_to_dev(i3c));
+	struct i3c_mctp *priv = i3cdev_get_drvdata(i3c);
 	struct i3c_mctp_packet *rx_packet;
 	struct i3c_priv_xfer xfers = {
 		.rnw = true,
@@ -480,7 +480,7 @@ static const struct file_operations i3c_mctp_fops = {
  */
 struct i3c_mctp_client *i3c_mctp_add_peci_client(struct i3c_device *i3c)
 {
-	struct i3c_mctp *priv = dev_get_drvdata(i3cdev_to_dev(i3c));
+	struct i3c_mctp *priv = i3cdev_get_drvdata(i3c);
 	struct i3c_mctp_client *client;
 
 	client = i3c_mctp_client_alloc(priv);
@@ -536,7 +536,7 @@ static struct i3c_mctp *i3c_mctp_alloc(struct i3c_device *i3c)
 
 static void i3c_mctp_ibi_handler(struct i3c_device *dev, const struct i3c_ibi_payload *payload)
 {
-	struct i3c_mctp *priv = dev_get_drvdata(i3cdev_to_dev(dev));
+	struct i3c_mctp *priv = i3cdev_get_drvdata(dev);
 	struct i3c_mctp_packet *rx_packet;
 
 	rx_packet = i3c_mctp_read_packet(dev);
@@ -658,7 +658,7 @@ EXPORT_SYMBOL_GPL(i3c_mctp_get_eid);
  */
 int i3c_mctp_send_packet(struct i3c_device *i3c, struct i3c_mctp_packet *tx_packet)
 {
-	struct i3c_mctp *priv = dev_get_drvdata(i3cdev_to_dev(i3c));
+	struct i3c_mctp *priv = i3cdev_get_drvdata(i3c);
 	u8 *protocol_hdr = (u8 *)tx_packet->data.protocol_hdr;
 	struct i3c_priv_xfer xfers = {
 		.rnw = false,
@@ -717,7 +717,7 @@ EXPORT_SYMBOL_GPL(i3c_mctp_receive_packet);
 
 static void i3c_mctp_i3c_event_cb(struct i3c_device *dev, enum i3c_event event)
 {
-	struct i3c_mctp *priv = dev_get_drvdata(i3cdev_to_dev(dev));
+	struct i3c_mctp *priv = i3cdev_get_drvdata(dev);
 
 	switch (event) {
 	case i3c_event_prepare_for_rescan:
@@ -775,7 +775,7 @@ static int i3c_mctp_probe(struct i3c_device *i3cdev)
 	if (IS_ERR(priv->default_client))
 		goto error;
 
-	dev_set_drvdata(i3cdev_to_dev(i3cdev), priv);
+	i3cdev_set_drvdata(i3cdev, priv);
 
 	priv->i3c_peci = platform_device_register_data(i3cdev_to_dev(i3cdev), "peci-i3c", priv->id,
 						       NULL, 0);
@@ -822,7 +822,7 @@ error_cdev:
 
 static void i3c_mctp_remove(struct i3c_device *i3cdev)
 {
-	struct i3c_mctp *priv = dev_get_drvdata(i3cdev_to_dev(i3cdev));
+	struct i3c_mctp *priv = i3cdev_get_drvdata(i3cdev);
 
 	i3c_mctp_disable_ibi(i3cdev);
 	i3c_mctp_client_free(priv->default_client);

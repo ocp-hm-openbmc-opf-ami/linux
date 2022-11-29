@@ -72,7 +72,8 @@ prepare_tx_packet(struct i3c_mctp_packet *tx_packet,
 	peci_payload[1] = rx_len;
 	memcpy(&peci_payload[2], tx_buf, tx_len);
 
-	tx_packet->size = I3C_MCTP_PACKET_SIZE;
+	tx_packet->size = tx_len + sizeof(struct mctp_protocol_hdr) +
+		sizeof(struct mctp_peci_vdm_hdr) + 2;
 }
 
 static int

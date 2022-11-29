@@ -220,6 +220,10 @@ struct smart_data {
 	 * e.g. registering new PSU while processing interrupt.
 	 */
 	struct mutex mutex;
+	/*
+	 * To synchronize concurrent accesses to devices
+	 */
+	struct mutex device_access_mutex;
 	struct gpio_desc *gpio;
 	struct delayed_work work;
 	struct delayed_work powergood_work;
@@ -967,10 +971,12 @@ static void smart_psu_polling(struct work_struct *work)
 	smart_data->additional_throttling_not_done = false;
 	psu_polls_num.value++;
 	status = INTERRUPT;
+	events.all = PSU_EVENT_NO_EVENT;
+	mutex_unlock(&smart_data->mutex);
 
+	mutex_lock(&smart_data->device_access_mutex);
 	smart_request_max_throttling(&smart_data->peci_list);
 
-	events.all = PSU_EVENT_NO_EVENT;
 	list_for_each_entry(psu, &smart_data->psu_list, node) {
 		if (!is_first_poll)
 			smart_clear_events(psu);
@@ -984,8 +990,7 @@ static void smart_psu_polling(struct work_struct *work)
 	smart_handle_ot_event(&list);
 	smart_log_smbalert(events);
 	smart_schedule_poll_or_remove_throttling(psu_poll_start_timestamp);
-
-	mutex_unlock(&smart_data->mutex);
+	mutex_unlock(&smart_data->device_access_mutex);
 }
 
 static void smart_powergood_polling(struct work_struct *work)
@@ -1002,8 +1007,7 @@ static void smart_powergood_polling(struct work_struct *work)
 
 	INIT_LIST_HEAD(&list);
 
-	mutex_lock(&smart_data->mutex);
-
+	mutex_lock(&smart_data->device_access_mutex);
 	list_for_each_entry(psu, &smart_data->psu_list, node) {
 		i2c = to_i2c_client(psu->dev);
 		powergood = smart_check_powergood(i2c);
@@ -1015,7 +1019,9 @@ static void smart_powergood_polling(struct work_struct *work)
 		if (powergood)
 			psu->unit_off = false;
 	}
+	mutex_unlock(&smart_data->device_access_mutex);
 
+	mutex_lock(&smart_data->mutex);
 	force_update_num = force_smbalert_mask_interval_time.value /
 			smart_powergood_polling_interval_time.value;
 	if (powergood_polls_num.value >= force_update_num) {
@@ -1023,7 +1029,9 @@ static void smart_powergood_polling(struct work_struct *work)
 		need_update = true;
 	}
 	powergood_polls_num.value++;
+	mutex_unlock(&smart_data->mutex);
 
+	mutex_lock(&smart_data->device_access_mutex);
 	if (need_update) {
 		dev_dbg(smart_data->dev, "powergood poll update");
 		smart_update_and_apply_default_smbalert_mask();
@@ -1033,8 +1041,7 @@ static void smart_powergood_polling(struct work_struct *work)
 		queue_delayed_work(smart_data->workqueue, &smart_data->powergood_work,
 				   msecs_to_jiffies(smart_powergood_polling_interval_time.value));
 	}
-
-	mutex_unlock(&smart_data->mutex);
+	mutex_unlock(&smart_data->device_access_mutex);
 }
 
 static irqreturn_t smart_smbalert_handler(int irq, void *private)
@@ -1056,19 +1063,19 @@ int smart_unregister_peci(struct device *dev)
 	struct smart_peci_entry *tmp, *peci;
 
 	dev_dbg(dev, "unregister %s in SmaRT", dev_name(dev->parent));
-	mutex_lock(&smart_data->mutex);
+	mutex_lock(&smart_data->device_access_mutex);
 
 	list_for_each_entry_safe(peci, tmp, &smart_data->peci_list, node) {
 		if (peci->dev == dev) {
 			list_del(&peci->node);
 			kfree(peci);
 			linked_peci_num.value--;
-			mutex_unlock(&smart_data->mutex);
+			mutex_unlock(&smart_data->device_access_mutex);
 			return 0;
 		}
 	}
 
-	mutex_unlock(&smart_data->mutex);
+	mutex_unlock(&smart_data->device_access_mutex);
 
 	return -EINVAL;
 }
@@ -1078,20 +1085,20 @@ int smart_register_peci(struct device *dev, struct peci_throttling_ops *peci_sma
 {
 	struct smart_peci_entry *new, *peci;
 
-	mutex_lock(&smart_data->mutex);
+	mutex_lock(&smart_data->device_access_mutex);
 
 	dev_dbg(dev, "register %s in SmaRT", dev_name(dev->parent));
 	list_for_each_entry(peci, &smart_data->peci_list, node) {
 		if (peci->dev == dev) {
 			dev_dbg(dev, "already registered %s", dev_name(dev->parent));
-			mutex_unlock(&smart_data->mutex);
+			mutex_unlock(&smart_data->device_access_mutex);
 			return -EPERM;
 		}
 	}
 
 	new = kzalloc(sizeof(*new), GFP_KERNEL);
 	if (!new) {
-		mutex_unlock(&smart_data->mutex);
+		mutex_unlock(&smart_data->device_access_mutex);
 		return -ENOMEM;
 	}
 
@@ -1100,7 +1107,7 @@ int smart_register_peci(struct device *dev, struct peci_throttling_ops *peci_sma
 	list_add(&new->node, &smart_data->peci_list);
 	linked_peci_num.value++;
 
-	mutex_unlock(&smart_data->mutex);
+	mutex_unlock(&smart_data->device_access_mutex);
 
 	return 0;
 }
@@ -1111,21 +1118,21 @@ int smart_unregister_psu(struct device *dev)
 	struct smart_psu_entry *tmp, *psu;
 
 	dev_dbg(dev, "unregister in SmaRT");
-	mutex_lock(&smart_data->mutex);
+	mutex_lock(&smart_data->device_access_mutex);
 
 	list_for_each_entry_safe(psu, tmp, &smart_data->psu_list, node) {
 		if (psu->dev == dev) {
 			list_del(&psu->node);
 			kfree(psu);
 			linked_psu_num.value--;
-			mutex_unlock(&smart_data->mutex);
+			mutex_unlock(&smart_data->device_access_mutex);
 			return 0;
 		}
 	}
 
 	smart_update_and_apply_default_smbalert_mask();
 
-	mutex_unlock(&smart_data->mutex);
+	mutex_unlock(&smart_data->device_access_mutex);
 
 	return -EINVAL;
 }
@@ -1138,12 +1145,12 @@ int smart_register_psu(struct device *dev)
 	union smart_psu_event event;
 
 	dev_dbg(dev, "register in SmaRT");
-	mutex_lock(&smart_data->mutex);
+	mutex_lock(&smart_data->device_access_mutex);
 
 	list_for_each_entry(psu, &smart_data->psu_list, node) {
 		if (psu->dev == dev) {
 			dev_dbg(dev, "already registered %s", dev_name(dev->parent));
-			mutex_unlock(&smart_data->mutex);
+			mutex_unlock(&smart_data->device_access_mutex);
 			return -EPERM;
 		}
 	}
@@ -1151,13 +1158,13 @@ int smart_register_psu(struct device *dev)
 	if (!smart_is_command_supported(i2c, PMBUS_PAGE_PLUS_WRITE) ||
 	    !smart_is_command_supported(i2c, PMBUS_PAGE_PLUS_READ)) {
 		dev_dbg(dev, "does not support PAGE_PLUS commands");
-		mutex_unlock(&smart_data->mutex);
+		mutex_unlock(&smart_data->device_access_mutex);
 		return 0;
 	}
 
 	new = kzalloc(sizeof(*new), GFP_KERNEL);
 	if (!new) {
-		mutex_unlock(&smart_data->mutex);
+		mutex_unlock(&smart_data->device_access_mutex);
 		return -ENOMEM;
 	}
 	new->dev = dev;
@@ -1173,7 +1180,7 @@ int smart_register_psu(struct device *dev)
 
 	smart_update_and_apply_default_smbalert_mask();
 
-	mutex_unlock(&smart_data->mutex);
+	mutex_unlock(&smart_data->device_access_mutex);
 
 	return 0;
 }
@@ -1259,9 +1266,9 @@ static ssize_t smart_write_redundancy(struct kobject *kobj, struct kobj_attribut
 	if (ret < 0)
 		return ret;
 
-	mutex_lock(&smart_data->mutex);
+	mutex_lock(&smart_data->device_access_mutex);
 	smart_update_and_apply_default_smbalert_mask();
-	mutex_unlock(&smart_data->mutex);
+	mutex_unlock(&smart_data->device_access_mutex);
 
 	return ret;
 }
@@ -1334,7 +1341,7 @@ static ssize_t smart_enable(struct kobject *kobj, struct kobj_attribute *attr, c
 	if (ret < 0)
 		return ret;
 
-	mutex_lock(&smart_data->mutex);
+	mutex_lock(&smart_data->device_access_mutex);
 	if (value) {
 		smart_enable_smbalert_generation();
 		list_for_each_entry(psu, &smart_data->psu_list, node) {
@@ -1345,13 +1352,13 @@ static ssize_t smart_enable(struct kobject *kobj, struct kobj_attribute *attr, c
 	} else {
 		smart_mask_all_events();
 	}
-	mutex_unlock(&smart_data->mutex);
+	mutex_unlock(&smart_data->device_access_mutex);
 
 	if (is_error) {
 		dev_dbg(smart_data->dev, "detected PSU(s) with non-zero status, kicking workqueue");
-		mutex_lock(&smart_data->mutex);
+		mutex_lock(&smart_data->device_access_mutex);
 		wq_calls_on_enable_num.value++;
-		mutex_unlock(&smart_data->mutex);
+		mutex_unlock(&smart_data->device_access_mutex);
 		queue_delayed_work(smart_data->workqueue, &smart_data->work, 0);
 	}
 
@@ -1370,6 +1377,7 @@ static int smart_probe(struct platform_device *pdev)
 	INIT_LIST_HEAD(&smart_data->psu_list);
 	INIT_LIST_HEAD(&smart_data->peci_list);
 	mutex_init(&smart_data->mutex);
+	mutex_init(&smart_data->device_access_mutex);
 
 	INIT_DELAYED_WORK(&smart_data->work, smart_psu_polling);
 	INIT_DELAYED_WORK(&smart_data->powergood_work, smart_powergood_polling);

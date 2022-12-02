@@ -39,12 +39,6 @@ struct i3c_mctp {
 	struct delayed_work polling_work;
 	struct platform_device *i3c_peci;
 	int id;
-	/*
-	 * Restrict an access to the /dev descriptor to one
-	 * user at a time.
-	 */
-	spinlock_t device_file_lock;
-	int device_open;
 	/* Currently only one userspace client is supported */
 	struct i3c_mctp_client *default_client;
 	struct i3c_mctp_client *peci_client;
@@ -56,10 +50,12 @@ struct i3c_mctp {
 	 * endpoints_lock protects list of endpoints
 	 */
 	struct mutex endpoints_lock;
+	spinlock_t clients_lock; /* to protect PECI and default client accesses */
 	u8 eid;
 };
 
 struct i3c_mctp_client {
+	struct kref ref;
 	struct i3c_mctp *priv;
 	struct ptr_ring rx_queue;
 	wait_queue_head_t wait_queue;
@@ -103,11 +99,23 @@ void i3c_mctp_packet_free(void *packet)
 }
 EXPORT_SYMBOL_GPL(i3c_mctp_packet_free);
 
-static void i3c_mctp_client_free(struct i3c_mctp_client *client)
+static void i3c_mctp_client_free(struct kref *ref)
 {
+	struct i3c_mctp_client *client = container_of(ref, typeof(*client), ref);
+
 	ptr_ring_cleanup(&client->rx_queue, &i3c_mctp_packet_free);
 
 	kfree(client);
+}
+
+static void i3c_mctp_client_get(struct i3c_mctp_client *client)
+{
+	kref_get(&client->ref);
+}
+
+static void i3c_mctp_client_put(struct i3c_mctp_client *client)
+{
+	kref_put(&client->ref, &i3c_mctp_client_free);
 }
 
 static struct i3c_mctp_client *i3c_mctp_client_alloc(struct i3c_mctp *priv)
@@ -117,15 +125,39 @@ static struct i3c_mctp_client *i3c_mctp_client_alloc(struct i3c_mctp *priv)
 
 	client = kzalloc(sizeof(*client), GFP_KERNEL);
 	if (!client)
-		goto out;
+		return ERR_PTR(-ENOMEM);
 
+	kref_init(&client->ref);
 	client->priv = priv;
 	ret = ptr_ring_init(&client->rx_queue, RX_RING_COUNT, GFP_KERNEL);
 	if (ret)
-		return ERR_PTR(ret);
+		goto out;
+
 	init_waitqueue_head(&client->wait_queue);
-out:
+
 	return client;
+out:
+	i3c_mctp_client_put(client);
+	return ERR_PTR(ret);
+}
+
+static int i3c_mctp_register_default_client(struct i3c_mctp *priv, struct file *file)
+{
+	struct i3c_mctp_client *client;
+
+	if (priv->default_client)
+		return -EBUSY;
+
+	client = i3c_mctp_client_alloc(priv);
+	if (IS_ERR(client))
+		return PTR_ERR(client);
+
+	file->private_data = client;
+	spin_lock(&priv->clients_lock);
+	priv->default_client = client;
+	spin_unlock(&priv->clients_lock);
+
+	return 0;
 }
 
 static struct i3c_mctp_client *i3c_mctp_find_client(struct i3c_mctp *priv,
@@ -181,14 +213,25 @@ static struct i3c_mctp_packet *i3c_mctp_read_packet(struct i3c_device *i3c)
 
 static void i3c_mctp_dispatch_packet(struct i3c_mctp *priv, struct i3c_mctp_packet *packet)
 {
-	struct i3c_mctp_client *client = i3c_mctp_find_client(priv, packet);
+	struct i3c_mctp_client *client;
 	int ret;
+
+	spin_lock(&priv->clients_lock);
+	client = i3c_mctp_find_client(priv, packet);
+	if (client)
+		i3c_mctp_client_get(client);
+	spin_unlock(&priv->clients_lock);
+
+	if (!client)
+		return;
 
 	ret = ptr_ring_produce(&client->rx_queue, packet);
 	if (ret)
 		i3c_mctp_packet_free(packet);
 	else
 		wake_up_all(&client->wait_queue);
+
+	i3c_mctp_client_put(client);
 }
 
 static void i3c_mctp_polling_work(struct work_struct *work)
@@ -219,10 +262,12 @@ out:
 static ssize_t i3c_mctp_write(struct file *file, const char __user *buf, size_t count,
 			      loff_t *f_pos)
 {
-	struct i3c_mctp *priv = file->private_data;
-	struct i3c_device *i3c = priv->i3c;
+	struct i3c_mctp_client *client = file->private_data;
 	struct i3c_mctp_packet *tx_packet;
 	int ret;
+
+	if (!client)
+		return -EBADF;
 
 	if (count < I3C_MCTP_MIN_PACKET_SIZE)
 		return -EINVAL;
@@ -235,14 +280,14 @@ static ssize_t i3c_mctp_write(struct file *file, const char __user *buf, size_t 
 		return -ENOMEM;
 
 	if (copy_from_user(&tx_packet->data, buf, count)) {
-		dev_err(priv->dev, "copy from user failed\n");
+		dev_err(client->priv->dev, "copy from user failed\n");
 		ret = -EFAULT;
 		goto out_packet;
 	}
 
 	tx_packet->size = count;
 
-	ret = i3c_mctp_send_packet(i3c, tx_packet);
+	ret = i3c_mctp_send_packet(client->priv->i3c, tx_packet);
 	if (ret)
 		goto out_packet;
 
@@ -255,9 +300,11 @@ out_packet:
 
 static ssize_t i3c_mctp_read(struct file *file, char __user *buf, size_t count, loff_t *f_pos)
 {
-	struct i3c_mctp *priv = file->private_data;
-	struct i3c_mctp_client *client = priv->default_client;
+	struct i3c_mctp_client *client = file->private_data;
 	struct i3c_mctp_packet *rx_packet;
+
+	if (!client)
+		return -EBADF;
 
 	if (count < I3C_MCTP_MIN_PACKET_SIZE)
 		return -EINVAL;
@@ -280,26 +327,18 @@ static ssize_t i3c_mctp_read(struct file *file, char __user *buf, size_t count, 
 	return count;
 }
 
-static int i3c_mctp_open(struct inode *inode, struct file *file)
-{
-	struct i3c_mctp *priv = container_of(inode->i_cdev, struct i3c_mctp, cdev);
-
-	spin_lock(&priv->device_file_lock);
-	priv->device_open++;
-	spin_unlock(&priv->device_file_lock);
-
-	file->private_data = priv;
-
-	return 0;
-}
-
 static int i3c_mctp_release(struct inode *inode, struct file *file)
 {
-	struct i3c_mctp *priv = file->private_data;
+	struct i3c_mctp_client *client = file->private_data;
 
-	spin_lock(&priv->device_file_lock);
-	priv->device_open--;
-	spin_unlock(&priv->device_file_lock);
+	if (!client)
+		return 0;
+
+	spin_lock(&client->priv->clients_lock);
+	client->priv->default_client = NULL;
+	spin_unlock(&client->priv->clients_lock);
+
+	i3c_mctp_client_put(client);
 
 	file->private_data = NULL;
 
@@ -308,12 +347,15 @@ static int i3c_mctp_release(struct inode *inode, struct file *file)
 
 static __poll_t i3c_mctp_poll(struct file *file, struct poll_table_struct *pt)
 {
-	struct i3c_mctp *priv = file->private_data;
+	struct i3c_mctp_client *client = file->private_data;
 	__poll_t ret = 0;
 
-	poll_wait(file, &priv->default_client->wait_queue, pt);
+	if (!client)
+		return ret;
 
-	if (__ptr_ring_peek(&priv->default_client->rx_queue))
+	poll_wait(file, &client->wait_queue, pt);
+
+	if (__ptr_ring_peek(&client->rx_queue))
 		ret |= EPOLLIN;
 
 	return ret;
@@ -448,7 +490,7 @@ static int i3c_mctp_set_own_eid(struct i3c_mctp *priv, void __user *userbuf)
 static long
 i3c_mctp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
-	struct i3c_mctp *priv = file->private_data;
+	struct i3c_mctp *priv = container_of(file_inode(file)->i_cdev, struct i3c_mctp, cdev);
 	void __user *userbuf = (void __user *)arg;
 	int ret;
 
@@ -458,6 +500,9 @@ i3c_mctp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		break;
 	case I3C_MCTP_IOCTL_SET_OWN_EID:
 		ret = i3c_mctp_set_own_eid(priv, userbuf);
+		break;
+	case I3C_MCTP_IOCTL_REGISTER_DEFAULT_CLIENT:
+		ret = i3c_mctp_register_default_client(priv, file);
 		break;
 	default:
 		break;
@@ -470,7 +515,6 @@ static const struct file_operations i3c_mctp_fops = {
 	.read = i3c_mctp_read,
 	.write = i3c_mctp_write,
 	.poll = i3c_mctp_poll,
-	.open = i3c_mctp_open,
 	.release = i3c_mctp_release,
 	.unlocked_ioctl = i3c_mctp_ioctl,
 };
@@ -490,7 +534,9 @@ struct i3c_mctp_client *i3c_mctp_add_peci_client(struct i3c_device *i3c)
 	if (IS_ERR(client))
 		return client;
 
+	spin_lock(&priv->clients_lock);
 	priv->peci_client = client;
+	spin_unlock(&priv->clients_lock);
 
 	return priv->peci_client;
 }
@@ -504,9 +550,11 @@ void i3c_mctp_remove_peci_client(struct i3c_mctp_client *client)
 {
 	struct i3c_mctp *priv = client->priv;
 
-	i3c_mctp_client_free(priv->peci_client);
-
+	spin_lock(&priv->clients_lock);
 	priv->peci_client = NULL;
+	spin_unlock(&priv->clients_lock);
+
+	i3c_mctp_client_put(client);
 }
 EXPORT_SYMBOL_GPL(i3c_mctp_remove_peci_client);
 
@@ -532,7 +580,7 @@ static struct i3c_mctp *i3c_mctp_alloc(struct i3c_device *i3c)
 	INIT_LIST_HEAD(&priv->endpoints);
 	mutex_init(&priv->endpoints_lock);
 
-	spin_lock_init(&priv->device_file_lock);
+	spin_lock_init(&priv->clients_lock);
 
 	return priv;
 }
@@ -679,8 +727,10 @@ int i3c_mctp_send_packet(struct i3c_device *i3c, struct i3c_mctp_packet *tx_pack
 		return -EINVAL;
 	}
 
+	spin_lock(&priv->clients_lock);
 	if (i3c_mctp_find_client(priv, tx_packet) == priv->peci_client)
 		protocol_hdr[MCTP_HDR_SRC_EID_OFFSET] = priv->eid;
+	spin_unlock(&priv->clients_lock);
 
 	return i3c_device_do_priv_xfers(i3c, &xfers, 1);
 }
@@ -774,10 +824,6 @@ static int i3c_mctp_probe(struct i3c_device *i3cdev)
 	if (ret)
 		goto error;
 
-	priv->default_client = i3c_mctp_client_alloc(priv);
-	if (IS_ERR(priv->default_client))
-		goto error;
-
 	i3cdev_set_drvdata(i3cdev, priv);
 
 	priv->i3c_peci = platform_device_register_data(i3cdev_to_dev(i3cdev), "peci-i3c", priv->id,
@@ -828,8 +874,6 @@ static void i3c_mctp_remove(struct i3c_device *i3cdev)
 	struct i3c_mctp *priv = i3cdev_get_drvdata(i3cdev);
 
 	i3c_mctp_disable_ibi(i3cdev);
-	i3c_mctp_client_free(priv->default_client);
-	priv->default_client = NULL;
 	platform_device_unregister(priv->i3c_peci);
 
 	device_destroy(i3c_mctp_class, MKDEV(MAJOR(i3c_mctp_devt), priv->id));

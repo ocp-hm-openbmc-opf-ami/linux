@@ -17,6 +17,8 @@
  * @I3C_MCTP_SET_EID_INFO: write or overwrite already existing list of
  * CPU EID and Domain ID mappings
  * @I3C_MCTP_SET_OWN_EID: write/overwrite own EID information
+ * @I3C_MCTP_IOCTL_REGISTER_DEFAULT_CLIENT: register the client to
+ * process MCTP packets over I3C
  */
 
 struct i3c_mctp_eid_info {
@@ -40,5 +42,7 @@ struct i3c_mctp_set_own_eid {
 	_IOW(I3C_MCTP_IOCTL_BASE, 0x41, struct i3c_mctp_set_eid_info)
 #define I3C_MCTP_IOCTL_SET_OWN_EID \
 	_IOW(I3C_MCTP_IOCTL_BASE, 0x42, struct i3c_mctp_set_own_eid)
+#define I3C_MCTP_IOCTL_REGISTER_DEFAULT_CLIENT \
+	_IO(I3C_MCTP_IOCTL_BASE, 0x43)
 
 #endif /* _UAPI_LINUX_I3C_MCTP_H */

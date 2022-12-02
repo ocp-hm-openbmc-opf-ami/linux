@@ -265,7 +265,6 @@ static int smart_read_byte(const struct i2c_client *client, u8 command)
 static int smart_read_word(const struct i2c_client *client, u8 command)
 {
 	union i2c_smbus_data data;
-	u16 result;
 	int ret;
 
 	data.block[0] = 2;

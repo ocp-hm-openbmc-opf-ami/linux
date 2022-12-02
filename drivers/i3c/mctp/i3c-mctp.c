@@ -269,12 +269,15 @@ static ssize_t i3c_mctp_read(struct file *file, char __user *buf, size_t count, 
 	if (!rx_packet)
 		return -EAGAIN;
 
-	if (copy_to_user(buf, &rx_packet->data, rx_packet->size))
-		return -EFAULT;
+	if (count > rx_packet->size)
+		count = rx_packet->size;
+
+	if (copy_to_user(buf, &rx_packet->data, count))
+		count = -EFAULT;
 
 	i3c_mctp_packet_free(rx_packet);
 
-	return rx_packet->size;
+	return count;
 }
 
 static int i3c_mctp_open(struct inode *inode, struct file *file)

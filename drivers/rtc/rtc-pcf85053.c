@@ -62,7 +62,6 @@ static int pcf85053_rtc_probe(struct i2c_client *client,
 			      const struct i2c_device_id *id)
 {
 	struct pcf85053 *pcf85053;
-	int rc;
 
 	pcf85053 = devm_kzalloc(&client->dev, sizeof(*pcf85053), GFP_KERNEL);
 	if (!pcf85053)

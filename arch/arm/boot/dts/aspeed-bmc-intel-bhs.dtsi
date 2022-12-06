@@ -168,6 +168,10 @@
 &syscon {
 	status = "okay";
 
+	mac1-clk-delay = <0x1f 0x10
+			  0x10 0x10
+			  0x10 0x10>;
+
 	misc_control {
 		compatible = "aspeed,bmc-misc";
 		uart_port_debug {

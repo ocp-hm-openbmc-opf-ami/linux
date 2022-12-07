@@ -72,6 +72,45 @@ static void __iomem *scu_g6_base;
 /* AST2600 revision: A0, A1, A2, etc */
 static u8 soc_rev;
 
+struct mac_delay_config {
+	u32 tx_delay_1000;
+	u32 rx_delay_1000;
+	u32 tx_delay_100;
+	u32 rx_delay_100;
+	u32 tx_delay_10;
+	u32 rx_delay_10;
+};
+
+union mac_delay_1g {
+	u32 w;
+	struct {
+		unsigned int tx_delay_1		: 6;	/* bit[5:0] */
+		unsigned int tx_delay_2		: 6;	/* bit[11:6] */
+		unsigned int rx_delay_1		: 6;	/* bit[17:12] */
+		unsigned int rx_delay_2		: 6;	/* bit[23:18] */
+		unsigned int rx_clk_inv_1	: 1;	/* bit[24] */
+		unsigned int rx_clk_inv_2	: 1;	/* bit[25] */
+		unsigned int rmii_tx_data_at_falling_1 : 1; /* bit[26] */
+		unsigned int rmii_tx_data_at_falling_2 : 1; /* bit[27] */
+		unsigned int rgmiick_pad_dir	: 1;	/* bit[28] */
+		unsigned int rmii_50m_oe_1	: 1;	/* bit[29] */
+		unsigned int rmii_50m_oe_2	: 1;	/* bit[30] */
+		unsigned int rgmii_125m_o_sel	: 1;	/* bit[31] */
+	} b;
+};
+
+union mac_delay_100_10 {
+	u32 w;
+	struct {
+		unsigned int tx_delay_1		: 6;	/* bit[5:0] */
+		unsigned int tx_delay_2		: 6;	/* bit[11:6] */
+		unsigned int rx_delay_1		: 6;	/* bit[17:12] */
+		unsigned int rx_delay_2		: 6;	/* bit[23:18] */
+		unsigned int rx_clk_inv_1	: 1;	/* bit[24] */
+		unsigned int rx_clk_inv_2	: 1;	/* bit[25] */
+		unsigned int reserved_0		: 6;	/* bit[31:26] */
+	} b;
+};
 /*
  * Clocks marked with CLK_IS_CRITICAL:
  *
@@ -818,6 +857,9 @@ static void __init aspeed_g6_cc(struct regmap *map)
 static void __init aspeed_g6_cc_init(struct device_node *np)
 {
 	struct regmap *map;
+	struct mac_delay_config mac_cfg;
+	union mac_delay_1g reg_1g;
+	union mac_delay_100_10 reg_100, reg_10;
 	int ret;
 	int i;
 
@@ -881,6 +923,56 @@ static void __init aspeed_g6_cc_init(struct device_node *np)
 
 	/* MAC3/4 default pad driving strength */
 	regmap_write(map, ASPEED_G6_MAC34_DRIVING_CTRL, 0x0000000a);
+
+	regmap_read(map, ASPEED_G6_MAC12_CLK_CTRL0, &reg_1g.w);
+	regmap_read(map, ASPEED_G6_MAC12_CLK_CTRL1, &reg_100.w);
+	regmap_read(map, ASPEED_G6_MAC12_CLK_CTRL2, &reg_10.w);
+	ret = of_property_read_u32_array(np, "mac0-clk-delay", (u32 *)&mac_cfg, 6);
+	if (!ret) {
+		reg_1g.b.tx_delay_1 = mac_cfg.tx_delay_1000;
+		reg_1g.b.rx_delay_1 = mac_cfg.rx_delay_1000;
+		reg_100.b.tx_delay_1 = mac_cfg.tx_delay_100;
+		reg_100.b.rx_delay_1 = mac_cfg.rx_delay_100;
+		reg_10.b.tx_delay_1 = mac_cfg.tx_delay_10;
+		reg_10.b.rx_delay_1 = mac_cfg.rx_delay_10;
+	}
+	ret = of_property_read_u32_array(np, "mac1-clk-delay", (u32 *)&mac_cfg, 6);
+	if (!ret) {
+		reg_1g.b.tx_delay_2 = mac_cfg.tx_delay_1000;
+		reg_1g.b.rx_delay_2 = mac_cfg.rx_delay_1000;
+		reg_100.b.tx_delay_2 = mac_cfg.tx_delay_100;
+		reg_100.b.rx_delay_2 = mac_cfg.rx_delay_100;
+		reg_10.b.tx_delay_2 = mac_cfg.tx_delay_10;
+		reg_10.b.rx_delay_2 = mac_cfg.rx_delay_10;
+	}
+	regmap_write(map, ASPEED_G6_MAC12_CLK_CTRL0, reg_1g.w);
+	regmap_write(map, ASPEED_G6_MAC12_CLK_CTRL1, reg_100.w);
+	regmap_write(map, ASPEED_G6_MAC12_CLK_CTRL2, reg_10.w);
+
+	regmap_read(map, ASPEED_G6_MAC34_CLK_CTRL0, &reg_1g.w);
+	regmap_read(map, ASPEED_G6_MAC34_CLK_CTRL1, &reg_100.w);
+	regmap_read(map, ASPEED_G6_MAC34_CLK_CTRL2, &reg_10.w);
+	ret = of_property_read_u32_array(np, "mac2-clk-delay", (u32 *)&mac_cfg, 6);
+	if (!ret) {
+		reg_1g.b.tx_delay_1 = mac_cfg.tx_delay_1000;
+		reg_1g.b.rx_delay_1 = mac_cfg.rx_delay_1000;
+		reg_100.b.tx_delay_1 = mac_cfg.tx_delay_100;
+		reg_100.b.rx_delay_1 = mac_cfg.rx_delay_100;
+		reg_10.b.tx_delay_1 = mac_cfg.tx_delay_10;
+		reg_10.b.rx_delay_1 = mac_cfg.rx_delay_10;
+	}
+	ret = of_property_read_u32_array(np, "mac3-clk-delay", (u32 *)&mac_cfg, 6);
+	if (!ret) {
+		reg_1g.b.tx_delay_2 = mac_cfg.tx_delay_1000;
+		reg_1g.b.rx_delay_2 = mac_cfg.rx_delay_1000;
+		reg_100.b.tx_delay_2 = mac_cfg.tx_delay_100;
+		reg_100.b.rx_delay_2 = mac_cfg.rx_delay_100;
+		reg_10.b.tx_delay_2 = mac_cfg.tx_delay_10;
+		reg_10.b.rx_delay_2 = mac_cfg.rx_delay_10;
+	}
+	regmap_write(map, ASPEED_G6_MAC34_CLK_CTRL0, reg_1g.w);
+	regmap_write(map, ASPEED_G6_MAC34_CLK_CTRL1, reg_100.w);
+	regmap_write(map, ASPEED_G6_MAC34_CLK_CTRL2, reg_10.w);
 
 	aspeed_g6_cc(map);
 	aspeed_g6_clk_data->num = ASPEED_G6_NUM_CLKS;

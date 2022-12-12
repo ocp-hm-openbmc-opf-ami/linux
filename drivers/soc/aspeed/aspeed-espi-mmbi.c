@@ -543,6 +543,14 @@ static ssize_t mmbi_read(struct file *filp, char *buff, size_t count,
 		"%s: Length: 0x%0x, Protocol Type: %d, Unread data: %d\n",
 		__func__, req_data_len, type, unread_data_len);
 
+	if (req_data_len > count) {
+		dev_err(priv->dev, "Data exceeding user space limit: %d\n", count);
+		ret = -EFAULT;
+		/* Discard data and advance the hrop */
+		update_host_rop(channel, 0, req_data_len + sizeof(struct mmbi_header));
+		goto err_out;
+	}
+
 	/* Check is data belongs to this device, if not wake_up corresponding device. */
 	if (type != protocol->type) {
 		ret = -EFAULT;

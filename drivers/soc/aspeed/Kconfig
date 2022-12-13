@@ -136,6 +136,15 @@ config ASPEED_ESPI_MMBI
 	  between Host/BIOS to BMC. This also creates protocol specific
 	  device nodes and IOCTLs for interfacing with userspace applications.
 
+config ASPEED_SPILOCK
+	tristate "Aspeed SPI Lock Driver"
+	depends on MACH_ASPEED_G6
+	help
+	  Enable support for SPI region locking/unlocking.
+	  This adds capability to lock/unlock SPI regions via Sysfs.
+	  This will protect specific SPI regions from getting updated
+	  accidentally or by intruder.
+
 endmenu
 
 endif

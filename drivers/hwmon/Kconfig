@@ -411,6 +411,16 @@ config SENSORS_ASPEED
 	  This driver can also be built as a module. If so, the module
 	  will be called aspeed_pwm_tacho.
 
+config SENSORS_ASPEED_CHASSIS
+	tristate "ASPEED CHASSIS driver"
+	depends on ARCH_ASPEED || COMPILE_TEST
+	help
+	  This driver provides support for Aspeed ast2600 chassis intruded
+	  detect support.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called aspeed-chassis.
+
 config SENSORS_ASPEED_G6
 	tristate "ASPEED AST2600 PWM and Fan tach driver"
 	depends on THERMAL || THERMAL=n

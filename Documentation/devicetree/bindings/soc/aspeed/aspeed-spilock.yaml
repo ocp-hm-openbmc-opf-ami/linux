@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: "http://devicetree.org/schemas/soc/aspeed/aspeed-spilock.yaml#"
+$schema: "http://devicetree.org/meta-schemas/core.yaml#"
+
+title: Aspeed AST26xx SPILOCK Controller
+
+maintainers:
+ - Meghan Saitwal <meghan.saitwal@intel.com>
+
+description: |
+  This binding describes the SPILOCK controller in the AST26xx SOCs.
+  The SPILOCK Controller allows the locking or unlocking of specific
+  SPI region via Sysfs.
+
+properties:
+  compatible:
+    enum:
+      - aspeed,ast2600-spilock
+
+  reg:
+    maxItems: 1
+    description: contains the FMC start register and size
+
+required:
+  - compatible
+  - reg
+
+additionalProperties: false
+
+examples:
+  - |
+    spilock: spilock@1e620000 {
+        compatible = "aspeed,ast2600-spilock";
+        reg = <0x1e620000 0x180>;
+    };

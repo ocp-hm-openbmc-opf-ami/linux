@@ -485,19 +485,24 @@
 			};
 
 			sram: sram@1e6ef000 {
-				compatible = "mmio-sram";
+				compatible = "mmio-sram", "simple-mfd", "syscon";
 				reg = <0x1e6ef000 0x1000>;
 				#address-cells = <1>;
 				#size-cells = <1>;
 				ranges = <0 0x1e6ef000 0x1000>;
 
-				sram-dev@0 {
+				sram1: sram-dev@0 {
 					reg = <0x0 0x4>;
 					export;
 				};
-				sram-dev@100 {
+				sram2: sram-dev@100 {
 					reg = <0x100 0x80>;
 					export;
+				};
+				chassis: chassis@10 {
+					compatible = "aspeed,ast2600-chassis";
+					reg = <0x10 0x4>;
+					status = "disabled";
 				};
 			};
 

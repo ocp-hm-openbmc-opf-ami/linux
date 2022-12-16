@@ -610,3 +610,7 @@
 &wdt2 {
 	status = "okay";
 };
+
+&chassis {
+	status = "okay";
+};

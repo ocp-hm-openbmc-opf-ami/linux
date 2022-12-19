@@ -37,6 +37,7 @@
 #define DEVICE_ADDR			0x4
 #define DEV_ADDR_DYNAMIC_ADDR_VALID	BIT(31)
 #define DEV_ADDR_DYNAMIC(x)		(((x) << 16) & GENMASK(22, 16))
+#define DEV_ADDR_DYNAMIC_GET(x)		(((x) & GENMASK(22, 16)) >> 16)
 
 #define HW_CAPABILITY			0x8
 #define COMMAND_QUEUE_PORT		0xc
@@ -1709,6 +1710,17 @@ static int dw_i3c_target_put_read_data(struct i3c_dev_desc *dev, struct i3c_priv
 	return 0;
 }
 
+static u8 dw_i3c_target_get_dyn_addr(struct i3c_master_controller *m)
+{
+	struct dw_i3c_master *master = to_dw_i3c_master(m);
+	u32 reg;
+
+	reg = readl(master->regs + DEVICE_ADDR);
+	if (reg & DEV_ADDR_DYNAMIC_ADDR_VALID)
+		return DEV_ADDR_DYNAMIC_GET(reg);
+	return 0;
+}
+
 static int dw_i3c_master_reattach_i3c_dev(struct i3c_dev_desc *dev,
 					  u8 old_dyn_addr)
 {
@@ -2329,6 +2341,7 @@ static const struct i3c_target_ops dw_mipi_i3c_target_ops = {
 	.priv_xfers = dw_i3c_target_priv_xfers,
 	.generate_ibi = dw_i3c_target_generate_ibi,
 	.put_read_data = dw_i3c_target_put_read_data,
+	.get_dyn_addr = dw_i3c_target_get_dyn_addr,
 };
 
 static const struct i3c_master_controller_ops dw_mipi_i3c_ops = {

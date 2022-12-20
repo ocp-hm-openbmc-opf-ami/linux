@@ -23,6 +23,11 @@
 /* CE Control Register */
 #define CE_CTRL_REG			0x4
 
+/* Command Control Register */
+#define CMD_CTRL_REG			0xc
+#define CMD_CTRL_ADDR_MASK		GENMASK(7, 4)
+#define CMD_CTRL_DATA_MASK		GENMASK(3, 0)
+
 /* CEx Control Register */
 #define CE0_CTRL_REG			0x10
 #define   CTRL_IO_MODE_MASK		GENMASK(30, 28)
@@ -43,6 +48,7 @@
 #define   CTRL_IO_MODE_USER		0x3
 
 #define   CTRL_IO_CMD_MASK		0xf0ff40c3
+#define   CTRL_IO_CMD_MASK_CMDMODE	0xf0ff40c7
 
 /* CEx Address Decoding Range Register */
 #define CE0_SEGMENT_ADDR_REG		0x30
@@ -101,6 +107,7 @@ struct aspeed_spi {
 	u32			 clk_freq;
 
 	struct aspeed_spi_chip	 chips[ASPEED_SPI_MAX_NUM_CS];
+	u8			*op_buf;
 };
 
 static u32 aspeed_spi_get_io_mode(const struct spi_mem_op *op)
@@ -372,6 +379,94 @@ static int aspeed_spi_exec_op(struct spi_mem *mem, const struct spi_mem_op *op)
 	return ret;
 }
 
+static int aspeed_spi_exec_op_cmd_mode(struct spi_mem *mem, const struct spi_mem_op *op)
+{
+	struct aspeed_spi *aspi = spi_controller_get_devdata(mem->spi->master);
+	struct aspeed_spi_chip *chip = &aspi->chips[mem->spi->chip_select];
+	void __iomem *op_addr = chip->ahb_base;
+	u32 addr_mode, addr_mode_backup;
+	u32 addr_data_mask = 0;
+	const void *data_buf;
+	unsigned long flags;
+	u32 dummy_data = 0;
+	u32 data_byte;
+	u32 ctrl_val;
+
+	dev_dbg(aspi->dev, "cmd:%x(%d),addr:%llx(%d),dummy:%d(%d),data_len:%x(%d)\n",
+		op->cmd.opcode, op->cmd.buswidth, op->addr.val,
+		op->addr.buswidth, op->dummy.nbytes, op->dummy.buswidth,
+		op->data.nbytes, op->data.buswidth);
+
+	addr_mode = readl(aspi->regs + CE_CTRL_REG);
+	addr_mode_backup = addr_mode;
+	ctrl_val = chip->ctl_val[ASPEED_SPI_BASE];
+	ctrl_val &= ~CTRL_IO_CMD_MASK_CMDMODE;
+	ctrl_val |= op->cmd.opcode << CTRL_COMMAND_SHIFT;
+	/* configure operation address, address length and address mask */
+	if (op->addr.nbytes) {
+		if (op->addr.nbytes == 4)
+			addr_mode |= (0x11 << chip->cs);
+		else
+			addr_mode &= ~(0x11 << chip->cs);
+		op_addr += op->addr.val;
+	} else {
+		addr_data_mask |= CMD_CTRL_ADDR_MASK;
+	}
+	if (op->dummy.nbytes)
+		ctrl_val |= CTRL_IO_DUMMY_SET(op->dummy.nbytes / op->dummy.buswidth);
+
+	/* configure data io mode and data mask */
+	if (op->data.nbytes) {
+		data_byte = op->data.nbytes;
+		if (op->data.dir == SPI_MEM_DATA_OUT) {
+			/* Ensuring data_byte multiple of 4 */
+			if (data_byte & 0x3) {
+				memset(aspi->op_buf, 0xff, round_up(data_byte, 4));
+				memcpy(aspi->op_buf, op->data.buf.out, data_byte);
+				data_buf = aspi->op_buf;
+				data_byte = round_up(data_byte, 4);
+			} else {
+				data_buf = op->data.buf.out;
+			}
+		} else {
+			data_buf = op->data.buf.in;
+		}
+		if (op->data.buswidth)
+			ctrl_val |= aspeed_spi_get_io_mode(op);
+	} else {
+		addr_data_mask |= CMD_CTRL_DATA_MASK;
+		data_byte = 1;
+		data_buf = &dummy_data;
+	}
+
+	if (op->data.dir == SPI_MEM_DATA_OUT)
+		ctrl_val |= CTRL_IO_MODE_WRITE;
+	else
+		ctrl_val |= CTRL_IO_MODE_READ;
+
+	writel(ctrl_val, aspi->regs + CE0_CTRL_REG + chip->cs * 4);
+	writel(addr_mode, aspi->regs + CE_CTRL_REG);
+	writel(addr_data_mask, aspi->regs + CMD_CTRL_REG);
+	dev_dbg(aspi->dev, "ctrl: 0x%08x, addr_mode: 0x%x, mask: 0x%x, addr:0x%08x\n",
+		ctrl_val, addr_mode, addr_data_mask, (uint32_t)op_addr);
+	/* trigger spi transmission or reception sequence */
+	local_irq_save(flags);
+	preempt_disable();
+
+	if (op->data.dir == SPI_MEM_DATA_OUT)
+		memcpy_toio(op_addr, data_buf, data_byte);
+	else
+		memcpy_fromio((void *)data_buf, op_addr, data_byte);
+
+	local_irq_restore(flags);
+	preempt_enable();
+	/* restore controller setting */
+	writel(chip->ctl_val[ASPEED_SPI_READ], aspi->regs + CE0_CTRL_REG + chip->cs * 4);
+	writel(addr_mode_backup, aspi->regs + CE_CTRL_REG);
+	writel(0x0, aspi->regs + CMD_CTRL_REG);
+	return 0;
+}
+
 static const char *aspeed_spi_get_name(struct spi_mem *mem)
 {
 	struct aspeed_spi *aspi = spi_controller_get_devdata(mem->spi->master);
@@ -636,12 +731,34 @@ static ssize_t aspeed_spi_dirmap_read(struct spi_mem_dirmap_desc *desc,
 	return len;
 }
 
+static ssize_t aspeed_spi_dirmap_cmd_read(struct spi_mem_dirmap_desc *desc,
+					  u64 offset, size_t len, void *buf)
+{
+	struct aspeed_spi *aspi = spi_controller_get_devdata(desc->mem->spi->master);
+	struct aspeed_spi_chip *chip = &aspi->chips[desc->mem->spi->chip_select];
+
+	if (chip->ahb_window_size < offset + len)
+		dev_err(aspi->dev, "exceed ahb window size\n");
+	else
+		memcpy_fromio(buf, chip->ahb_base + offset, len);
+
+	return len;
+}
+
 static const struct spi_controller_mem_ops aspeed_spi_mem_ops = {
 	.supports_op = aspeed_spi_supports_op,
 	.exec_op = aspeed_spi_exec_op,
 	.get_name = aspeed_spi_get_name,
 	.dirmap_create = aspeed_spi_dirmap_create,
 	.dirmap_read = aspeed_spi_dirmap_read,
+};
+
+static const struct spi_controller_mem_ops aspeed_spi_cmd_mem_ops = {
+	.supports_op = aspeed_spi_supports_op,
+	.exec_op = aspeed_spi_exec_op_cmd_mode,
+	.get_name = aspeed_spi_get_name,
+	.dirmap_create = aspeed_spi_dirmap_create,
+	.dirmap_read = aspeed_spi_dirmap_cmd_read,
 };
 
 static void aspeed_spi_chip_set_type(struct aspeed_spi *aspi, unsigned int cs, int type)
@@ -767,11 +884,22 @@ static int aspeed_spi_probe(struct platform_device *pdev)
 		return ret;
 	}
 
+	aspi->op_buf = devm_kmalloc(dev, 0x1000, GFP_KERNEL);
+	if (!aspi->op_buf)
+		return -ENOMEM;
+
 	/* IRQ is for DMA, which the driver doesn't support yet */
 
 	ctlr->mode_bits = SPI_RX_DUAL | SPI_TX_DUAL | data->mode_bits;
 	ctlr->bus_num = pdev->id;
-	ctlr->mem_ops = &aspeed_spi_mem_ops;
+
+	if (of_property_read_bool(dev->of_node, "fmc-spi-cmd-mode")) {
+		dev_info(dev, "adopt command mode\n");
+		ctlr->mem_ops = &aspeed_spi_cmd_mem_ops;
+	} else {
+		dev_info(dev, "adopt user mode\n");
+		ctlr->mem_ops = &aspeed_spi_mem_ops;
+	}
 	ctlr->setup = aspeed_spi_setup;
 	ctlr->cleanup = aspeed_spi_cleanup;
 	ctlr->num_chipselect = data->max_cs;

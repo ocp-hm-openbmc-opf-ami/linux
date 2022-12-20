@@ -266,7 +266,7 @@ static ssize_t i3c_mctp_write(struct file *file, const char __user *buf, size_t 
 	struct i3c_mctp_packet *tx_packet;
 	int ret;
 
-	if (!client)
+	if (!client || !client->priv)
 		return -EBADF;
 
 	if (count < I3C_MCTP_MIN_PACKET_SIZE)
@@ -334,10 +334,14 @@ static int i3c_mctp_release(struct inode *inode, struct file *file)
 	if (!client)
 		return 0;
 
+	if (!client->priv)
+		goto out;
+
 	spin_lock(&client->priv->clients_lock);
 	client->priv->default_client = NULL;
 	spin_unlock(&client->priv->clients_lock);
 
+out:
 	i3c_mctp_client_put(client);
 
 	file->private_data = NULL;
@@ -872,6 +876,9 @@ error_cdev:
 static void i3c_mctp_remove(struct i3c_device *i3cdev)
 {
 	struct i3c_mctp *priv = i3cdev_get_drvdata(i3cdev);
+
+	if (priv->default_client)
+		priv->default_client->priv = NULL;
 
 	i3c_mctp_disable_ibi(i3cdev);
 	platform_device_unregister(priv->i3c_peci);

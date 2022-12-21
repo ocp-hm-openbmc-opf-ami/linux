@@ -146,6 +146,7 @@
 };
 
 &fmc {
+	fmc-spi-cmd-mode;
 	status = "okay";
 	flash@0 {
 		status = "okay";

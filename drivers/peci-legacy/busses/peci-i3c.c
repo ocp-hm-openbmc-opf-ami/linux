@@ -21,7 +21,7 @@
 #define PECI_RESPONSE			0
 #define PECI_PAYLOAD_SIZE		59
 
-#define I3C_PECI_MCTP_TIMEOUT_VALUE_MS	800
+#define I3C_PECI_MCTP_TIMEOUT_VALUE_MS	1100
 
 struct mctp_peci_vdm_hdr {
 	u8 type;

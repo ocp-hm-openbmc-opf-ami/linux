@@ -326,28 +326,31 @@ static u8 i3c_hub_io_strength_dt_to_reg(u8 dt_value)
 	}
 }
 
-static int i3c_hub_of_get_setting(const struct device_node *node, const char *setting_name,
-				  const struct hub_setting settings[], const u8 settings_count,
-				  u8 *setting_value)
+static void i3c_hub_of_get_setting(struct device *dev, const struct device_node *node,
+				   const char *setting_name, const struct hub_setting settings[],
+				   const u8 settings_count, u8 *setting_value)
 {
 	const char *sval;
 	int ret;
 	int i;
 
 	ret = of_property_read_string(node, setting_name, &sval);
-	if (ret)
-		return ret;
+	if (ret) {
+		if (ret != -EINVAL) /* Lack of property is not considered as a problem. */
+			dev_warn(dev, "No setting or invalid setting for %s, err=%i\n",
+				 setting_name, ret);
+		return;
+	}
 
 	for (i = 0; i < settings_count; ++i) {
 		const struct hub_setting * const setting = &settings[i];
 
 		if (!strcmp(setting->name, sval)) {
 			*setting_value = setting->value;
-			return 0;
+			return;
 		}
 	}
-
-	return -EINVAL;
+	dev_warn(dev, "Unknown setting for %s: '%s'\n", setting_name, sval);
 }
 
 static void i3c_hub_tp_of_get_setting(struct device *dev, const struct device_node *node,
@@ -357,96 +360,53 @@ static void i3c_hub_tp_of_get_setting(struct device *dev, const struct device_no
 	int id;
 
 	for_each_available_child_of_node(node, tp_node) {
-		int ret;
-
 		if (!tp_node->name || of_node_cmp(tp_node->name, "target-port"))
 			continue;
 
 		if (!tp_node->full_name ||
 		    (sscanf(tp_node->full_name, "target-port@%i", &id) != 1)) {
-			dev_warn(dev, "Invalid target port node found in DT - %s\n",
+			dev_warn(dev, "Invalid target port node found in DT: %s\n",
 				 tp_node->full_name);
 			continue;
 		}
 
 		if (id >= I3C_HUB_TP_MAX_COUNT) {
-			dev_warn(dev, "Invalid target port index found in DT - %i\n", id);
+			dev_warn(dev, "Invalid target port index found in DT: %i\n", id);
 			continue;
 		}
-		ret = i3c_hub_of_get_setting(tp_node, "mode", tp_mode_settings,
-					     ARRAY_SIZE(tp_mode_settings), &tp_setting[id].mode);
-		if (ret)
-			dev_warn(dev, "Invalid or not specified setting for target port[%i].mode\n",
-				 id);
-
-		ret = i3c_hub_of_get_setting(tp_node, "pullup", tp_pullup_settings,
-					     ARRAY_SIZE(tp_pullup_settings),
-					     &tp_setting[id].pullup_en);
-		if (ret)
-			dev_warn(dev,
-				 "Invalid or not specified setting for target port[%i].pullup\n",
-				 id);
+		i3c_hub_of_get_setting(dev, tp_node, "mode", tp_mode_settings,
+				       ARRAY_SIZE(tp_mode_settings), &tp_setting[id].mode);
+		i3c_hub_of_get_setting(dev, tp_node, "pullup", tp_pullup_settings,
+				       ARRAY_SIZE(tp_pullup_settings), &tp_setting[id].pullup_en);
 	}
 }
 
 static void i3c_hub_of_get_conf_static(struct device *dev, const struct device_node *node)
 {
 	struct i3c_hub *priv = dev_get_drvdata(dev);
-	int ret;
 
-	ret = i3c_hub_of_get_setting(node, "cp0-ldo", ldo_settings, ARRAY_SIZE(ldo_settings),
-				     &priv->settings.cp0_ldo);
-	if (ret)
-		dev_warn(dev, "Invalid or not specified setting for cp0-ldo\n");
-
-	ret = i3c_hub_of_get_setting(node, "cp1-ldo", ldo_settings, ARRAY_SIZE(ldo_settings),
-				     &priv->settings.cp1_ldo);
-	if (ret)
-		dev_warn(dev, "Invalid or not specified setting for cp1-ldo\n");
-
-	ret = i3c_hub_of_get_setting(node, "tp0145-ldo", ldo_settings, ARRAY_SIZE(ldo_settings),
-				     &priv->settings.tp0145_ldo);
-	if (ret)
-		dev_warn(dev, "Invalid or not specified setting for tp0145-ldo\n");
-
-	ret = i3c_hub_of_get_setting(node, "tp2367-ldo", ldo_settings, ARRAY_SIZE(ldo_settings),
-				     &priv->settings.tp2367_ldo);
-	if (ret)
-		dev_warn(dev, "Invalid or not specified setting for tp2367-ldo\n");
-
-	ret = i3c_hub_of_get_setting(node, "tp0145-pullup", pullup_settings,
-				     ARRAY_SIZE(pullup_settings), &priv->settings.tp0145_pullup);
-	if (ret)
-		dev_warn(dev, "Invalid or not specified setting for tp0145-pullup\n");
-
-	ret = i3c_hub_of_get_setting(node, "tp2367-pullup", pullup_settings,
-				     ARRAY_SIZE(pullup_settings), &priv->settings.tp2367_pullup);
-	if (ret)
-		dev_warn(dev, "Invalid or not specified setting for tp2367-pullup\n");
-
-	ret = i3c_hub_of_get_setting(node, "cp0-io-strength", io_strength_settings,
-				     ARRAY_SIZE(io_strength_settings),
-				     &priv->settings.cp0_io_strength);
-	if (ret)
-		dev_warn(dev, "Invalid or not specified setting for cp0-io-strength\n");
-
-	ret = i3c_hub_of_get_setting(node, "cp1-io-strength", io_strength_settings,
-				     ARRAY_SIZE(io_strength_settings),
-				     &priv->settings.cp1_io_strength);
-	if (ret)
-		dev_warn(dev, "Invalid or not specified setting for cp1-io-strength\n");
-
-	ret = i3c_hub_of_get_setting(node, "tp0145-io-strength", io_strength_settings,
-				     ARRAY_SIZE(io_strength_settings),
-				     &priv->settings.tp0145_io_strength);
-	if (ret)
-		dev_warn(dev, "Invalid or not specified setting for tp0145-io-strength\n");
-
-	ret = i3c_hub_of_get_setting(node, "tp2367-io-strength", io_strength_settings,
-				     ARRAY_SIZE(io_strength_settings),
-				     &priv->settings.tp2367_io_strength);
-	if (ret)
-		dev_warn(dev, "Invalid or not specified setting for tp2367-io-strength\n");
+	i3c_hub_of_get_setting(dev, node, "cp0-ldo", ldo_settings, ARRAY_SIZE(ldo_settings),
+			       &priv->settings.cp0_ldo);
+	i3c_hub_of_get_setting(dev, node, "cp1-ldo", ldo_settings, ARRAY_SIZE(ldo_settings),
+			       &priv->settings.cp1_ldo);
+	i3c_hub_of_get_setting(dev, node, "tp0145-ldo", ldo_settings, ARRAY_SIZE(ldo_settings),
+			       &priv->settings.tp0145_ldo);
+	i3c_hub_of_get_setting(dev, node, "tp2367-ldo", ldo_settings, ARRAY_SIZE(ldo_settings),
+			       &priv->settings.tp2367_ldo);
+	i3c_hub_of_get_setting(dev, node, "tp0145-pullup", pullup_settings,
+			       ARRAY_SIZE(pullup_settings), &priv->settings.tp0145_pullup);
+	i3c_hub_of_get_setting(dev, node, "tp2367-pullup", pullup_settings,
+			       ARRAY_SIZE(pullup_settings), &priv->settings.tp2367_pullup);
+	i3c_hub_of_get_setting(dev, node, "cp0-io-strength", io_strength_settings,
+			       ARRAY_SIZE(io_strength_settings), &priv->settings.cp0_io_strength);
+	i3c_hub_of_get_setting(dev, node, "cp1-io-strength", io_strength_settings,
+			       ARRAY_SIZE(io_strength_settings), &priv->settings.cp1_io_strength);
+	i3c_hub_of_get_setting(dev, node, "tp0145-io-strength", io_strength_settings,
+			       ARRAY_SIZE(io_strength_settings),
+			       &priv->settings.tp0145_io_strength);
+	i3c_hub_of_get_setting(dev, node, "tp2367-io-strength", io_strength_settings,
+			       ARRAY_SIZE(io_strength_settings),
+			       &priv->settings.tp2367_io_strength);
 
 	i3c_hub_tp_of_get_setting(dev, node, priv->settings.tp);
 }
@@ -831,7 +791,7 @@ static void i3c_hub_trans_pre_cb(struct i3c_master_controller *master)
 
 	ret = regmap_write(priv->regmap, I3C_HUB_TP_NET_CON_CONF, bus->tp_map);
 	if (ret)
-		dev_warn(dev, "Failed to open Target Port");
+		dev_warn(dev, "Failed to open Target Port(s)\n");
 }
 
 static void i3c_hub_trans_post_cb(struct i3c_master_controller *master)
@@ -843,7 +803,7 @@ static void i3c_hub_trans_post_cb(struct i3c_master_controller *master)
 
 	ret = regmap_write(priv->regmap, I3C_HUB_TP_NET_CON_CONF, 0x00);
 	if (ret)
-		dev_warn(dev, "Failed to close Target Port");
+		dev_warn(dev, "Failed to close Target Port(s)\n");
 }
 
 static struct logical_bus *bus_from_i3c_desc(struct i3c_dev_desc *desc)
@@ -1041,25 +1001,25 @@ static void i3c_hub_delayed_work(struct work_struct *work)
 			ret = regmap_write(priv->regmap, I3C_HUB_TP_NET_CON_CONF,
 					   priv->logical_bus[i].tp_map);
 			if (ret)
-				dev_warn(dev, "Failed to open Target Port");
+				dev_warn(dev, "Failed to open Target Port(s)\n");
 
 			dev->of_node = priv->logical_bus[i].of_node;
 			ret = i3c_hub_logic_register(&priv->logical_bus[i].controller,
 						     i3c_dev_get_master(priv->i3cdev->desc), dev);
 			if (ret)
-				dev_warn(dev, "Failed to register i3c controller\n");
+				dev_warn(dev, "Failed to register i3c controller - bus id:%i\n", i);
 			else
 				priv->logical_bus[i].registered = true;
 
 			ret = regmap_write(priv->regmap, I3C_HUB_TP_NET_CON_CONF, 0x00);
 			if (ret)
-				dev_warn(dev, "Failed to close Target Port");
+				dev_warn(dev, "Failed to close Target Port(s)\n");
 		}
 	}
 
 	ret = i3c_master_do_daa(priv->controller);
 	if (ret)
-		dev_warn(dev, "Failed to run DAA");
+		dev_warn(dev, "Failed to run DAA\n");
 }
 
 static int i3c_hub_probe(struct i3c_device *i3cdev)
@@ -1106,7 +1066,7 @@ static int i3c_hub_probe(struct i3c_device *i3cdev)
 		node = i3c_hub_get_dt_hub_node(dev->parent->of_node, id);
 
 	if (!node) {
-		dev_warn(dev, "Failed to find DT entry for the driver. Running with hardware defaults.\n");
+		dev_info(dev, "No DT entry - running with hardware defaults.\n");
 	} else {
 		of_node_get(node);
 		i3c_hub_of_get_conf_static(dev, node);

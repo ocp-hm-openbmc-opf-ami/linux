@@ -357,14 +357,14 @@ static void i3c_hub_tp_of_get_setting(struct device *dev, const struct device_no
 				      struct tp_setting tp_setting[])
 {
 	struct device_node *tp_node;
-	int id;
+	u32 id;
 
 	for_each_available_child_of_node(node, tp_node) {
 		if (!tp_node->name || of_node_cmp(tp_node->name, "target-port"))
 			continue;
 
 		if (!tp_node->full_name ||
-		    (sscanf(tp_node->full_name, "target-port@%i", &id) != 1)) {
+		    (sscanf(tp_node->full_name, "target-port@%u", &id) != 1)) {
 			dev_warn(dev, "Invalid target port node found in DT: %s\n",
 				 tp_node->full_name);
 			continue;

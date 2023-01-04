@@ -1325,7 +1325,7 @@ static ssize_t pmbus_show_power_average_sensor(struct device *dev,
 	}
 	if (sensor->energy_count < last_energy_count)
 		energy_count_diff = sensor->energy_count +
-			(pmbus_energy_count(data, sensor, 0xFFFF, 0xFF) + 1) - last_energy_count;
+			(pmbus_energy_count(data, sensor, 0x7FFF, 0xFF) + 1) - last_energy_count;
 	else
 		energy_count_diff = sensor->energy_count - last_energy_count;
 

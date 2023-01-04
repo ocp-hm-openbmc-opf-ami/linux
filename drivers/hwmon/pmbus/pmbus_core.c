@@ -52,9 +52,12 @@ struct pmbus_sensor {
 	container_of(_attr, struct pmbus_sensor, attribute)
 
 struct pmbus_power_average_sensor {
+	bool valid;
 	struct pmbus_sensor sensor;
 	u64 energy_count;
 	u32 sample_count;
+	ulong last_updated;
+	u64 last_value;
 };
 
 #define to_pmbus_power_average_sensor(_attr) \
@@ -1269,6 +1272,20 @@ static ssize_t pmbus_show_sensor(struct device *dev,
 	return ret;
 }
 
+#define AVG_UPDATE_INTERVAL	(HZ / 10)
+
+static inline bool pmbus_avg_sensor_need_update(struct pmbus_power_average_sensor *sensor)
+{
+	return !sensor->valid ||
+	       time_after(jiffies, sensor->last_updated + AVG_UPDATE_INTERVAL);
+}
+
+static inline void pmbus_avg_sensor_mark_updated(struct pmbus_power_average_sensor *sensor)
+{
+	sensor->valid = true;
+	sensor->last_updated = jiffies;
+}
+
 static ssize_t pmbus_show_power_average_sensor(struct device *dev,
 					       struct device_attribute *devattr, char *buf)
 {
@@ -1282,8 +1299,14 @@ static ssize_t pmbus_show_power_average_sensor(struct device *dev,
 	u64 energy_count_diff;
 	u32 sample_count_diff;
 	ssize_t ret;
+	u64 value;
 
 	mutex_lock(&data->update_lock);
+	if (!pmbus_avg_sensor_need_update(sensor)) {
+		ret = sysfs_emit(buf, "%llu\n", sensor->last_value);
+		goto unlock;
+	}
+
 	ret = pmbus_set_page(client, sensor->sensor.page, sensor->sensor.phase);
 	if (ret < 0)
 		goto unlock;
@@ -1311,7 +1334,10 @@ static ssize_t pmbus_show_power_average_sensor(struct device *dev,
 	else
 		sample_count_diff = sensor->sample_count - last_sample_count;
 
-	ret = sysfs_emit(buf, "%llu\n", div_u64(energy_count_diff, sample_count_diff));
+	value = div_u64(energy_count_diff, sample_count_diff);
+	ret = sysfs_emit(buf, "%llu\n", value);
+	sensor->last_value = value;
+	pmbus_avg_sensor_mark_updated(sensor);
 unlock:
 	mutex_unlock(&data->update_lock);
 	return ret;

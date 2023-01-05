@@ -221,7 +221,8 @@ struct dt_settings {
 };
 
 struct logical_bus {
-	bool available;
+	bool available; /* Indicates that logical bus configuration is available in DT. */
+	bool registered; /* Indicates that logical bus was registered in the framework. */
 	u8 tp_map;
 	struct i3c_master_controller controller;
 	struct device_node *of_node;
@@ -1047,6 +1048,8 @@ static void i3c_hub_delayed_work(struct work_struct *work)
 						     i3c_dev_get_master(priv->i3cdev->desc), dev);
 			if (ret)
 				dev_warn(dev, "Failed to register i3c controller\n");
+			else
+				priv->logical_bus[i].registered = true;
 
 			ret = regmap_write(priv->regmap, I3C_HUB_TP_NET_CON_CONF, 0x00);
 			if (ret)
@@ -1148,7 +1151,7 @@ static void i3c_hub_remove(struct i3c_device *i3cdev)
 	int i;
 
 	for (i = 0; i < I3C_HUB_LOGICAL_BUS_MAX_COUNT; ++i) {
-		if (priv->logical_bus[i].available)
+		if (priv->logical_bus[i].registered)
 			i3c_master_unregister(&priv->logical_bus[i].controller);
 	}
 	cancel_delayed_work_sync(&priv->delayed_work);

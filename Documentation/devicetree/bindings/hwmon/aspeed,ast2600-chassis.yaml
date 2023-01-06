@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: (GPL-2.0-or-later OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: "http://devicetree.org/schemas/hwmon/aspeed,ast2600-chassis.yaml#"
+$schema: "http://devicetree.org/meta-schemas/core.yaml#"
+
+title: ASPEED ast2600 chassis intrusion hwmon driver
+
+maintainers:
+  - Matthew Simmering <matthew.simmering@intel.com>
+
+description: |
+  This module monitors the CHAI10 register on ASPEED ast2600 boards
+  in order to detect chassis intrusion.
+
+properties:
+  compatible:
+    items:
+      - const: aspeed,ast2600-chassis
+
+  reg:
+    maxItems: 1
+
+  interrupts:
+    maxItems: 1
+
+required:
+  - compatible
+  - reg
+
+additionalProperties: false
+
+examples:
+  - |
+    chassis: chassis@10 {
+      compatible = "aspeed,ast2600-chassis";
+      reg = <0x10 0x4>;
+      status = "disabled";
+    };

@@ -172,7 +172,14 @@ static ssize_t aspeed_mbox_read(struct file *file, char __user *buf,
 	}
 
 	mutex_lock(&mbox->mutex);
-	if (kfifo_is_empty(&mbox->fifo)) {
+	/*
+	 * Since fifo on the producer side will drop the oldest values, causing
+	 * a shift if the data is not consumed fully, when we're using count ==
+	 * num_regs reads, we need to serialize with the producer to make
+	 * sure that all regs were inserted into fifo (avoiding a partial
+	 * read).
+	 */
+	if (kfifo_is_empty_spinlocked(&mbox->fifo, &mbox->lock)) {
 		if (file->f_flags & O_NONBLOCK) {
 			ret = -EAGAIN;
 			goto out_unlock;

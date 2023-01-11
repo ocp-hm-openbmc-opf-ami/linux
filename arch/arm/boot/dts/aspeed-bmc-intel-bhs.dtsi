@@ -144,6 +144,23 @@
 	};
 };
 
+/* SPI1 controller - BIOS SPI flash */
+&spi1 {
+	status = "okay";
+	flash@0 {
+		status = "okay";
+		spi-max-frequency = <25000000>; /* 25MHz */
+		spi-rx-bus-width = <1>;
+		spi-tx-bus-width = <1>;
+
+		/*
+		 * It makes an entry in sysfs which will later be
+		 * changed to real spi-nor driver on need basis.
+		 */
+		compatible = "spidev";
+	};
+};
+
 /* TODO BHS: Enable eSPI SAFS and pinctrl for it */
 
 &espi {

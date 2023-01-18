@@ -1979,7 +1979,8 @@ static int dw_i3c_master_disable_ibi(struct i3c_dev_desc *dev)
 	/* Disable SIR generation on the requested slave device */
 	ret = i3c_master_disec_locked(m, dev->info.dyn_addr, I3C_CCC_EVENT_SIR);
 	if (ret)
-		return ret;
+		dev_dbg(master->dev, "DISEC CCC failed for dev %02x\n, ret = %d",
+			dev->info.dyn_addr, ret);
 
 	pos = dw_i3c_master_get_addr_pos(master, dev->info.dyn_addr);
 	if (pos < 0) {

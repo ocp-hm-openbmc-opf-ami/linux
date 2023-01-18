@@ -556,6 +556,9 @@ int i3c_master_enec_locked(struct i3c_master_controller *master, u8 addr,
 int i3c_master_entdaa_locked(struct i3c_master_controller *master);
 int i3c_master_defslvs_locked(struct i3c_master_controller *master);
 
+struct i3c_dev_desc *i3c_master_find_i3c_dev_by_addr(const struct i3c_master_controller *master,
+						     u16 addr);
+
 int i3c_master_get_free_addr(struct i3c_master_controller *master,
 			     u8 start_addr);
 

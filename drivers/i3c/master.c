@@ -788,6 +788,27 @@ i3c_master_find_i2c_dev_by_addr(const struct i3c_master_controller *master,
 }
 
 /**
+ * i3c_master_find_i3c_dev_by_addr() - find i3c_dev_desc basing on given address
+ * @master: I3C master object
+ * @addr: dynamic address to look a match with
+ *
+ * Return: the first i3c_dev_desc found with the given address; NULL if no device was found
+ */
+struct i3c_dev_desc *i3c_master_find_i3c_dev_by_addr(const struct i3c_master_controller *master,
+						     u16 addr)
+{
+	struct i3c_dev_desc *dev;
+
+	i3c_bus_for_each_i3cdev(&master->bus, dev) {
+		if (dev->info.dyn_addr == addr)
+			return dev;
+	}
+
+	return NULL;
+}
+EXPORT_SYMBOL_GPL(i3c_master_find_i3c_dev_by_addr);
+
+/**
  * i3c_master_get_free_addr() - get a free address on the bus
  * @master: I3C master object
  * @start_addr: where to start searching

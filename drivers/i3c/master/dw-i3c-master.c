@@ -23,7 +23,6 @@
 #include <linux/reset.h>
 #include <linux/slab.h>
 
-#define CCC_WORKAROUND
 #define DEVICE_CTRL			0x0
 #define DEV_CTRL_ENABLE			BIT(31)
 #define DEV_CTRL_RESUME			BIT(30)
@@ -1374,85 +1373,7 @@ static int dw_i3c_master_daa(struct i3c_master_controller *m)
 
 	return 0;
 }
-#ifdef CCC_WORKAROUND
-/*
- * Provide an interface for sending CCC from userspace.  Especially for the
- * transfers with PEC and direct CCC.
- */
-static int dw_i3c_master_ccc_xfers(struct i3c_dev_desc *dev,
-				    struct i3c_priv_xfer *i3c_xfers,
-				    int i3c_nxfers)
-{
-	struct dw_i3c_i2c_dev_data *data = i3c_dev_get_master_data(dev);
-	struct i3c_master_controller *m = i3c_dev_get_master(dev);
-	struct dw_i3c_master *master = to_dw_i3c_master(m);
-	struct dw_i3c_xfer *xfer;
-	int i, ret = 0;
-	struct dw_i3c_cmd *cmd_ccc;
 
-	xfer = dw_i3c_master_alloc_xfer(master, i3c_nxfers);
-	if (!xfer)
-		return -ENOMEM;
-
-	/* i3c_xfers[0] handles the CCC data */
-	cmd_ccc = &xfer->cmds[0];
-	cmd_ccc->cmd_hi = COMMAND_PORT_ARG_DATA_LEN(i3c_xfers[0].len - 1) |
-			  COMMAND_PORT_TRANSFER_ARG;
-	cmd_ccc->tx_buf = i3c_xfers[0].data.out + 1;
-	cmd_ccc->tx_len = i3c_xfers[0].len - 1;
-	cmd_ccc->cmd_lo = COMMAND_PORT_SPEED(dev->info.max_write_ds);
-	cmd_ccc->cmd_lo |= COMMAND_PORT_TID(0) |
-			   COMMAND_PORT_DEV_INDEX(master->maxdevs - 1) |
-			   COMMAND_PORT_ROC;
-	if (i3c_nxfers == 1)
-		cmd_ccc->cmd_lo |= COMMAND_PORT_TOC;
-
-	dev_dbg(master->dev,
-		"%s:cmd_ccc_hi=0x%08x cmd_ccc_lo=0x%08x tx_len=%d\n", __func__,
-		cmd_ccc->cmd_hi, cmd_ccc->cmd_lo, cmd_ccc->tx_len);
-
-	for (i = 1; i < i3c_nxfers; i++) {
-		struct dw_i3c_cmd *cmd = &xfer->cmds[i];
-
-		cmd->cmd_hi = COMMAND_PORT_ARG_DATA_LEN(i3c_xfers[i].len) |
-			COMMAND_PORT_TRANSFER_ARG;
-
-		if (i3c_xfers[i].rnw) {
-			cmd->rx_buf = i3c_xfers[i].data.in;
-			cmd->rx_len = i3c_xfers[i].len;
-			cmd->cmd_lo = COMMAND_PORT_READ_TRANSFER |
-				      COMMAND_PORT_SPEED(dev->info.max_read_ds);
-
-		} else {
-			cmd->tx_buf = i3c_xfers[i].data.out;
-			cmd->tx_len = i3c_xfers[i].len;
-			cmd->cmd_lo =
-				COMMAND_PORT_SPEED(dev->info.max_write_ds);
-		}
-
-		cmd->cmd_lo |= COMMAND_PORT_TID(i) |
-			       COMMAND_PORT_DEV_INDEX(data->index) |
-			       COMMAND_PORT_ROC;
-
-		if (i == (i3c_nxfers - 1))
-			cmd->cmd_lo |= COMMAND_PORT_TOC;
-
-		dev_dbg(master->dev,
-			"%s:cmd_hi=0x%08x cmd_lo=0x%08x tx_len=%d rx_len=%d\n",
-			__func__, cmd->cmd_hi, cmd->cmd_lo, cmd->tx_len,
-			cmd->rx_len);
-	}
-
-	dw_i3c_master_enqueue_xfer(master, xfer);
-	if (!wait_for_completion_timeout(&xfer->comp, XFER_TIMEOUT))
-		dw_i3c_master_dequeue_xfer(master, xfer);
-
-	ret = xfer->ret;
-	dw_i3c_master_free_xfer(xfer);
-
-	return ret;
-}
-#endif
 static int dw_i3c_master_priv_xfers(struct i3c_dev_desc *dev,
 				    struct i3c_priv_xfer *i3c_xfers,
 				    int i3c_nxfers)
@@ -1480,17 +1401,6 @@ static int dw_i3c_master_priv_xfers(struct i3c_dev_desc *dev,
 	if (ntxwords > master->caps.datafifodepth ||
 	    nrxwords > master->caps.datafifodepth)
 		return -ENOTSUPP;
-
-#ifdef CCC_WORKAROUND
-	if (i3c_xfers[0].rnw == 0) {
-		/* write command: check if hit special address */
-		u8 tmp;
-
-		memcpy(&tmp, i3c_xfers[0].data.out, 1);
-		if (tmp == 0xff)
-			return dw_i3c_master_ccc_xfers(dev, i3c_xfers, i3c_nxfers);
-	}
-#endif
 
 	xfer = dw_i3c_master_alloc_xfer(master, i3c_nxfers);
 	if (!xfer)
@@ -2414,16 +2324,7 @@ static int dw_i3c_probe(struct platform_device *pdev)
 	master->datstartaddr = ret;
 	master->maxdevs = ret >> 16;
 	master->free_pos = GENMASK(master->maxdevs - 1, 0);
-#ifdef CCC_WORKAROUND
-	if (master->maxdevs > 0) {
-		master->free_pos &= ~BIT(master->maxdevs - 1);
-		ret = (even_parity(I3C_BROADCAST_ADDR) << 7) | I3C_BROADCAST_ADDR;
-		master->addrs[master->maxdevs - 1] = ret;
-		writel(DEV_ADDR_TABLE_DYNAMIC_ADDR(ret),
-			   master->regs + DEV_ADDR_TABLE_LOC(master->datstartaddr,
-							     master->maxdevs - 1));
-	}
-#endif
+
 	writel(INTR_ALL, master->regs + INTR_STATUS);
 	irq = platform_get_irq(pdev, 0);
 	ret = devm_request_irq(&pdev->dev, irq,

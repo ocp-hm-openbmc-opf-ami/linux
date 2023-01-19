@@ -28,6 +28,8 @@
 
 &i3c2 {
 	/* I3C_MNG_LVC18 */
+	i3c-scl-hz = <7692000>;
+	i3c-pp-scl-high-ns = <50>;
 
 	hub@0,0 {
 		cp0-ldo = "disabled";
@@ -36,6 +38,8 @@
 		tp2367-ldo = "disabled";
 		tp0145-pullup = "2k";
 		tp2367-pullup = "2k";
+		tp0145-io-strength = "50Ohms";
+		tp2367-io-strength = "50Ohms";
 
 		target-port@0 {
 			mode = "i3c";

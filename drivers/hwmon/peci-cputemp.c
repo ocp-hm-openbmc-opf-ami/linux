@@ -468,6 +468,7 @@ static int check_resolved_cores(struct peci_cputemp *priv)
 
 		break;
 	case INTEL_FAM6_SAPPHIRERAPIDS:
+	case INTEL_FAM6_EMERALDRAPIDS:
 		re_msg.addr = priv->mgr->client->addr;
 		re_msg.msg_type = PECI_ENDPTCFG_TYPE_LOCAL_PCI;
 		re_msg.params.pci_cfg.seg = 0;
@@ -590,7 +591,7 @@ static int create_module_temp_info(struct peci_cputemp *priv)
 
 	/* INTEL_FAM6_GRANITERAPIDS does not support module temp */
 	ret = check_resolved_cores(priv);
-	if (ret && model != INTEL_FAM6_SAPPHIRERAPIDS)
+	if (ret && (model != INTEL_FAM6_SAPPHIRERAPIDS && model != INTEL_FAM6_EMERALDRAPIDS))
 		return ret;
 
 	priv->module_temp_label = devm_kzalloc(priv->dev,
@@ -600,7 +601,7 @@ static int create_module_temp_info(struct peci_cputemp *priv)
 	if (!priv->module_temp_label)
 		return -ENOMEM;
 
-	if (model == INTEL_FAM6_SAPPHIRERAPIDS) {
+	if (model == INTEL_FAM6_SAPPHIRERAPIDS || model == INTEL_FAM6_EMERALDRAPIDS) {
 		struct peci_rd_end_pt_cfg_msg re_msg;
 		u32 capid3_cfg;
 

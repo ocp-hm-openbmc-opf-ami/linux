@@ -44,6 +44,7 @@ static const u8 support_model[] = {
 	INTEL_FAM6_ICELAKE_X,
 	INTEL_FAM6_ICELAKE_XD,
 	INTEL_FAM6_SAPPHIRERAPIDS,
+	INTEL_FAM6_EMERALDRAPIDS,
 	INTEL_FAM6_GRANITERAPIDS,
 };
 
@@ -83,6 +84,7 @@ static int get_dimm_temp(struct peci_dimmtemp *priv, int dimm_no)
 	 */
 	switch (priv->gen_info->model) {
 	case INTEL_FAM6_SAPPHIRERAPIDS:
+	case INTEL_FAM6_EMERALDRAPIDS:
 	case INTEL_FAM6_ICELAKE_X:
 	case INTEL_FAM6_ICELAKE_XD:
 		re_msg.addr = priv->mgr->client->addr;

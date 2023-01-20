@@ -2,9 +2,33 @@
 # Platform Environment Control Interface (PECI) subsystem configuration
 #
 
+choice
+	prompt "PECI supported subsystem"
+	default WANT_PECI_LEGACY
+	help
+	  Temporarily, to make the transition to upstream PECI easier, two
+	  mutually exclusive PECI subsystems (legacy and upstream) are supported.
+	  This option enforces selecting only one PECI subsystem at the same time.
+	  Note that once the transition is completed, the legacy PECI support will be removed.
+
+config WANT_PECI_LEGACY
+	bool "Use legacy PECI"
+	help
+	  Select non-upstream PECI subsystem.
+	  This will be removed once upstream PECI transition is completed.
+
+config WANT_PECI
+	bool "Use upstream PECI"
+	help
+	  Select PECI subsystem available in the mainline kernel.
+
+endchoice
+
 menuconfig PECI_LEGACY
 	tristate "PECI legacy support"
 	select CRC8
+	depends on WANT_PECI_LEGACY
+
 	help
 	  The Platform Environment Control Interface (PECI) is a one-wire bus
 	  interface that provides a communication channel from Intel processors

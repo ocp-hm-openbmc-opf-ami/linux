@@ -2,6 +2,7 @@
 
 menuconfig PECI
 	tristate "PECI support"
+	depends on WANT_PECI
 	help
 	  The Platform Environment Control Interface (PECI) is an interface
 	  that provides a communication channel to Intel processors and

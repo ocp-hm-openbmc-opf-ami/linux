@@ -25,6 +25,9 @@ static bool is_registered;
 static DEFINE_MUTEX(core_lock);
 static DEFINE_IDR(peci_adapter_idr);
 
+/* Lock requests if sent to the same device on different interface */
+struct mutex cpu_domain_lock[PECI_OFFSET_MAX][DOMAIN_OFFSET_MAX];
+
 static uint total_retry_timeout_us __read_mostly;
 module_param(total_retry_timeout_us, uint, 0660);
 static uint retry_interval_min_us __read_mostly = PECI_DEV_RETRY_INTERVAL_MIN_USEC;
@@ -212,7 +215,7 @@ static int __peci_xfer(struct peci_adapter *adapter, struct peci_xfer_msg *msg,
 	uint interval_us = retry_interval_min_us;
 	char task_name[TASK_COMM_LEN];
 	ulong timeout = jiffies;
-	u8 aw_fcs;
+	u8 aw_fcs, node_id, domain_id;
 	int ret;
 
 	/*
@@ -248,10 +251,22 @@ static int __peci_xfer(struct peci_adapter *adapter, struct peci_xfer_msg *msg,
 	if (do_retry)
 		timeout += usecs_to_jiffies(total_retry_timeout_us);
 
+	node_id = msg->addr - PECI_BASE_ADDR;
+
+	if (msg->tx_len >= 2)
+		domain_id = msg->tx_buf[1] >> 1; /* Domain ID [7:1] | Retry bit [0] */
+	else
+		domain_id = 0;
+
+	if (node_id >= PECI_OFFSET_MAX || domain_id >= DOMAIN_OFFSET_MAX) {
+		dev_dbg(&adapter->dev, "Wrong address cpu:%x domain_id:%x\n", msg->addr, domain_id);
+		return -EFAULT;
+	}
+
 	for (;;) {
-		mutex_lock(&core_lock);
+		mutex_lock(&cpu_domain_lock[node_id][domain_id]);
 		ret = adapter->xfer(adapter, msg);
-		mutex_unlock(&core_lock);
+		mutex_unlock(&cpu_domain_lock[node_id][domain_id]);
 
 		if (!do_retry || ret || !msg->rx_buf)
 			break;
@@ -2479,7 +2494,7 @@ EXPORT_SYMBOL_GPL(peci_del_driver);
 
 static int __init peci_init(void)
 {
-	int ret;
+	int ret, i, j;
 
 	total_retry_timeout_us = jiffies_to_usecs(PECI_DEV_RETRY_TIMEOUT);
 
@@ -2494,6 +2509,10 @@ static int __init peci_init(void)
 	if (IS_ENABLED(CONFIG_OF_DYNAMIC))
 		WARN_ON(of_reconfig_notifier_register(&peci_of_notifier));
 
+	for (i = 0; i < PECI_OFFSET_MAX; i++)
+		for (j = 0; j < DOMAIN_OFFSET_MAX; j++)
+			mutex_init(&cpu_domain_lock[i][j]);
+
 	is_registered = true;
 
 	return 0;
@@ -2501,10 +2520,18 @@ static int __init peci_init(void)
 
 static void __exit peci_exit(void)
 {
+	int i, j;
+
 	if (IS_ENABLED(CONFIG_OF_DYNAMIC))
 		WARN_ON(of_reconfig_notifier_unregister(&peci_of_notifier));
 
 	bus_unregister(&peci_bus_type);
+
+	for (i = 0; i < PECI_OFFSET_MAX; i++)
+		for (j = 0; j < DOMAIN_OFFSET_MAX; j++)
+			mutex_destroy(&cpu_domain_lock[i][j]);
+
+	is_registered = false;
 }
 
 subsys_initcall(peci_init);

@@ -394,6 +394,8 @@ struct dw_i3c_master {
 
 	/* All parameters are expressed in nanoseconds */
 	struct {
+		unsigned long i3c_core_rate;
+		unsigned long i3c_core_period;
 		u32 i3c_od_scl_freq;
 		u32 i3c_od_scl_low;
 		u32 i3c_od_scl_high;
@@ -1014,6 +1016,9 @@ static int dw_i3c_clk_cfg(struct dw_i3c_master *master)
 	lcnt = DIV_ROUND_UP(core_rate, I3C_BUS_SDR4_SCL_RATE) - hcnt;
 	scl_timing |= SCL_EXT_LCNT_4(lcnt);
 	writel(scl_timing, master->regs + SCL_EXT_LCNT_TIMING);
+
+	master->timings.i3c_core_rate = core_rate;
+	master->timings.i3c_core_period = core_period;
 
 	return 0;
 }

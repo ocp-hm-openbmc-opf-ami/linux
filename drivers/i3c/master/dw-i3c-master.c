@@ -82,6 +82,9 @@
 #define RESPONSE_ERROR_TRANSF_ABORT	8
 #define RESPONSE_ERROR_I2C_W_NACK_ERR	9
 #define RESPONSE_PORT_TID(x)		(((x) & GENMASK(27, 24)) >> 24)
+#define TID_SLAVE_IBI			0x1
+#define TID_MASTER_READ			0x2
+#define TID_MASTER_WRITE		0x3
 #define RESPONSE_PORT_DATA_LEN(x)	((x) & GENMASK(15, 0))
 
 #define RX_TX_DATA_PORT			0x14
@@ -687,7 +690,7 @@ static void dw_i3c_master_end_xfer_locked(struct dw_i3c_master *master, u32 isr)
 
 		resp = readl(master->regs + RESPONSE_QUEUE_PORT);
 
-		cmd = &xfer->cmds[RESPONSE_PORT_TID(resp)];
+		cmd = &xfer->cmds[i];
 		cmd->rx_len = RESPONSE_PORT_DATA_LEN(resp);
 		cmd->error = RESPONSE_PORT_ERR_STATUS(resp);
 		if (cmd->rx_len && !cmd->error)
@@ -1473,18 +1476,18 @@ static int dw_i3c_master_priv_xfers(struct i3c_dev_desc *dev,
 		if (i3c_xfers[i].rnw) {
 			cmd->rx_buf = i3c_xfers[i].data.in;
 			cmd->rx_len = i3c_xfers[i].len;
-			cmd->cmd_lo = COMMAND_PORT_READ_TRANSFER |
+			cmd->cmd_lo = COMMAND_PORT_TID(TID_MASTER_READ) |
+				      COMMAND_PORT_READ_TRANSFER |
 				      COMMAND_PORT_SPEED(dev->info.max_read_ds);
 
 		} else {
 			cmd->tx_buf = i3c_xfers[i].data.out;
 			cmd->tx_len = i3c_xfers[i].len;
-			cmd->cmd_lo =
-				COMMAND_PORT_SPEED(dev->info.max_write_ds);
+			cmd->cmd_lo = COMMAND_PORT_TID(TID_MASTER_WRITE) |
+				      COMMAND_PORT_SPEED(dev->info.max_write_ds);
 		}
 
-		cmd->cmd_lo |= COMMAND_PORT_TID(i) |
-			       COMMAND_PORT_DEV_INDEX(data->index) |
+		cmd->cmd_lo |= COMMAND_PORT_DEV_INDEX(data->index) |
 			       COMMAND_PORT_ROC;
 
 		if (i == (i3c_nxfers - 1))
@@ -1538,7 +1541,7 @@ static int dw_i3c_target_priv_xfers(struct i3c_dev_desc *dev,
 		if (!i3c_xfers[i].rnw) {
 			cmd->tx_buf = i3c_xfers[i].data.out;
 			cmd->tx_len = i3c_xfers[i].len;
-			cmd->cmd_lo = 0 | (i << 3) | (cmd->tx_len << 16);
+			cmd->cmd_lo = 0 | COMMAND_PORT_TID(TID_MASTER_READ) | (cmd->tx_len << 16);
 
 			dw_i3c_master_wr_tx_fifo(master, cmd->tx_buf, cmd->tx_len);
 			writel(cmd->cmd_lo, master->regs + COMMAND_QUEUE_PORT);
@@ -1650,7 +1653,7 @@ static int dw_i3c_target_put_read_data(struct i3c_dev_desc *dev, struct i3c_priv
 		if (!i3c_xfers[i].rnw) {
 			cmd->tx_buf = i3c_xfers[i].data.out;
 			cmd->tx_len = i3c_xfers[i].len;
-			cmd->cmd_lo = 0 | (i << 3) | (cmd->tx_len << 16);
+			cmd->cmd_lo = 0 | COMMAND_PORT_TID(TID_MASTER_READ) | (cmd->tx_len << 16);
 
 			dw_i3c_master_wr_tx_fifo(master, cmd->tx_buf, cmd->tx_len);
 			writel(cmd->cmd_lo, master->regs + COMMAND_QUEUE_PORT);
@@ -1792,15 +1795,16 @@ static int dw_i3c_master_i2c_xfers(struct i2c_dev_desc *dev,
 		cmd->cmd_hi = COMMAND_PORT_ARG_DATA_LEN(i2c_xfers[i].len) |
 			COMMAND_PORT_TRANSFER_ARG;
 
-		cmd->cmd_lo = COMMAND_PORT_TID(i) |
-			      COMMAND_PORT_DEV_INDEX(data->index) |
+		cmd->cmd_lo = COMMAND_PORT_DEV_INDEX(data->index) |
 			      COMMAND_PORT_ROC;
 
 		if (i2c_xfers[i].flags & I2C_M_RD) {
-			cmd->cmd_lo |= COMMAND_PORT_READ_TRANSFER;
+			cmd->cmd_lo |= COMMAND_PORT_TID(TID_MASTER_READ) |
+				       COMMAND_PORT_READ_TRANSFER;
 			cmd->rx_buf = i2c_xfers[i].buf;
 			cmd->rx_len = i2c_xfers[i].len;
 		} else {
+			cmd->cmd_lo |= COMMAND_PORT_TID(TID_MASTER_WRITE);
 			cmd->tx_buf = i2c_xfers[i].buf;
 			cmd->tx_len = i2c_xfers[i].len;
 		}
@@ -2171,6 +2175,10 @@ static void dw_i3c_target_handle_response_ready(struct dw_i3c_master *master)
 	for (i = 0; i < nresp; i++) {
 		u32 resp = readl(master->regs + RESPONSE_QUEUE_PORT);
 		u32 nbytes = RESPONSE_PORT_DATA_LEN(resp);
+
+		if (RESPONSE_PORT_SLAVE_TID(resp) == TID_MASTER_READ)
+			complete(&master->target_read_comp);
+
 		if (RESPONSE_PORT_ERR_STATUS(resp)) {
 			has_error = 1;
 			continue;

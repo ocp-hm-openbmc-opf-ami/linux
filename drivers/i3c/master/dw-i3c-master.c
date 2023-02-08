@@ -1577,6 +1577,9 @@ static int dw_i3c_target_priv_xfers(struct i3c_dev_desc *dev,
 	if (!i3c_nxfers)
 		return 0;
 
+	if (i3c_nxfers > master->caps.cmdfifodepth)
+		return -EOPNOTSUPP;
+
 	xfer = dw_i3c_master_alloc_xfer(master, i3c_nxfers);
 	if (!xfer)
 		return -ENOMEM;
@@ -1690,6 +1693,9 @@ static int dw_i3c_target_put_read_data(struct i3c_dev_desc *dev, struct i3c_priv
 
 	if (!i3c_nxfers)
 		return 0;
+
+	if (i3c_nxfers > master->caps.cmdfifodepth)
+		return -EOPNOTSUPP;
 
 	xfer = dw_i3c_master_alloc_xfer(master, i3c_nxfers);
 	if (!xfer)

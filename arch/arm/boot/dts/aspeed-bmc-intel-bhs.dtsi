@@ -552,6 +552,10 @@
 	status = "okay";
 };
 
+&i3cglobal {
+	status = "okay";
+};
+
 &i3c1 {
 	/* I3C_PFR_BMC */
 	status = "okay";

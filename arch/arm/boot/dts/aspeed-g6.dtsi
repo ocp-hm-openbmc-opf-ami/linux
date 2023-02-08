@@ -1271,6 +1271,12 @@
 };
 
 &i3c {
+	i3cglobal: i3cg@00 {
+		reg = <0x0 0x1000>;
+		compatible = "syscon";
+		resets = <&syscon ASPEED_RESET_I3C_DMA>;
+	};
+
 	i3c0: i3c0@2000 {
 		#address-cells = <1>;
 		#size-cells = <0>;

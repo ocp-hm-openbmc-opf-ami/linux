@@ -452,6 +452,7 @@ static int check_resolved_cores(struct peci_cputemp *priv)
 
 		priv->core_mask |= le32_to_cpup((__le32 *)re_msg.data);
 		break;
+	case INTEL_FAM6_ALDERLAKE_S:
 	case INTEL_FAM6_RAPTORLAKE_S:
 		ret = peci_client_read_package_config(priv->mgr,
 						      PECI_MBX_INDEX_CPU_ID, 6,

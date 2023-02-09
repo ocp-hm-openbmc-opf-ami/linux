@@ -25,6 +25,7 @@
 #define INTEL_FAM6_EMERALDRAPIDS	0xCF
 #define INTEL_FAM6_RAPTORLAKE_S		0xB7
 #define INTEL_FAM6_GRANITERAPIDS	0xAD
+#define INTEL_FAM6_ALDERLAKE_S		0x97
 #endif
 
 #define INTEL_FAM6             6 /* P6 (Pentium Pro and later) */
@@ -68,6 +69,10 @@
 #define CORE_MASK_BITS_ON_GNR  64 /* X1 now, will update to 128 for X2 and X3 */
 #define CHAN_RANK_MAX_ON_GNR   12 /* Max number of channel ranks on Granite Rapids */
 #define DIMM_IDX_MAX_ON_GNR    2  /* Max DIMM index per channel on Granite Rapids */
+
+#define CORE_MASK_BITS_ON_ADLS  64
+#define CHAN_RANK_MAX_ON_ADLS   8  /* Max number of channel ranks on Alderlake */
+#define DIMM_IDX_MAX_ON_ADLS    2  /* Max DIMM index per channel on Alderlake */
 
 #define CORE_MASK_BITS_HIGH    64 /* bits per core mask */
 #define CORE_MASK_BITS_MAX     CORE_MASK_BITS_ON_GNR

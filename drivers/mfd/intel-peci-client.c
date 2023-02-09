@@ -87,6 +87,12 @@ static const struct cpu_gen_info cpu_gen_info_table[] = {
 		.core_mask_bits = CORE_MASK_BITS_ON_GNR,
 		.chan_rank_max  = CHAN_RANK_MAX_ON_GNR,
 		.dimm_idx_max   = DIMM_IDX_MAX_ON_GNR },
+	{ /* Alderlake */
+		.family         = INTEL_FAM6,
+		.model          = INTEL_FAM6_ALDERLAKE_S,
+		.core_mask_bits = CORE_MASK_BITS_ON_ADLS,
+		.chan_rank_max  = CHAN_RANK_MAX_ON_ADLS,
+		.dimm_idx_max   = DIMM_IDX_MAX_ON_ADLS },
 };
 
 static int peci_client_get_cpu_gen_info(struct peci_client_manager *priv)

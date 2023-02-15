@@ -15,7 +15,10 @@
 					   /* -1 = no timeout */
 #define DIMM_TEMP_MAX_DEFAULT		90000
 #define DIMM_TEMP_CRIT_DEFAULT		100000
+#define CTL_DIMM_TEMP_MAX		80000
+#define CTL_DIMM_TEMP_CRIT		85000
 #define BIOS_RST_CPL4			BIT(4)
+#define HOTTEST_DIMM_ABS_TEMP_IDX	0
 
 struct peci_dimmtemp {
 	struct peci_client_manager	*mgr;
@@ -47,6 +50,8 @@ static const u8 support_model[] = {
 	INTEL_FAM6_EMERALDRAPIDS,
 	INTEL_FAM6_GRANITERAPIDS,
 	INTEL_FAM6_SIERRAFOREST,
+	INTEL_FAM6_RAPTORLAKE_S,
+	INTEL_FAM6_ALDERLAKE_S,
 };
 
 static inline int read_ddr_dimm_temp_config(struct peci_dimmtemp *priv,
@@ -55,6 +60,16 @@ static inline int read_ddr_dimm_temp_config(struct peci_dimmtemp *priv,
 {
 	return peci_client_read_package_config(priv->mgr,
 					       PECI_MBX_INDEX_DDR_DIMM_TEMP,
+					       chan_rank, cfg_data,
+					       sizeof(u32));
+}
+
+static inline int read_ddr_hot_absolute_temp_config(struct peci_dimmtemp *priv,
+						    int chan_rank,
+						    u8 *cfg_data)
+{
+	return peci_client_read_package_config(priv->mgr,
+					       PECI_MBX_INDEX_DDR_HOT_ABSOLUTE,
 					       chan_rank, cfg_data,
 					       sizeof(u32));
 }
@@ -73,7 +88,11 @@ static int get_dimm_temp(struct peci_dimmtemp *priv, int dimm_no)
 	if (!peci_sensor_need_update(&priv->temp[dimm_no]))
 		return 0;
 
-	ret = read_ddr_dimm_temp_config(priv, chan_rank, cfg_data);
+	if (priv->mgr->gen_info->model == INTEL_FAM6_RAPTORLAKE_S ||
+	    priv->mgr->gen_info->model == INTEL_FAM6_ALDERLAKE_S)
+		ret = read_ddr_hot_absolute_temp_config(priv, chan_rank, cfg_data);
+	else
+		ret = read_ddr_dimm_temp_config(priv, chan_rank, cfg_data);
 	if (ret || cfg_data[dimm_order] == 0 || cfg_data[dimm_order] == 0xff)
 		return -ENODATA;
 
@@ -119,6 +138,9 @@ static int get_dimm_temp(struct peci_dimmtemp *priv, int dimm_no)
 	}
 
 	switch (priv->gen_info->model) {
+	case INTEL_FAM6_RAPTORLAKE_S:
+	case INTEL_FAM6_ALDERLAKE_S:
+		break;
 	case INTEL_FAM6_GRANITERAPIDS:
 	case INTEL_FAM6_SIERRAFOREST:
 		re_msg.addr = priv->mgr->client->addr;
@@ -490,7 +512,11 @@ static int check_populated_dimms(struct peci_dimmtemp *priv)
 	for (chan_rank = 0; chan_rank < chan_rank_max; chan_rank++) {
 		int ret, idx;
 
-		ret = read_ddr_dimm_temp_config(priv, chan_rank, cfg_data);
+		if (priv->mgr->gen_info->model == INTEL_FAM6_RAPTORLAKE_S ||
+		    priv->mgr->gen_info->model == INTEL_FAM6_ALDERLAKE_S)
+			ret = read_ddr_hot_absolute_temp_config(priv, chan_rank, cfg_data);
+		else
+			ret = read_ddr_dimm_temp_config(priv, chan_rank, cfg_data);
 		if (ret) {
 			if (ret == -EAGAIN)
 				continue;
@@ -499,6 +525,15 @@ static int check_populated_dimms(struct peci_dimmtemp *priv)
 			return ret;
 		}
 
+		if (priv->mgr->gen_info->model == INTEL_FAM6_RAPTORLAKE_S ||
+		    priv->mgr->gen_info->model == INTEL_FAM6_ALDERLAKE_S) {
+			if (cfg_data[HOTTEST_DIMM_ABS_TEMP_IDX]) {
+				priv->dimm_mask = BIT(HOTTEST_DIMM_ABS_TEMP_IDX);
+				priv->temp_max[HOTTEST_DIMM_ABS_TEMP_IDX] = CTL_DIMM_TEMP_MAX;
+				priv->temp_crit[HOTTEST_DIMM_ABS_TEMP_IDX] = CTL_DIMM_TEMP_CRIT;
+			}
+			break;
+		}
 		for (idx = 0; idx < dimm_idx_max; idx++) {
 			if (cfg_data[idx]) {
 				uint chan = chan_rank * dimm_idx_max + idx;
@@ -527,12 +562,15 @@ static int create_dimm_temp_label(struct peci_dimmtemp *priv, int chan)
 	if (!priv->dimmtemp_label[chan])
 		return -ENOMEM;
 
-	rank = chan / priv->gen_info->dimm_idx_max;
-	idx = chan % priv->gen_info->dimm_idx_max;
-
-	snprintf(priv->dimmtemp_label[chan], PECI_HWMON_LABEL_STR_LEN,
-		 "DIMM %c%d", 'A' + rank, idx + 1);
-
+	if (priv->mgr->gen_info->model == INTEL_FAM6_RAPTORLAKE_S ||
+	    priv->mgr->gen_info->model == INTEL_FAM6_ALDERLAKE_S) {
+		snprintf(priv->dimmtemp_label[chan], PECI_HWMON_LABEL_STR_LEN, "DIMM");
+	} else {
+		rank = chan / priv->gen_info->dimm_idx_max;
+		idx = chan % priv->gen_info->dimm_idx_max;
+		snprintf(priv->dimmtemp_label[chan], PECI_HWMON_LABEL_STR_LEN,
+			 "DIMM %c%d", 'A' + rank, idx + 1);
+	}
 	return 0;
 }
 

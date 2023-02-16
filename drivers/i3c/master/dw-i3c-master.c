@@ -2415,6 +2415,7 @@ static const struct dw_i3c_platform_ops ast2600_platform_ops = {
 
 static const struct of_device_id dw_i3c_master_of_match[] = {
 	{ .compatible = "snps,dw-i3c-master-1.00a", },
+	{ .compatible = "aspeed,ast2600-i3c", .data = &ast2600_platform_ops },
 	{},
 };
 MODULE_DEVICE_TABLE(of, dw_i3c_master_of_match);

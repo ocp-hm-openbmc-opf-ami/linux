@@ -356,6 +356,11 @@ struct dw_i3c_master {
 	u16 ver_type;
 	u8 addrs[MAX_DEVS];
 
+	/* platform-specific data */
+	const struct dw_i3c_platform_ops *platform_ops;
+	union {
+	} pdata;
+
 	/* All parameters are expressed in nanoseconds */
 	struct {
 		u32 i3c_od_scl_freq;
@@ -371,6 +376,11 @@ struct dw_i3c_master {
 		void *buf;
 		u16 max_len;
 	} target_rx;
+};
+
+struct dw_i3c_platform_ops {
+	int (*probe)(struct dw_i3c_master *i3c, struct platform_device *pdev);
+	int (*init)(struct dw_i3c_master *i3c);
 };
 
 struct dw_i3c_i2c_dev_data {
@@ -1130,6 +1140,12 @@ static int dw_i3c_master_bus_init(struct i3c_master_controller *m)
 	struct i3c_device_info info = { };
 	u32 thld_ctrl;
 	int ret;
+
+	if (master->platform_ops && master->platform_ops->init) {
+		ret = master->platform_ops->init(master);
+		if (ret)
+			return ret;
+	}
 
 	ret = dw_i3c_bus_clk_cfg(m);
 	if (ret)
@@ -2275,8 +2291,15 @@ static const struct i3c_master_controller_ops dw_mipi_i3c_ops = {
 	.recycle_ibi_slot = dw_i3c_master_recycle_ibi_slot,
 };
 
+static const struct of_device_id dw_i3c_master_of_match[] = {
+	{ .compatible = "snps,dw-i3c-master-1.00a", },
+	{},
+};
+MODULE_DEVICE_TABLE(of, dw_i3c_master_of_match);
+
 static int dw_i3c_probe(struct platform_device *pdev)
 {
+	const struct of_device_id *match;
 	struct dw_i3c_master *master;
 	int ret, irq;
 
@@ -2324,6 +2347,18 @@ static int dw_i3c_probe(struct platform_device *pdev)
 	master->datstartaddr = ret;
 	master->maxdevs = ret >> 16;
 	master->free_pos = GENMASK(master->maxdevs - 1, 0);
+
+	/* match any platform-specific ops */
+	match = of_match_node(dw_i3c_master_of_match, pdev->dev.of_node);
+	if (match && match->data)
+		master->platform_ops = match->data;
+
+	/* platform-specific probe */
+	if (master->platform_ops && master->platform_ops->probe) {
+		ret = master->platform_ops->probe(master, pdev);
+		if (ret)
+			goto err_assert_rst;
+	}
 
 	writel(INTR_ALL, master->regs + INTR_STATUS);
 	irq = platform_get_irq(pdev, 0);
@@ -2379,12 +2414,6 @@ static void dw_i3c_shutdown(struct platform_device *pdev)
 {
 	dw_i3c_remove(pdev);
 }
-
-static const struct of_device_id dw_i3c_master_of_match[] = {
-	{ .compatible = "snps,dw-i3c-master-1.00a", },
-	{},
-};
-MODULE_DEVICE_TABLE(of, dw_i3c_master_of_match);
 
 static struct platform_driver dw_i3c_driver = {
 	.probe = dw_i3c_probe,

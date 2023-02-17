@@ -1103,6 +1103,12 @@ static int dw_i3c_target_bus_init(struct i3c_master_controller *m)
 	u32 reg;
 	int ret;
 
+	if (master->platform_ops && master->platform_ops->init) {
+		ret = master->platform_ops->init(master);
+		if (ret)
+			return ret;
+	}
+
 	ret = dw_i3c_bus_clk_cfg(m);
 	if (ret)
 		return ret;

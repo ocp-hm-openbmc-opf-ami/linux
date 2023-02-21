@@ -125,6 +125,7 @@ struct peci_platformpower {
 	struct peci_sensor_data energy_cache; /* used to limit PECI communication */
 	struct peci_sensor_data power_sensor_prev_energy;
 	struct peci_sensor_data energy_sensor_prev_energy;
+	bool extended_energy_supported;
 
 	union peci_pkg_power_sku_unit units;
 	bool units_valid;
@@ -208,9 +209,14 @@ peci_platformpower_get_energy_counter(struct peci_platformpower *priv,
 		goto unlock;
 	}
 
-	ret = peci_pcs_read(priv->mgr, PECI_MBX_INDEX_ENERGY_COUNTER,
-			    PECI_PKG_ID_PLATFORM, (u8 *)&sensor_data->uvalue,
-			    sizeof(u32));
+	if (priv->extended_energy_supported)
+		ret = peci_pcs_read(priv->mgr, PECI_MBX_INDEX_ENERGY_COUNTER,
+				    PECI_PKG_ID_PLATFORM, (u8 *)&sensor_data->uvalue,
+				    sizeof(sensor_data->uvalue));
+	else
+		ret = peci_pcs_read(priv->mgr, PECI_MBX_INDEX_ENERGY_COUNTER,
+				    PECI_PKG_ID_PLATFORM, (u8 *)&sensor_data->uvalue,
+				    sizeof(u32));
 
 	if (ret) {
 		dev_dbg(priv->dev, "not able to read package energy\n");
@@ -265,7 +271,7 @@ peci_platformpower_get_average_power(void *ctx,
 					 &priv->power_sensor_prev_energy,
 					 &priv->energy_cache,
 					 PECI_PLATFORMPOWER_ENERGY_UNIT,
-					 false,
+					 priv->extended_energy_supported,
 					 &sensor_data->value);
 	if (ret) {
 		dev_dbg(priv->dev, "power calculation failed\n");
@@ -616,7 +622,7 @@ peci_platformpower_read_energy(void *ctx, struct peci_sensor_conf *sensor_conf,
 				    &priv->energy_sensor_prev_energy,
 				    &priv->energy_cache,
 				    PECI_PLATFORMPOWER_ENERGY_UNIT,
-				    false,
+				    priv->extended_energy_supported,
 				    &sensor_data->value);
 
 	if (ret) {
@@ -1000,6 +1006,12 @@ static int peci_platformpower_probe(struct platform_device *pdev)
 	priv->info[PECI_PLATFORMPOWER_SENSOR_TYPE_ENERGY] = &priv->energy_info;
 	priv->energy_info.type = hwmon_energy;
 	priv->energy_info.config = priv->energy_config;
+
+	/* Extended energy read is supported on GNR. */
+	if (mgr->gen_info->model == INTEL_FAM6_GRANITERAPIDS)
+		priv->extended_energy_supported = true;
+	else
+		priv->extended_energy_supported = false;
 
 	priv->chip.ops = &peci_platformpower_ops;
 	priv->chip.info = priv->info;

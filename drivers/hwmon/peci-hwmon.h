@@ -12,19 +12,22 @@
 #define UPDATE_INTERVAL_100MS		(HZ / 10)
 #define UPDATE_INTERVAL_10S		(HZ * 10)
 
+#define EXTENDED_ENERGY_TIME_UNIT_10NS	100000000
+
 #define PECI_HWMON_LABEL_STR_LEN	10
 
 /**
  * struct peci_sensor_data - PECI sensor information
  * @valid: flag to indicate the sensor value is valid
- * @value: sensor value in milli units
+ * @value: hwmon sensor value in milli units
+ * @uvalue: used to store PECI reg value
  * @last_updated: time of the last update in jiffies
  */
 struct peci_sensor_data {
 	uint valid;
 	union {
 		s32 value;
-		u32 uvalue;
+		u64 uvalue;
 	};
 	ulong last_updated;
 	struct mutex lock; /* protect sensor access */
@@ -171,6 +174,7 @@ peci_sensor_get_ctx(s32 attribute, struct peci_sensor_conf sensor_conf_list[],
 #define PECI_PCS_PARAM_ZERO 0x0000u
 
 #define PECI_PCS_REGISTER_SIZE 4u /* PCS register size in bytes */
+#define PECI_PCS_EXT_REGISTER_SIZE 8u /* PCS extended register size in bytes */
 
 /* PPL1 value to PPL2 value conversation macro */
 #define PECI_PCS_PPL1_TO_PPL2(ppl1_value) ((((u32)(ppl1_value)) * 12uL) / 10uL)
@@ -180,6 +184,19 @@ peci_sensor_get_ctx(s32 attribute, struct peci_sensor_conf sensor_conf_list[],
 #define PECI_PCS_PPL2_TIME_WINDOW 10 /* PPL2 Time Window value in ms */
 
 #define PECI_PCS_PPL_MAX_VALUE 0x7FFF /* Maximum PPL1/PPL2 Limit value */
+
+/**
+ * struct peci_acc_energy_status_extended - PECI Accumulated Energy Status PCS
+ * Accessing over PECI: PCS=0x3, Parameters: 0xFF, 0xFE
+ *     @energy:        Bits [31:0] - Free running accumulated energy counter
+ *     @timestamp:     Bits [63:32] - Timestamp
+ */
+struct peci_acc_energy_status_extended {
+	u32 energy;
+	u32 timestamp;
+} __packed;
+
+static_assert(sizeof(struct peci_acc_energy_status_extended) == PECI_PCS_EXT_REGISTER_SIZE);
 
 /**
  * union peci_pkg_power_sku_unit - PECI Package Power Unit PCS
@@ -392,6 +409,79 @@ static inline u32 peci_pcs_munits_to_xn(u32 mu_value, u8 n)
 }
 
 /**
+ * peci_get_energy_ext_value - get energy value from extended energy container
+ * @energy: Pointer to peci sensor data with extended energy reading
+ *
+ * Return: Energy value
+ */
+static inline u32 peci_get_energy_ext_value(struct peci_sensor_data *energy)
+{
+	struct peci_acc_energy_status_extended *energy_ext =
+		(struct peci_acc_energy_status_extended *)&energy->uvalue;
+
+	return energy_ext->energy;
+}
+
+/**
+ * peci_get_energy_ext_elapsed - get time elapsed since previous extended energy reading
+ * @prev_energy: Pointer to peci sensor data with previous extended energy reading
+ * @curr_energy: Pointer to peci sensor data with current extended energy reading
+ *
+ * Return: Time elapsed since previous energy reading
+ */
+static inline ulong peci_get_energy_ext_elapsed
+	(struct peci_sensor_data *prev_energy,
+	 struct peci_sensor_data *curr_energy)
+{
+	ulong elapsed;
+
+	struct peci_acc_energy_status_extended *prev_energy_ext =
+		(struct peci_acc_energy_status_extended *)&prev_energy->uvalue;
+	struct peci_acc_energy_status_extended *curr_energy_ext =
+		(struct peci_acc_energy_status_extended *)&curr_energy->uvalue;
+
+	if (curr_energy_ext->timestamp > prev_energy_ext->timestamp)
+		elapsed = curr_energy_ext->timestamp - prev_energy_ext->timestamp;
+	else
+		elapsed = (U32_MAX - prev_energy_ext->timestamp) +
+					curr_energy_ext->timestamp + 1u;
+
+	return elapsed;
+}
+
+/**
+ * peci_pcs_parse_energy_data - parse CPU energy data
+ * @prev_energy: Previous energy reading context with raw energy counter value
+ * @curr_energy: Current energy reading context with raw energy counter value
+ * @extended: True if energy timestamp was read from CPU PCS 3
+ * @energy: Current energy reading context with raw energy counter value
+ * @prev_energy_val: Pointer to previous energy value
+ * @curr_energy_val: Pointer to current energy value
+ * @elapsed: Pointer to time elapsed since previous energy reading
+ * @time_unit: Pointer to time unit
+ */
+static inline void peci_pcs_parse_energy_data(struct peci_sensor_data *prev_energy,
+					      struct peci_sensor_data *curr_energy,
+					      bool extended,
+					      u32 *prev_energy_val,
+					      u32 *curr_energy_val,
+					      ulong *elapsed,
+					      u32 *time_unit)
+{
+	if (extended) {
+		*prev_energy_val = peci_get_energy_ext_value(prev_energy);
+		*curr_energy_val = peci_get_energy_ext_value(curr_energy);
+		*elapsed = peci_get_energy_ext_elapsed(prev_energy, curr_energy);
+		*time_unit = EXTENDED_ENERGY_TIME_UNIT_10NS;
+	} else {
+		*prev_energy_val = (u32)prev_energy->uvalue;
+		*curr_energy_val = (u32)curr_energy->uvalue;
+		*elapsed = curr_energy->last_updated - prev_energy->last_updated;
+		*time_unit = HZ;
+	}
+}
+
+/**
  * peci_pcs_read - read PCS register
  * @peci_mgr: PECI client manager handle
  * @index: PCS index
@@ -458,6 +548,7 @@ static inline int peci_pcs_write(struct peci_client_manager *peci_mgr, u8 index,
  * @prev_energy: Previous energy reading context with raw energy counter value
  * @energy: Current energy reading context with raw energy counter value
  * @unit: Calculation factor
+ * @extended: True if energy timestamp was read from CPU PCS 3
  * @power_val_in_mW: Pointer to the variable calculation result is going to
  * be put
  *
@@ -468,16 +559,21 @@ static inline int peci_pcs_write(struct peci_client_manager *peci_mgr, u8 index,
 static inline int peci_pcs_calc_pwr_from_eng(struct device *dev,
 					     struct peci_sensor_data *prev_energy,
 					     struct peci_sensor_data *energy,
-					     u32 unit, s32 *power_in_mW)
+					     u32 unit, bool extended,
+					     s32 *power_in_mW)
 {
+	u32 prev_energy_val;
+	u32 curr_energy_val;
 	ulong elapsed;
+	u32 time_unit;
 	int ret;
 
+	peci_pcs_parse_energy_data(prev_energy, energy, extended,
+				   &prev_energy_val, &curr_energy_val,
+				   &elapsed, &time_unit);
 
-	elapsed = energy->last_updated - prev_energy->last_updated;
-
-	dev_dbg(dev, "raw energy before %u, raw energy now %u, unit %u, jiffies elapsed %lu\n",
-		prev_energy->uvalue, energy->uvalue, unit, elapsed);
+	dev_dbg(dev, "raw energy before %u, raw energy now %u, energy unit %u, time elapsed %lu, time unit %u\n",
+		prev_energy_val, curr_energy_val, unit, elapsed, time_unit);
 
 	/*
 	 * TODO: Remove checking current energy value against 0.
@@ -492,27 +588,26 @@ static inline int peci_pcs_calc_pwr_from_eng(struct device *dev,
 	 * calculation does not overflow or underflow) or energy read time
 	 * did not change.
 	 */
-	if (energy->uvalue > 0 && prev_energy->last_updated > 0 &&
-	    elapsed < (HZ * 3600) && elapsed) {
+	if (curr_energy_val > 0 && prev_energy->last_updated > 0 &&
+	    elapsed < ((u64)time_unit * 3600) && elapsed) {
 		u32 energy_consumed;
 		u64 energy_consumed_in_mJ;
-		u64 energy_by_jiffies;
+		u64 energy_by_time_unit;
 
-		if (energy->uvalue >= prev_energy->uvalue)
-			energy_consumed = energy->uvalue - prev_energy->uvalue;
+		if (curr_energy_val >= prev_energy_val)
+			energy_consumed = curr_energy_val - prev_energy_val;
 		else
-			energy_consumed = (U32_MAX - prev_energy->uvalue) +
-					energy->uvalue + 1u;
+			energy_consumed = (U32_MAX - prev_energy_val) + curr_energy_val + 1u;
 
 		energy_consumed_in_mJ =
 				peci_pcs_xn_to_munits(energy_consumed, unit);
-		energy_by_jiffies = energy_consumed_in_mJ * HZ;
+		energy_by_time_unit = energy_consumed_in_mJ * time_unit;
 
-		if (energy_by_jiffies > (u64)U32_MAX) {
-			do_div(energy_by_jiffies, elapsed);
-			*power_in_mW = (long)energy_by_jiffies;
+		if (energy_by_time_unit > (u64)U32_MAX) {
+			do_div(energy_by_time_unit, elapsed);
+			*power_in_mW = (long)energy_by_time_unit;
 		} else {
-			*power_in_mW = (u32)energy_by_jiffies / elapsed;
+			*power_in_mW = (u32)energy_by_time_unit / elapsed;
 		}
 
 		dev_dbg(dev, "raw energy consumed %u, scaled energy consumed %llumJ, scaled power %dmW\n",
@@ -538,6 +633,7 @@ static inline int peci_pcs_calc_pwr_from_eng(struct device *dev,
  * @prev_energy: Previous energy reading context with raw energy counter value
  * @energy: Current energy reading context with raw energy counter value
  * @unit: Calculation factor
+ * @extended: True if energy timestamp was read from CPU PCS 3
  * @acc_energy_in_uJ: Pointer to the variable with cumulative energy counter
  *
  * Return: 0 if succeeded,
@@ -547,15 +643,21 @@ static inline int peci_pcs_calc_pwr_from_eng(struct device *dev,
 static inline int peci_pcs_calc_acc_eng(struct device *dev,
 					struct peci_sensor_data *prev_energy,
 					struct peci_sensor_data *curr_energy,
-					u32 unit, u32 *acc_energy_in_uJ)
+					u32 unit, bool extended,
+					s32 *acc_energy_in_uJ)
 {
+	u32 prev_energy_val;
+	u32 curr_energy_val;
 	ulong elapsed;
+	u32 time_unit;
 	int ret;
 
-	elapsed = curr_energy->last_updated - prev_energy->last_updated;
+	peci_pcs_parse_energy_data(prev_energy, curr_energy, extended,
+				   &prev_energy_val, &curr_energy_val,
+				   &elapsed, &time_unit);
 
-	dev_dbg(dev, "raw energy before %u, raw energy now %u, unit %u, jiffies elapsed %lu\n",
-		prev_energy->uvalue, curr_energy->uvalue, unit, elapsed);
+	dev_dbg(dev, "raw energy before %u, raw energy now %u, energy unit %u, time elapsed %lu, time unit %u\n",
+		prev_energy_val, curr_energy_val, unit, elapsed, time_unit);
 
 	/*
 	 * TODO: Remove checking current energy value against 0.
@@ -569,22 +671,21 @@ static inline int peci_pcs_calc_acc_eng(struct device *dev,
 	 * read was more than 17 minutes ago (jiffies and energy raw counter did not wrap
 	 * and power calculation does not overflow or underflow).
 	 */
-	if (curr_energy->uvalue > 0 && prev_energy->last_updated > 0 &&
+	if (curr_energy_val > 0 && prev_energy->last_updated > 0 &&
 	    elapsed < (HZ * 17 * 60)) {
 		u32 energy_consumed;
 		u64 energy_consumed_in_uJ;
 
-		if (curr_energy->uvalue >= prev_energy->uvalue)
-			energy_consumed = curr_energy->uvalue -
-					prev_energy->uvalue;
+		if (curr_energy_val >= prev_energy_val)
+			energy_consumed = curr_energy_val - prev_energy_val;
 		else
-			energy_consumed = (U32_MAX - prev_energy->uvalue) +
-					curr_energy->uvalue + 1u;
+			energy_consumed = (U32_MAX - prev_energy_val) +
+					curr_energy_val + 1u;
 
 		energy_consumed_in_uJ =
 				peci_pcs_xn_to_uunits(energy_consumed, unit);
 		*acc_energy_in_uJ = S32_MAX &
-				(*acc_energy_in_uJ + (u32)energy_consumed_in_uJ);
+				((u64)*acc_energy_in_uJ + energy_consumed_in_uJ);
 
 		dev_dbg(dev, "raw energy %u, scaled energy %llumJ, cumulative energy %dmJ\n",
 			energy_consumed, energy_consumed_in_uJ,

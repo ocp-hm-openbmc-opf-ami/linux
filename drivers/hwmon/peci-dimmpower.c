@@ -97,7 +97,7 @@ peci_dimmpower_get_energy_counter(struct peci_dimmpower *priv,
 
 	ret = peci_pcs_read(priv->mgr, PECI_MBX_INDEX_ENERGY_STATUS,
 			    PECI_PKG_ID_DIMM, (u8 *)&sensor_data->uvalue,
-			    sizeof(sensor_data->uvalue));
+			    sizeof(u32));
 	if (ret) {
 		dev_dbg(priv->dev, "not able to read dimm energy\n");
 		goto unlock;
@@ -106,7 +106,7 @@ peci_dimmpower_get_energy_counter(struct peci_dimmpower *priv,
 	peci_sensor_mark_updated(sensor_data);
 
 	dev_dbg(priv->dev,
-		"energy counter updated %duJ, jif %lu, HZ is %d jiffies\n",
+		"energy counter updated %lluuJ, jif %lu, HZ is %d jiffies\n",
 		sensor_data->uvalue, sensor_data->last_updated, HZ);
 
 unlock:
@@ -146,6 +146,7 @@ peci_dimmpower_get_avg_power(void *ctx, struct peci_sensor_conf *sensor_conf,
 					 &priv->power_sensor_prev_energy,
 					 &priv->energy_cache,
 					 priv->units.bits.eng_unit,
+					 false,
 					 &sensor_data->value);
 	if (ret) {
 		dev_dbg(priv->dev, "power calculation failed\n");
@@ -332,7 +333,7 @@ peci_dimmpower_read_energy(void *ctx, struct peci_sensor_conf *sensor_conf,
 					       sensor_conf->update_interval)) {
 		dev_dbg(priv->dev,
 			"skip generating new energy value %duJ jif %lu\n",
-			sensor_data->uvalue, jiffies);
+			sensor_data->value, jiffies);
 		goto unlock;
 	}
 
@@ -353,7 +354,8 @@ peci_dimmpower_read_energy(void *ctx, struct peci_sensor_conf *sensor_conf,
 				    &priv->energy_sensor_prev_energy,
 				    &priv->energy_cache,
 				    priv->units.bits.eng_unit,
-				    &sensor_data->uvalue);
+				    false,
+				    &sensor_data->value);
 
 	if (ret) {
 		dev_dbg(priv->dev, "cumulative energy calculation failed\n");
@@ -363,7 +365,7 @@ peci_dimmpower_read_energy(void *ctx, struct peci_sensor_conf *sensor_conf,
 					   priv->energy_cache.last_updated);
 
 	dev_dbg(priv->dev, "energy %duJ, jif %lu, HZ is %d jiffies\n",
-		sensor_data->uvalue, sensor_data->last_updated, HZ);
+		sensor_data->value, sensor_data->last_updated, HZ);
 
 unlock:
 	mutex_unlock(&sensor_data->lock);

@@ -76,6 +76,7 @@
 
 /* ASPEED_JTAG_EC : Controller set for go to IDLE */
 #define ASPEED_JTAG_EC_GO_IDLE		BIT(0)
+#define ASPEED_JTAG_EC_TRST		BIT(31)
 
 #define ASPEED_JTAG_IOUT_LEN(len) \
 	(ASPEED_JTAG_CTL_ENG_EN | \
@@ -591,6 +592,40 @@ static void aspeed_jtag_set_tap_state_sw(struct aspeed_jtag *aspeed_jtag,
 				  tapstate->endstate);
 }
 
+static void aspeed_jtag_set_tap_state_sw_26xx(struct aspeed_jtag *aspeed_jtag,
+					      struct jtag_tap_state *tapstate)
+{
+	u32 gblctrl;
+	u32 jtagctrl;
+	u32 enginectrl;
+	int i;
+	/* SW mode from current tap state -> to end_state */
+	if (tapstate->reset) {
+		/* Hardware starts in TLRRESET state - TRST external pin low*/
+		gblctrl = aspeed_jtag_read(aspeed_jtag, ASPEED_JTAG_GBLCTRL);
+		enginectrl = aspeed_jtag_read(aspeed_jtag, ASPEED_JTAG_EC);
+		jtagctrl = aspeed_jtag_read(aspeed_jtag, ASPEED_JTAG_CTRL);
+		for (i = 0; i < ASPEED_JTAG_RESET_CNTR; i++)
+			aspeed_jtag_tck_cycle(aspeed_jtag, 1, 0);
+		aspeed_jtag->current_state = JTAG_STATE_TLRESET;
+		/* Transition TRST External Pin from low to high*/
+		aspeed_jtag_write(aspeed_jtag,
+				  jtagctrl | ASPEED_JTAG_CTL_ENG_OUT_EN,
+				  ASPEED_JTAG_CTRL);
+		aspeed_jtag_write(aspeed_jtag,
+				  enginectrl | ASPEED_JTAG_EC_TRST,
+				  ASPEED_JTAG_EC);
+		aspeed_jtag_write(aspeed_jtag, gblctrl |
+				  ASPEED_JTAG_GBLCTRL_ENG_OUT_EN |
+				  ASPEED_JTAG_GBLCTRL_TRST,
+				  ASPEED_JTAG_GBLCTRL);
+		aspeed_jtag_set_tap_state(aspeed_jtag, aspeed_jtag->current_state,
+					  JTAG_STATE_IDLE);
+	}
+
+	aspeed_jtag_set_tap_state(aspeed_jtag, tapstate->from, tapstate->endstate);
+}
+
 static int aspeed_jtag_status_set(struct jtag *jtag,
 				  struct jtag_tap_state *tapstate)
 {
@@ -647,20 +682,32 @@ static void aspeed_jtag_shctrl_tms_mask(enum jtag_tapstate from,
 static void aspeed_jtag_set_tap_state_hw2(struct aspeed_jtag *aspeed_jtag,
 					  struct jtag_tap_state *tapstate)
 {
-	u32 reg_val;
-
+	u32 gblctrl;
+	u32 jtagctrl;
+	u32 enginectrl;
 	/* x TMS high + 1 TMS low */
 	if (tapstate->reset) {
 		/* Disable sw mode */
 		aspeed_jtag_write(aspeed_jtag, 0, ASPEED_JTAG_SW);
 		udelay(AST26XX_JTAG_CTRL_UDELAY);
-		reg_val = aspeed_jtag_read(aspeed_jtag, ASPEED_JTAG_GBLCTRL);
+		gblctrl = aspeed_jtag_read(aspeed_jtag, ASPEED_JTAG_GBLCTRL);
+		enginectrl = aspeed_jtag_read(aspeed_jtag, ASPEED_JTAG_EC);
+		jtagctrl = aspeed_jtag_read(aspeed_jtag, ASPEED_JTAG_CTRL);
 		aspeed_jtag_write(aspeed_jtag,
-				  reg_val | ASPEED_JTAG_GBLCTRL_ENG_MODE_EN |
-					  ASPEED_JTAG_GBLCTRL_ENG_OUT_EN |
-					  ASPEED_JTAG_GBLCTRL_RESET_FIFO |
-					  ASPEED_JTAG_GBLCTRL_FORCE_TMS,
+				  gblctrl |
+				  ASPEED_JTAG_GBLCTRL_ENG_MODE_EN |
+				  ASPEED_JTAG_GBLCTRL_ENG_OUT_EN |
+				  ASPEED_JTAG_GBLCTRL_RESET_FIFO |
+				  ASPEED_JTAG_GBLCTRL_TRST |
+				  ASPEED_JTAG_GBLCTRL_FORCE_TMS,
 				  ASPEED_JTAG_GBLCTRL);
+		udelay(AST26XX_JTAG_CTRL_UDELAY);
+		aspeed_jtag_write(aspeed_jtag, jtagctrl |
+				  ASPEED_JTAG_CTL_ENG_OUT_EN,
+				  ASPEED_JTAG_CTRL);
+		aspeed_jtag_write(aspeed_jtag, enginectrl |
+				  ASPEED_JTAG_EC_TRST,
+				  ASPEED_JTAG_EC);
 		udelay(AST26XX_JTAG_CTRL_UDELAY);
 		aspeed_jtag->current_state = JTAG_STATE_TLRESET;
 	} else if (tapstate->endstate == JTAG_STATE_IDLE &&
@@ -686,7 +733,7 @@ static int aspeed_jtag_status_set_26xx(struct jtag *jtag,
 #endif
 
 	if (!(aspeed_jtag->mode & JTAG_XFER_HW_MODE)) {
-		aspeed_jtag_set_tap_state_sw(aspeed_jtag, tapstate);
+		aspeed_jtag_set_tap_state_sw_26xx(aspeed_jtag, tapstate);
 		return 0;
 	}
 

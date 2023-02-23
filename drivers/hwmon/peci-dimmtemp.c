@@ -46,6 +46,7 @@ static const u8 support_model[] = {
 	INTEL_FAM6_SAPPHIRERAPIDS,
 	INTEL_FAM6_EMERALDRAPIDS,
 	INTEL_FAM6_GRANITERAPIDS,
+	INTEL_FAM6_SIERRAFOREST,
 };
 
 static inline int read_ddr_dimm_temp_config(struct peci_dimmtemp *priv,
@@ -119,6 +120,7 @@ static int get_dimm_temp(struct peci_dimmtemp *priv, int dimm_no)
 
 	switch (priv->gen_info->model) {
 	case INTEL_FAM6_GRANITERAPIDS:
+	case INTEL_FAM6_SIERRAFOREST:
 		re_msg.addr = priv->mgr->client->addr;
 		re_msg.rx_len = 4;
 		re_msg.msg_type = PECI_ENDPTCFG_TYPE_LOCAL_PCI;

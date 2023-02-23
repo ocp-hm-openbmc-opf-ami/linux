@@ -104,6 +104,7 @@ static int get_bios_reset_cfg(struct peci_cputemp *priv)
 
 	switch (priv->gen_info->model) {
 	case INTEL_FAM6_GRANITERAPIDS:
+	case INTEL_FAM6_SIERRAFOREST:
 		re_msg.addr = priv->mgr->client->addr;
 		re_msg.msg_type = PECI_ENDPTCFG_TYPE_LOCAL_PCI;
 		re_msg.params.pci_cfg.seg = 0;
@@ -418,6 +419,7 @@ static int check_resolved_cores(struct peci_cputemp *priv)
 	/* Get the RESOLVED_CORES register value */
 	switch (priv->gen_info->model) {
 	case INTEL_FAM6_GRANITERAPIDS:
+	case INTEL_FAM6_SIERRAFOREST:
 		re_msg.addr = priv->mgr->client->addr;
 		re_msg.msg_type = PECI_ENDPTCFG_TYPE_LOCAL_PCI;
 		re_msg.params.pci_cfg.seg = 0;

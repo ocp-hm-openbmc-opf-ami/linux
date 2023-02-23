@@ -143,6 +143,7 @@ static const u8 peci_platformpower_models[] = {
 	INTEL_FAM6_SAPPHIRERAPIDS,
 	INTEL_FAM6_EMERALDRAPIDS,
 	INTEL_FAM6_GRANITERAPIDS,
+	INTEL_FAM6_SIERRAFOREST,
 };
 
 static const char

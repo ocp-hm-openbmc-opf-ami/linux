@@ -508,6 +508,15 @@ static int check_populated_dimms(struct peci_dimmtemp *priv)
 	u32 dimm_idx_max = priv->gen_info->dimm_idx_max;
 	int chan_rank;
 	u8  cfg_data[4];
+	/* WA: PCS 14 returns 0xFF instead of 0x0 for unpopulated dimms*/
+	u8  empty_data_wa = 0;
+
+	switch (priv->gen_info->model) {
+	case INTEL_FAM6_GRANITERAPIDS:
+	case INTEL_FAM6_SIERRAFOREST:
+		empty_data_wa = 0xFF;
+		break;
+	}
 
 	for (chan_rank = 0; chan_rank < chan_rank_max; chan_rank++) {
 		int ret, idx;
@@ -535,7 +544,7 @@ static int check_populated_dimms(struct peci_dimmtemp *priv)
 			break;
 		}
 		for (idx = 0; idx < dimm_idx_max; idx++) {
-			if (cfg_data[idx]) {
+			if (cfg_data[idx] && cfg_data[idx] != empty_data_wa) {
 				uint chan = chan_rank * dimm_idx_max + idx;
 				priv->dimm_mask |= BIT(chan);
 				priv->temp_max[chan] = DIMM_TEMP_MAX_DEFAULT;

@@ -281,6 +281,10 @@ static void mctp_peci_cpu_discovery(struct peci_adapter *adapter)
 		if (IS_ERR(rx_packet)) {
 			dev_dbg(priv->dev, "Device EID=%d not discovered\n",
 				cpu.eid);
+			/* first CPU must exist - retry discovery */
+			if (i == 0)
+				return;
+
 			continue;
 		}
 

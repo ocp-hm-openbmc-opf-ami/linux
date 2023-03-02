@@ -201,10 +201,14 @@ static void i3c_target_mctp_delete_client(struct mctp_client *client)
 {
 	struct i3c_target_mctp *priv = client->priv;
 
+	if (!priv)
+		goto out;
+
 	spin_lock_irq(&priv->client_lock);
 	priv->client = NULL;
 	spin_unlock_irq(&priv->client_lock);
 
+out:
 	i3c_target_mctp_client_put(client);
 }
 
@@ -383,6 +387,9 @@ err:
 static void i3c_target_mctp_remove(struct i3c_device *i3cdev)
 {
 	struct i3c_target_mctp *priv = i3cdev_get_drvdata(i3cdev);
+
+	if (priv->client)
+		priv->client->priv = NULL;
 
 	device_destroy(i3c_target_mctp_class, priv->dev->devt);
 	cdev_del(&priv->cdev);

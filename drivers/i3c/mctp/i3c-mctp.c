@@ -32,6 +32,8 @@
 /* MCTP header definitions */
 #define MCTP_HDR_SRC_EID_OFFSET			2
 
+#define MAX_PROCESS_COUNT			255
+
 struct i3c_mctp {
 	struct i3c_device *i3c;
 	struct cdev cdev;
@@ -52,6 +54,14 @@ struct i3c_mctp {
 	struct mutex endpoints_lock;
 	spinlock_t clients_lock; /* to protect PECI and default client accesses */
 	u8 eid;
+	/*
+	 * As there can be more than one process opening the /dev file - we need
+	 * a counter to take care of device cleanup in case the file is opened
+	 * on device removal. We also need a locker to avoid potential race
+	 * conditions.
+	 */
+	spinlock_t file_lock;
+	u8 process_count;
 };
 
 struct i3c_mctp_client {
@@ -259,6 +269,25 @@ out:
 	schedule_delayed_work(&priv->polling_work, msecs_to_jiffies(POLLING_TIMEOUT_MS));
 }
 
+static int i3c_mctp_open(struct inode *inode, struct file *file)
+{
+	struct i3c_mctp *priv = container_of(inode->i_cdev, struct i3c_mctp, cdev);
+	int ret = 0;
+
+	spin_lock(&priv->file_lock);
+	if (priv->process_count >= MAX_PROCESS_COUNT) {
+		ret = -EBUSY;
+		goto out_unlock;
+	}
+
+	priv->process_count++;
+
+out_unlock:
+	spin_unlock(&priv->file_lock);
+
+	return ret;
+}
+
 static ssize_t i3c_mctp_write(struct file *file, const char __user *buf, size_t count,
 			      loff_t *f_pos)
 {
@@ -329,7 +358,14 @@ static ssize_t i3c_mctp_read(struct file *file, char __user *buf, size_t count, 
 
 static int i3c_mctp_release(struct inode *inode, struct file *file)
 {
+	struct i3c_mctp *priv = container_of(inode->i_cdev, struct i3c_mctp, cdev);
 	struct i3c_mctp_client *client = file->private_data;
+
+	if (inode->i_cdev && priv) {
+		spin_lock(&priv->file_lock);
+		priv->process_count--;
+		spin_unlock(&priv->file_lock);
+	}
 
 	if (!client)
 		return 0;
@@ -516,6 +552,7 @@ i3c_mctp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 static const struct file_operations i3c_mctp_fops = {
 	.owner = THIS_MODULE,
+	.open = i3c_mctp_open,
 	.read = i3c_mctp_read,
 	.write = i3c_mctp_write,
 	.poll = i3c_mctp_poll,
@@ -580,11 +617,13 @@ static struct i3c_mctp *i3c_mctp_alloc(struct i3c_device *i3c)
 	priv->id = id;
 	priv->i3c = i3c;
 	priv->eid = 0;
+	priv->process_count = 0;
 
 	INIT_LIST_HEAD(&priv->endpoints);
 	mutex_init(&priv->endpoints_lock);
 
 	spin_lock_init(&priv->clients_lock);
+	spin_lock_init(&priv->file_lock);
 
 	return priv;
 }
@@ -876,9 +915,17 @@ error_cdev:
 static void i3c_mctp_remove(struct i3c_device *i3cdev)
 {
 	struct i3c_mctp *priv = i3cdev_get_drvdata(i3cdev);
+	int i;
 
 	if (priv->default_client)
 		priv->default_client->priv = NULL;
+
+	spin_lock(&priv->file_lock);
+	for (i = 0; i < priv->process_count; i++) {
+		kobject_put(&priv->cdev.kobj);
+		module_put(priv->cdev.owner);
+	}
+	spin_unlock(&priv->file_lock);
 
 	i3c_mctp_disable_ibi(i3cdev);
 	cancel_delayed_work(&priv->polling_work);

@@ -534,6 +534,9 @@ i3c_mctp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	void __user *userbuf = (void __user *)arg;
 	int ret;
 
+	if (!file_inode(file)->i_cdev)
+		return -ENODEV;
+
 	switch (cmd) {
 	case I3C_MCTP_IOCTL_SET_EID_INFO:
 		ret = i3c_mctp_set_eid_info(priv, userbuf);

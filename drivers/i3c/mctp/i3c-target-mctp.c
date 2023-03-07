@@ -272,6 +272,9 @@ static ssize_t i3c_target_mctp_write(struct file *file, const char __user *buf,
 	int ret;
 	u8 addr;
 
+	if (!priv)
+		return -ENODEV;
+
 	if (count < I3C_MCTP_MIN_PACKET_SIZE)
 		return -EINVAL;
 

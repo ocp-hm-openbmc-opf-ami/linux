@@ -388,8 +388,11 @@ static void i3c_target_mctp_remove(struct i3c_device *i3cdev)
 {
 	struct i3c_target_mctp *priv = i3cdev_get_drvdata(i3cdev);
 
-	if (priv->client)
+	if (priv->client) {
 		priv->client->priv = NULL;
+		kobject_put(&priv->cdev.kobj);
+		module_put(priv->cdev.owner);
+	}
 
 	device_destroy(i3c_target_mctp_class, priv->dev->devt);
 	cdev_del(&priv->cdev);

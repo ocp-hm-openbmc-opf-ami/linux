@@ -29,7 +29,7 @@
 #define AQCD01 0x154
 #define ENB_CMD_FLT 0x1
 #define ENB_ADDR_FLT 0xF
-#define CMD_READ 0x8000003B
+#define CMD_READ 0x8000006B
 #define CMD_PROG 0x80000202
 #define CMD_ERASE 0x8000D8D8
 

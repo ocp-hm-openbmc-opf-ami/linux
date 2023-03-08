@@ -190,6 +190,9 @@ static int aspeed_spilock_probe(struct platform_device *pdev)
 		goto err_rot_s_file;
 
 	platform_set_drvdata(pdev, spilock);
+	/* Lock ROT-P and ROT-S by default */
+	lock_spi_region(spilock->dev, ROT_P, true);
+	lock_spi_region(spilock->dev, ROT_S, true);
 
 	return 0;
 

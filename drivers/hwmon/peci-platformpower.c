@@ -956,12 +956,6 @@ static int peci_platformpower_probe(struct platform_device *pdev)
 	int ret;
 #endif /* CONFIG_SMART_MODULE */
 
-	/* Psys is available only on CPU0. */
-	if (mgr->client->addr != PECI_BASE_ADDR) {
-		dev_dbg(dev, "not supported CPU index\n");
-		return -ENODEV;
-	}
-
 	cmd_mask = BIT(PECI_CMD_RD_PKG_CFG) | BIT(PECI_CMD_WR_PKG_CFG);
 	if ((mgr->client->adapter->cmd_mask & cmd_mask) != cmd_mask)
 		return -ENODEV;

@@ -1021,6 +1021,13 @@
 	};
 };
 
+&espi {
+	vwgpio: vwgpio@0 {
+		compatible = "aspeed,ast2600-espi-vw-gpio";
+		status = "disabled";
+	};
+};
+
 &i2c {
 	i2c0: i2c-bus@80 {
 		#address-cells = <1>;

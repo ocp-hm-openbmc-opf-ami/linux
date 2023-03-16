@@ -1,0 +1,72 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/gpio/aspeed,ast2600-espi-vw-gpio.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Aspeed ESPI VW GPIO controller
+
+maintainers:
+  - Nidhin M S <nidhin.ms@intel.com>
+
+description:
+  The ASPEED eSPI Slave Interface shall support the eSPI Virtual Wire
+  channel and implement support for the General Purpose I/O Expander
+  Virtual Wire group (Index 128..255) which allows the master to
+  control GPIOs on the slave. The aim of this driver is to
+  expose virtual wire gpios to be used as regular gpios using libgpiod.
+  This module will work as a child of espi.
+
+properties:
+  compatible:
+    const: aspeed,ast2600-espi-vw-gpio
+  gpio-count:
+    description: Number of VW GPIO lines. This include unnamed GPIO lines also.
+    $ref: /schemas/types.yaml#/definitions/uint32
+    minimum: 1
+    maximum: 32
+  gpio-names:
+    description:
+      Array of human readable names to be used for each GPIO. Length can be less
+      than or equal to gpio-count property. Refer gpio-names-mask for usage.
+    $ref: /schemas/types.yaml#/definitions/string-array
+    minItems: 1
+    maxItems: 32
+  gpio-names-mask:
+    description:
+      Used to identify which gpio name maps to which index. For example if
+      we have 32 GPIO lines and gpio-names has only 6 then this mask will be
+      used to identify the 6 GPIOs which has names and all other GPIO lines
+      will be marked as unused
+    $ref: /schemas/types.yaml#/definitions/uint32
+    minimum: 0x000000
+    maximum: 0xffffff
+  gpio-dir-mask:
+    description:
+      Bitmask used to identify which GPIO is input and which is output.
+      1 denotes output and 0 means input GPIO.
+    $ref: /schemas/types.yaml#/definitions/uint32
+    minimum: 0x000000
+    maximum: 0xffffff
+
+required:
+  - compatible
+  - gpio-count
+  - gpio-names-mask
+  - gpio-dir-mask
+  - gpio-names
+
+additionalProperties: false
+
+examples:
+  - |
+    vwgpio: vwgpio@0 {
+      compatible = "aspeed,ast2600-espi-vw-gpio";
+      gpio-count = <32>;
+      gpio-names-mask = <0x000001F1>;
+      gpio-dir-mask = <0x00000FF0>;
+      gpio-names = "VW_FM_BIOS_POST_CMPLT_N",
+        "VW_FM_DUAL_PARTITION_N", "VW_FM_STANDALONE_MODE_N",
+        "VW_FM_4S_8S_N_MODE", "VW_FM_NODE_ID_1", "VW_FM_NODE_ID_0";
+      status = "disabled";
+    };

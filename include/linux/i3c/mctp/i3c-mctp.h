@@ -41,6 +41,7 @@ struct i3c_mctp_packet {
 
 void *i3c_mctp_packet_alloc(gfp_t flags);
 void i3c_mctp_packet_free(void *packet);
+void i3c_mctp_flush_rx_queue(struct i3c_mctp_client *client);
 
 int i3c_mctp_get_eid(struct i3c_mctp_client *client, u8 domain_id, u8 *eid);
 int i3c_mctp_send_packet(struct i3c_device *i3c, struct i3c_mctp_packet *tx_packet);

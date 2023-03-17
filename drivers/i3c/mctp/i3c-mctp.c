@@ -109,6 +109,20 @@ void i3c_mctp_packet_free(void *packet)
 }
 EXPORT_SYMBOL_GPL(i3c_mctp_packet_free);
 
+/**
+ * i3c_mctp_flush_rx_queue() - flushes mctp client rx queue
+ *
+ * @client: pointer to the i3c mctp client whose rx queue should be flushed
+ */
+void i3c_mctp_flush_rx_queue(struct i3c_mctp_client *client)
+{
+	struct i3c_mctp_packet *packet;
+
+	while ((packet = ptr_ring_consume_bh(&client->rx_queue)))
+		i3c_mctp_packet_free(packet);
+}
+EXPORT_SYMBOL_GPL(i3c_mctp_flush_rx_queue);
+
 static void i3c_mctp_client_free(struct kref *ref)
 {
 	struct i3c_mctp_client *client = container_of(ref, typeof(*client), ref);

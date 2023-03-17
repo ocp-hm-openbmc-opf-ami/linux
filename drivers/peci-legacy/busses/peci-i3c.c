@@ -129,6 +129,8 @@ static struct i3c_mctp_packet *i3c_peci_send_receive(struct peci_adapter *adapte
 
 	prepare_tx_packet(tx_packet, tx_len, rx_len, tx_buf, dest_eid, tag);
 
+	i3c_mctp_flush_rx_queue(priv->client);
+
 	print_hex_dump_bytes("TX : ", DUMP_PREFIX_NONE, &tx_packet->data, tx_packet->size);
 
 	ret = i3c_mctp_send_packet(i3cdev, tx_packet);

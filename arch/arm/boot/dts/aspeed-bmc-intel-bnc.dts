@@ -6,6 +6,24 @@
 / {
 	model = "Intel Beechnut City BMC";
 	compatible = "intel,bnc-bmc", "aspeed,ast2600";
+	aliases {
+		i2c16 = &i2c9_mux_ch7;
+	};
+};
+
+&i2c9 {
+	/*
+	 * W/A: add SMBUS MUX via device tree instead of entity-manager
+	 * to assign fixed numbers for buses behind MUX which can be referred
+	 * later in platform configuration
+	 */
+	pca9848@70 {
+		compatible = "nxp,pca9848";
+		reg = <0x70>;
+		i2c9_mux_ch7: i2c@7 {
+			reg = <7>;
+		};
+	};
 };
 
 &i3c2 {

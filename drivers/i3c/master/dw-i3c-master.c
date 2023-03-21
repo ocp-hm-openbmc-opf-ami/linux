@@ -210,7 +210,7 @@
 #define CCC_DEVICE_STATUS		0x58
 #define DEVICE_ADDR_TABLE_POINTER	0x5c
 #define DEVICE_ADDR_TABLE_DEPTH(x)	(((x) & GENMASK(31, 16)) >> 16)
-#define DEVICE_ADDR_TABLE_ADDR(x)	((x) & GENMASK(7, 0))
+#define DEVICE_ADDR_TABLE_ADDR(x)	((x) & GENMASK(15, 0))
 
 #define DEV_CHAR_TABLE_POINTER		0x60
 #define VENDOR_SPECIFIC_REG_POINTER	0x6c
@@ -379,6 +379,7 @@ struct dw_i3c_master {
 	struct device *dev;
 	struct i3c_master_controller base;
 	u16 maxdevs;
+	u16 dat_depth;
 	u16 datstartaddr;
 	u32 free_pos;
 	struct {
@@ -2681,8 +2682,9 @@ static int dw_i3c_probe(struct platform_device *pdev)
 	master->caps.datafifodepth = DATA_BUFFER_STATUS_LEVEL_TX(ret);
 
 	ret = readl(master->regs + DEVICE_ADDR_TABLE_POINTER);
-	master->datstartaddr = ret;
-	master->maxdevs = ret >> 16;
+	master->datstartaddr = DEVICE_ADDR_TABLE_ADDR(ret);
+	master->maxdevs = DEVICE_ADDR_TABLE_DEPTH(ret);
+	master->dat_depth = DEVICE_ADDR_TABLE_DEPTH(ret);
 	master->free_pos = GENMASK(master->maxdevs - 1, 0);
 
 	/* match any platform-specific ops */

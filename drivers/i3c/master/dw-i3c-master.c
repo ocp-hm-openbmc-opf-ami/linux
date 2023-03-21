@@ -294,8 +294,11 @@
 #define DEV_ADDR_TABLE_SIR_REJECT	BIT(13)
 #define DEV_ADDR_TABLE_IBI_WITH_DATA	BIT(12)
 #define DEV_ADDR_TABLE_IBI_PEC_EN	BIT(11)
-#define DEV_ADDR_TABLE_DYNAMIC_ADDR(x)	(((x) << 16) & GENMASK(23, 16))
-#define DEV_ADDR_TABLE_DYNAMIC_ADDR_GET(x)	(((x) & GENMASK(23, 16)) >> 16)
+#define DEV_ADDR_TABLE_DYNAMIC_ADDR_PARITY_MASK	BIT(23)
+#define DEV_ADDR_TABLE_DYNAMIC_ADDR_PARITY(x)	(((x) << 23) & BIT(23))
+#define DEV_ADDR_TABLE_DYNAMIC_ADDR_MASK	GENMASK(22, 16)
+#define DEV_ADDR_TABLE_DYNAMIC_ADDR(x)	(((x) << 16) & DEV_ADDR_TABLE_DYNAMIC_ADDR_MASK)
+#define DEV_ADDR_TABLE_DYNAMIC_ADDR_GET(x)	(((x) & DEV_ADDR_TABLE_DYNAMIC_ADDR_MASK) >> 16)
 #define DEV_ADDR_TABLE_STATIC_ADDR(x)	((x) & GENMASK(6, 0))
 #define DEV_ADDR_TABLE_LOC(start, idx)	((start) + ((idx) << 2))
 
@@ -1495,49 +1498,36 @@ static int dw_i3c_master_send_ccc_cmd(struct i3c_master_controller *m,
 	return ret;
 }
 
-static int dw_i3c_master_daa(struct i3c_master_controller *m)
+static int dw_i3c_master_daa_single(struct i3c_master_controller *m)
 {
 	struct dw_i3c_master *master = to_dw_i3c_master(m);
 	struct dw_i3c_xfer *xfer;
 	struct dw_i3c_cmd *cmd;
-	u32 olddevs, newdevs;
-	u8 p, last_addr = 0;
-	int ret, pos;
-
-	olddevs = ~(master->free_pos);
+	u8 addrs[MAX_DEVS];
+	int last_addr = 0;
+	int newdevs;
+	int index;
 
 	/* Prepare DAT before launching DAA. */
-	for (pos = 0; pos < master->maxdevs; pos++) {
-		if (olddevs & BIT(pos))
-			continue;
-
-		ret = i3c_master_get_free_addr(m, last_addr + 1);
-		if (ret < 0)
+	for (index = 0; index < master->dat_depth; index++) {
+		last_addr = i3c_master_get_free_addr(m, last_addr + 1);
+		if (last_addr < 0)
 			return -ENOSPC;
 
-		master->addrs[pos] = ret;
-		p = even_parity(ret);
-		last_addr = ret;
-		ret |= (p << 7);
-
-		writel(DEV_ADDR_TABLE_DYNAMIC_ADDR(ret),
-		       master->regs +
-		       DEV_ADDR_TABLE_LOC(master->datstartaddr, pos));
+		addrs[index] = last_addr;
+		writel(DEV_ADDR_TABLE_DYNAMIC_ADDR_PARITY(even_parity(last_addr)) |
+		       DEV_ADDR_TABLE_DYNAMIC_ADDR(last_addr),
+		       master->regs + DEV_ADDR_TABLE_LOC(master->datstartaddr, index));
 	}
 
 	xfer = dw_i3c_master_alloc_xfer(master, 1);
 	if (!xfer)
 		return -ENOMEM;
 
-	pos = dw_i3c_master_get_free_pos(master);
-	if (pos < 0) {
-		dw_i3c_master_free_xfer(xfer);
-		return pos;
-	}
 	cmd = &xfer->cmds[0];
 	cmd->cmd_hi = 0x1;
-	cmd->cmd_lo = COMMAND_PORT_DEV_COUNT(master->maxdevs - pos) |
-		      COMMAND_PORT_DEV_INDEX(pos) |
+	cmd->cmd_lo = COMMAND_PORT_DEV_COUNT(master->dat_depth) |
+		      COMMAND_PORT_DEV_INDEX(0) |
 		      COMMAND_PORT_CMD(I3C_CCC_ENTDAA) |
 		      COMMAND_PORT_ADDR_ASSGN_CMD |
 		      COMMAND_PORT_TOC |
@@ -1547,17 +1537,40 @@ static int dw_i3c_master_daa(struct i3c_master_controller *m)
 	if (!wait_for_completion_timeout(&xfer->comp, XFER_TIMEOUT))
 		dw_i3c_master_dequeue_xfer(master, xfer);
 
-	newdevs = GENMASK(master->maxdevs - cmd->rx_len - 1, 0);
-	newdevs &= ~olddevs;
-
-	for (pos = 0; pos < master->maxdevs; pos++) {
-		if (newdevs & BIT(pos))
-			i3c_master_add_i3c_dev_locked(m, master->addrs[pos]);
-	}
+	newdevs = master->dat_depth - cmd->rx_len;
 
 	dw_i3c_master_free_xfer(xfer);
 
-	return 0;
+	for (index = 0; index < newdevs; index++)
+		i3c_master_add_i3c_dev_locked(m, addrs[index]);
+
+	return newdevs;
+}
+
+static int dw_i3c_master_daa(struct i3c_master_controller *m)
+{
+	struct dw_i3c_master *master = to_dw_i3c_master(m);
+	u32 hw_dat[MAX_DEVS];
+	int index;
+	int ret;
+
+	/* Save DAT before DAA */
+	for (index = 0; index < master->dat_depth; ++index)
+		hw_dat[index] = readl(master->regs + DEV_ADDR_TABLE_LOC(master->datstartaddr,
+									index));
+
+	do {
+		ret = dw_i3c_master_daa_single(m);
+		if (ret < 0)
+			break;
+	} while (ret == master->dat_depth);
+
+	/* Restore DAT after DAA */
+	for (index = 0; index < master->dat_depth; ++index)
+		writel(hw_dat[index], master->regs + DEV_ADDR_TABLE_LOC(master->datstartaddr,
+									index));
+
+	return (ret < 0) ? ret : 0;
 }
 
 static int dw_i3c_master_priv_xfers(struct i3c_dev_desc *dev,
@@ -2640,6 +2653,7 @@ static int dw_i3c_probe(struct platform_device *pdev)
 	const struct of_device_id *match;
 	struct dw_i3c_master *master;
 	int ret, irq;
+	int pos;
 
 	master = devm_kzalloc(&pdev->dev, sizeof(*master), GFP_KERNEL);
 	if (!master)
@@ -2686,6 +2700,10 @@ static int dw_i3c_probe(struct platform_device *pdev)
 	master->maxdevs = DEVICE_ADDR_TABLE_DEPTH(ret);
 	master->dat_depth = DEVICE_ADDR_TABLE_DEPTH(ret);
 	master->free_pos = GENMASK(master->maxdevs - 1, 0);
+
+	/* Clear HW DAT */
+	for (pos = 0; pos < master->dat_depth; ++pos)
+		writel(0, master->regs + DEV_ADDR_TABLE_LOC(master->datstartaddr, pos));
 
 	/* match any platform-specific ops */
 	match = of_match_node(dw_i3c_master_of_match, pdev->dev.of_node);

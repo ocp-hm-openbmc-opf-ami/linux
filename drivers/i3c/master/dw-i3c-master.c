@@ -640,6 +640,94 @@ static int dw_i3c_master_get_free_pos(struct dw_i3c_master *master)
 	return ffs(master->free_pos) - 1;
 }
 
+static int dw_i3c_master_remove_dev(struct dw_i3c_master *master, u8 pos)
+{
+	if (pos > master->maxdevs)
+		return -EINVAL;
+
+	writel(0, master->regs + DEV_ADDR_TABLE_LOC(master->datstartaddr, pos));
+	master->addrs[pos] = 0;
+	master->free_pos |= BIT(pos);
+
+	return 0;
+}
+
+static int dw_i3c_master_add_i3c_dev(struct dw_i3c_master *master, u8 addr, u8 pos)
+{
+	u32 dat_reg;
+
+	if (pos > master->maxdevs)
+		return -EINVAL;
+
+	master->free_pos &= ~BIT(pos);
+	master->addrs[pos] = addr;
+	dat_reg = DEV_ADDR_TABLE_DYNAMIC_ADDR_PARITY(even_parity(addr)) |
+		  DEV_ADDR_TABLE_DYNAMIC_ADDR(addr);
+	writel(dat_reg, master->regs + DEV_ADDR_TABLE_LOC(master->datstartaddr, pos));
+
+	return 0;
+}
+
+static int dw_i3c_master_update_i3c_dev(struct dw_i3c_master *master, u8 addr, u8 pos)
+{
+	u32 dat_reg;
+
+	if (pos > master->maxdevs)
+		return -EINVAL;
+
+	dat_reg = readl(master->regs + DEV_ADDR_TABLE_LOC(master->datstartaddr, pos));
+
+	if (DEV_ADDR_TABLE_DYNAMIC_ADDR_GET(dat_reg) != addr) {
+		master->addrs[pos] = addr;
+		dat_reg &= ~(DEV_ADDR_TABLE_DYNAMIC_ADDR_PARITY_MASK |
+			     DEV_ADDR_TABLE_DYNAMIC_ADDR_MASK);
+		dat_reg |= DEV_ADDR_TABLE_DYNAMIC_ADDR_PARITY(even_parity(addr)) |
+			   DEV_ADDR_TABLE_DYNAMIC_ADDR(addr);
+		writel(dat_reg, master->regs + DEV_ADDR_TABLE_LOC(master->datstartaddr, pos));
+	}
+
+	return 0;
+}
+
+static int dw_i3c_master_add_i2c_dev(struct dw_i3c_master *master, u8 addr, u8 pos)
+{
+	if (pos > master->maxdevs)
+		return -EINVAL;
+
+	master->addrs[pos] = addr;
+	master->free_pos &= ~BIT(pos);
+	writel(DEV_ADDR_TABLE_LEGACY_I2C_DEV | DEV_ADDR_TABLE_STATIC_ADDR(addr), master->regs +
+	       DEV_ADDR_TABLE_LOC(master->datstartaddr, pos));
+
+	return 0;
+}
+
+static void dw_i3c_master_enable_ibi_in_dat(struct dw_i3c_master *master, u8 pos, bool ibi_payload)
+{
+	int dat_loc = DEV_ADDR_TABLE_LOC(master->datstartaddr, pos);
+	u32 dat_reg;
+
+	dat_reg = readl(master->regs + dat_loc);
+	dat_reg &= ~DEV_ADDR_TABLE_SIR_REJECT;
+	if (ibi_payload)
+		dat_reg |= DEV_ADDR_TABLE_IBI_WITH_DATA;
+	dat_reg |= DEV_ADDR_TABLE_IBI_PEC_EN;
+
+	writel(dat_reg, master->regs + dat_loc);
+}
+
+static void dw_i3c_master_disable_ibi_in_dat(struct dw_i3c_master *master, u8 pos)
+{
+	int dat_loc = DEV_ADDR_TABLE_LOC(master->datstartaddr, pos);
+	u32 dat_reg;
+
+	dat_reg = readl(master->regs + dat_loc);
+	dat_reg |= DEV_ADDR_TABLE_SIR_REJECT;
+	dat_reg &= ~DEV_ADDR_TABLE_IBI_WITH_DATA;
+	dat_reg &= ~DEV_ADDR_TABLE_IBI_PEC_EN;
+	writel(dat_reg, master->regs + dat_loc);
+}
+
 static void dw_i3c_master_wr_tx_fifo(struct dw_i3c_master *master,
 				     const u8 *bytes, int nbytes)
 {
@@ -1880,17 +1968,8 @@ static int dw_i3c_master_reattach_i3c_dev(struct i3c_dev_desc *dev,
 	struct dw_i3c_i2c_dev_data *data = i3c_dev_get_master_data(dev);
 	struct i3c_master_controller *m = i3c_dev_get_master(dev);
 	struct dw_i3c_master *master = to_dw_i3c_master(m);
-	int offset = DEV_ADDR_TABLE_LOC(master->datstartaddr, data->index);
-	u32 dat_reg;
 
-	dat_reg = readl(master->regs + offset);
-	if (DEV_ADDR_TABLE_DYNAMIC_ADDR_GET(dat_reg) != dev->info.dyn_addr) {
-		master->addrs[data->index] = dev->info.dyn_addr;
-		writel(DEV_ADDR_TABLE_DYNAMIC_ADDR(master->addrs[data->index]),
-		       master->regs + offset);
-	}
-
-	return 0;
+	return dw_i3c_master_update_i3c_dev(master, dev->info.dyn_addr, data->index);
 }
 
 static int dw_i3c_master_attach_i3c_dev(struct i3c_dev_desc *dev)
@@ -1899,6 +1978,7 @@ static int dw_i3c_master_attach_i3c_dev(struct i3c_dev_desc *dev)
 	struct dw_i3c_master *master = to_dw_i3c_master(m);
 	struct dw_i3c_i2c_dev_data *data;
 	int pos;
+	int ret;
 
 	pos = dw_i3c_master_get_addr_pos(master, dev->info.dyn_addr ? : dev->info.static_addr);
 	if (pos < 0) {
@@ -1911,16 +1991,13 @@ static int dw_i3c_master_attach_i3c_dev(struct i3c_dev_desc *dev)
 	if (!data)
 		return -ENOMEM;
 
-	data->index = pos;
-	master->addrs[pos] = dev->info.dyn_addr ? : dev->info.static_addr;
-	master->free_pos &= ~BIT(pos);
-	i3c_dev_set_master_data(dev, data);
+	ret = dw_i3c_master_add_i3c_dev(master, dev->info.dyn_addr ? : dev->info.static_addr, pos);
+	if (!ret) {
+		data->index = pos;
+		i3c_dev_set_master_data(dev, data);
+	}
 
-	writel(DEV_ADDR_TABLE_DYNAMIC_ADDR(master->addrs[pos]),
-	       master->regs +
-	       DEV_ADDR_TABLE_LOC(master->datstartaddr, data->index));
-
-	return 0;
+	return ret;
 }
 
 static void dw_i3c_master_detach_i3c_dev(struct i3c_dev_desc *dev)
@@ -1929,13 +2006,8 @@ static void dw_i3c_master_detach_i3c_dev(struct i3c_dev_desc *dev)
 	struct i3c_master_controller *m = i3c_dev_get_master(dev);
 	struct dw_i3c_master *master = to_dw_i3c_master(m);
 
-	writel(0,
-	       master->regs +
-	       DEV_ADDR_TABLE_LOC(master->datstartaddr, data->index));
-
+	dw_i3c_master_remove_dev(master, data->index);
 	i3c_dev_set_master_data(dev, NULL);
-	master->addrs[data->index] = 0;
-	master->free_pos |= BIT(data->index);
 	kfree(data);
 }
 
@@ -2070,7 +2142,7 @@ static int dw_i3c_master_enable_ibi(struct i3c_dev_desc *dev)
 {
 	struct i3c_master_controller *m = i3c_dev_get_master(dev);
 	struct dw_i3c_master *master = to_dw_i3c_master(m);
-	int ret, pos, dat_loc;
+	int ret, pos;
 	u32 reg;
 
 	pos = dw_i3c_master_get_addr_pos(master, dev->info.dyn_addr);
@@ -2089,13 +2161,7 @@ static int dw_i3c_master_enable_ibi(struct i3c_dev_desc *dev)
 	 * Corresponding changes to DAT: ACK the SIR from the specific device;
 	 * One or more data bytes must be present.
 	 */
-	dat_loc = DEV_ADDR_TABLE_LOC(master->datstartaddr, pos);
-	reg = readl(master->regs + dat_loc);
-	reg &= ~DEV_ADDR_TABLE_SIR_REJECT;
-	if (dev->info.bcr & I3C_BCR_IBI_PAYLOAD)
-		reg |= DEV_ADDR_TABLE_IBI_WITH_DATA;
-	reg |= DEV_ADDR_TABLE_IBI_PEC_EN;
-	writel(reg, master->regs + dat_loc);
+	dw_i3c_master_enable_ibi_in_dat(master, pos, dev->info.bcr & I3C_BCR_IBI_PAYLOAD);
 
 	spin_unlock_irq(&master->ibi.master.lock);
 
@@ -2107,11 +2173,7 @@ static int dw_i3c_master_enable_ibi(struct i3c_dev_desc *dev)
 		reg |= BIT(dev->info.dyn_addr);
 		writel(reg, master->regs + IBI_SIR_REQ_REJECT);
 
-		reg = readl(master->regs + dat_loc);
-		reg |= DEV_ADDR_TABLE_SIR_REJECT;
-		reg &= ~DEV_ADDR_TABLE_IBI_WITH_DATA;
-		reg &= ~DEV_ADDR_TABLE_IBI_PEC_EN;
-		writel(reg, master->regs + dat_loc);
+		dw_i3c_master_disable_ibi_in_dat(master, pos);
 		spin_unlock_irq(&master->ibi.master.lock);
 	}
 
@@ -2129,7 +2191,7 @@ static int dw_i3c_master_disable_ibi(struct i3c_dev_desc *dev)
 	struct i3c_master_controller *m = i3c_dev_get_master(dev);
 	struct dw_i3c_master *master = to_dw_i3c_master(m);
 	u32 reg;
-	int ret, pos, dat_loc;
+	int ret, pos;
 
 	/* Disable SIR generation on the requested slave device */
 	ret = i3c_master_disec_locked(m, dev->info.dyn_addr, I3C_CCC_EVENT_SIR);
@@ -2149,12 +2211,7 @@ static int dw_i3c_master_disable_ibi(struct i3c_dev_desc *dev)
 	reg |= BIT(dev->info.dyn_addr);
 	writel(reg, master->regs + IBI_SIR_REQ_REJECT);
 
-	dat_loc = DEV_ADDR_TABLE_LOC(master->datstartaddr, pos);
-	reg = readl(master->regs + dat_loc);
-	reg |= DEV_ADDR_TABLE_SIR_REJECT;
-	reg &= ~DEV_ADDR_TABLE_IBI_WITH_DATA;
-	reg &= ~DEV_ADDR_TABLE_IBI_PEC_EN;
-	writel(reg, master->regs + dat_loc);
+	dw_i3c_master_disable_ibi_in_dat(master, pos);
 
 	reg = readl(master->regs + IBI_SIR_REQ_REJECT);
 	if (reg == IBI_REQ_REJECT_ALL)
@@ -2194,6 +2251,7 @@ static int dw_i3c_master_attach_i2c_dev(struct i2c_dev_desc *dev)
 	struct dw_i3c_master *master = to_dw_i3c_master(m);
 	struct dw_i3c_i2c_dev_data *data;
 	int pos;
+	int ret;
 
 	pos = dw_i3c_master_get_free_pos(master);
 	if (pos < 0)
@@ -2203,17 +2261,13 @@ static int dw_i3c_master_attach_i2c_dev(struct i2c_dev_desc *dev)
 	if (!data)
 		return -ENOMEM;
 
-	data->index = pos;
-	master->addrs[pos] = dev->addr;
-	master->free_pos &= ~BIT(pos);
-	i2c_dev_set_master_data(dev, data);
+	ret = dw_i3c_master_add_i2c_dev(master, dev->addr, pos);
+	if (!ret) {
+		data->index = pos;
+		i2c_dev_set_master_data(dev, data);
+	}
 
-	writel(DEV_ADDR_TABLE_LEGACY_I2C_DEV |
-	       DEV_ADDR_TABLE_STATIC_ADDR(dev->addr),
-	       master->regs +
-	       DEV_ADDR_TABLE_LOC(master->datstartaddr, data->index));
-
-	return 0;
+	return ret;
 }
 
 static void dw_i3c_master_detach_i2c_dev(struct i2c_dev_desc *dev)
@@ -2222,13 +2276,8 @@ static void dw_i3c_master_detach_i2c_dev(struct i2c_dev_desc *dev)
 	struct i3c_master_controller *m = i2c_dev_get_master(dev);
 	struct dw_i3c_master *master = to_dw_i3c_master(m);
 
-	writel(0,
-	       master->regs +
-	       DEV_ADDR_TABLE_LOC(master->datstartaddr, data->index));
-
+	dw_i3c_master_remove_dev(master, data->index);
 	i2c_dev_set_master_data(dev, NULL);
-	master->addrs[data->index] = 0;
-	master->free_pos |= BIT(data->index);
 	kfree(data);
 }
 

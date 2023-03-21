@@ -168,6 +168,7 @@
 };
 
 &vwgpio {
+	interrupts-extended = <&gic GIC_SPI 42 IRQ_TYPE_LEVEL_HIGH>;
 	gpio-count = <32>;
 	gpio-names-mask = <0x000001F1>;
 	gpio-dir-mask = <0x00000FF0>;

@@ -349,6 +349,12 @@
 
 #define AST2600_I3C_IBI_MAX_PAYLOAD	255
 
+/*
+ * HW DAT slot used in SW DAT mechanism for communication with all I3C target
+ * devies for which IBI is not enabled.
+ */
+#define DEVICE_ADDR_TABLE_COMMON_SLOT	0
+
 struct dw_i3c_master_caps {
 	u8 cmdfifodepth;
 	u8 datafifodepth;
@@ -437,6 +443,13 @@ struct dw_i3c_master {
 		void *buf;
 		u16 max_len;
 	} target_rx;
+
+	bool sw_dat_enabled;
+	struct {
+		u32 dat;
+		bool hw_dat_linked;
+		int hw_dat_index;
+	} sw_dat[MAX_DEVS];
 };
 
 struct dw_i3c_platform_ops {
@@ -645,9 +658,18 @@ static int dw_i3c_master_remove_dev(struct dw_i3c_master *master, u8 pos)
 	if (pos > master->maxdevs)
 		return -EINVAL;
 
-	writel(0, master->regs + DEV_ADDR_TABLE_LOC(master->datstartaddr, pos));
-	master->addrs[pos] = 0;
 	master->free_pos |= BIT(pos);
+	master->addrs[pos] = 0;
+	if (master->sw_dat_enabled) {
+		master->sw_dat[pos].dat = 0;
+		if (master->sw_dat[pos].hw_dat_linked)
+			writel(0, master->regs +
+			       DEV_ADDR_TABLE_LOC(master->datstartaddr,
+						  master->sw_dat[pos].hw_dat_index));
+		master->sw_dat[pos].hw_dat_linked = false;
+	} else {
+		writel(0, master->regs + DEV_ADDR_TABLE_LOC(master->datstartaddr, pos));
+	}
 
 	return 0;
 }
@@ -663,7 +685,12 @@ static int dw_i3c_master_add_i3c_dev(struct dw_i3c_master *master, u8 addr, u8 p
 	master->addrs[pos] = addr;
 	dat_reg = DEV_ADDR_TABLE_DYNAMIC_ADDR_PARITY(even_parity(addr)) |
 		  DEV_ADDR_TABLE_DYNAMIC_ADDR(addr);
-	writel(dat_reg, master->regs + DEV_ADDR_TABLE_LOC(master->datstartaddr, pos));
+	if (master->sw_dat_enabled) {
+		master->sw_dat[pos].dat = dat_reg;
+		master->sw_dat[pos].hw_dat_linked = false;
+	} else {
+		writel(dat_reg, master->regs + DEV_ADDR_TABLE_LOC(master->datstartaddr, pos));
+	}
 
 	return 0;
 }
@@ -675,7 +702,10 @@ static int dw_i3c_master_update_i3c_dev(struct dw_i3c_master *master, u8 addr, u
 	if (pos > master->maxdevs)
 		return -EINVAL;
 
-	dat_reg = readl(master->regs + DEV_ADDR_TABLE_LOC(master->datstartaddr, pos));
+	if (master->sw_dat_enabled)
+		dat_reg = master->sw_dat[pos].dat;
+	else
+		dat_reg = readl(master->regs + DEV_ADDR_TABLE_LOC(master->datstartaddr, pos));
 
 	if (DEV_ADDR_TABLE_DYNAMIC_ADDR_GET(dat_reg) != addr) {
 		master->addrs[pos] = addr;
@@ -683,7 +713,16 @@ static int dw_i3c_master_update_i3c_dev(struct dw_i3c_master *master, u8 addr, u
 			     DEV_ADDR_TABLE_DYNAMIC_ADDR_MASK);
 		dat_reg |= DEV_ADDR_TABLE_DYNAMIC_ADDR_PARITY(even_parity(addr)) |
 			   DEV_ADDR_TABLE_DYNAMIC_ADDR(addr);
-		writel(dat_reg, master->regs + DEV_ADDR_TABLE_LOC(master->datstartaddr, pos));
+		if (master->sw_dat_enabled) {
+			master->sw_dat[pos].dat = dat_reg;
+			if (master->sw_dat[pos].hw_dat_linked)
+				writel(dat_reg, master->regs +
+				       DEV_ADDR_TABLE_LOC(master->datstartaddr,
+							  master->sw_dat[pos].hw_dat_index));
+		} else {
+			writel(dat_reg, master->regs +
+			       DEV_ADDR_TABLE_LOC(master->datstartaddr, pos));
+		}
 	}
 
 	return 0;
@@ -696,36 +735,143 @@ static int dw_i3c_master_add_i2c_dev(struct dw_i3c_master *master, u8 addr, u8 p
 
 	master->addrs[pos] = addr;
 	master->free_pos &= ~BIT(pos);
-	writel(DEV_ADDR_TABLE_LEGACY_I2C_DEV | DEV_ADDR_TABLE_STATIC_ADDR(addr), master->regs +
-	       DEV_ADDR_TABLE_LOC(master->datstartaddr, pos));
+	if (master->sw_dat_enabled) {
+		master->sw_dat[pos].dat = DEV_ADDR_TABLE_LEGACY_I2C_DEV |
+					  DEV_ADDR_TABLE_STATIC_ADDR(addr);
+		master->sw_dat[pos].hw_dat_linked = false;
+	} else {
+		writel(DEV_ADDR_TABLE_LEGACY_I2C_DEV | DEV_ADDR_TABLE_STATIC_ADDR(addr),
+		       master->regs + DEV_ADDR_TABLE_LOC(master->datstartaddr, pos));
+	}
 
 	return 0;
 }
 
-static void dw_i3c_master_enable_ibi_in_dat(struct dw_i3c_master *master, u8 pos, bool ibi_payload)
+static void dw_i3c_master_link_hw_dat(struct dw_i3c_master *master, int index, int hw_dat_index)
 {
-	int dat_loc = DEV_ADDR_TABLE_LOC(master->datstartaddr, pos);
+	master->sw_dat[index].hw_dat_index = hw_dat_index;
+	master->sw_dat[index].hw_dat_linked = true;
+	writel(master->sw_dat[index].dat, master->regs +
+	       DEV_ADDR_TABLE_LOC(master->datstartaddr, hw_dat_index));
+}
+
+static void dw_i3c_master_unlink_hw_dat(struct dw_i3c_master *master, int hw_dat_index)
+{
+	u32 dat_reg;
+	int index;
+
+	dat_reg = readl(master->regs + DEV_ADDR_TABLE_LOC(master->datstartaddr, hw_dat_index));
+	if (dat_reg != 0) {
+		writel(0, master->regs + DEV_ADDR_TABLE_LOC(master->datstartaddr, hw_dat_index));
+		index = dw_i3c_master_get_addr_pos(master,
+						   DEV_ADDR_TABLE_DYNAMIC_ADDR_GET(dat_reg));
+		if (index >= 0)
+			master->sw_dat[index].hw_dat_linked = false;
+	}
+}
+
+static void dw_i3c_master_unlink_index(struct dw_i3c_master *master, int index)
+{
+	if (master->sw_dat[index].hw_dat_linked) {
+		writel(0, master->regs +
+		       DEV_ADDR_TABLE_LOC(master->datstartaddr,
+					  master->sw_dat[index].hw_dat_index));
+		master->sw_dat[index].hw_dat_linked = false;
+	}
+}
+
+static int dw_i3c_master_find_hw_dat_index_for_ibi(struct dw_i3c_master *master)
+{
+	int hw_dat_index;
 	u32 dat_reg;
 
-	dat_reg = readl(master->regs + dat_loc);
+	for (hw_dat_index = DEVICE_ADDR_TABLE_COMMON_SLOT + 1; hw_dat_index < master->dat_depth;
+	     ++hw_dat_index) {
+		dat_reg = readl(master->regs + DEV_ADDR_TABLE_LOC(master->datstartaddr,
+								  hw_dat_index));
+		if (dat_reg == 0)
+			return hw_dat_index;
+	}
+
+	return -ENOSPC;
+}
+
+static int dw_i3c_master_enable_ibi_in_dat(struct dw_i3c_master *master, u8 index, bool ibi_payload)
+{
+	int dat_loc = DEV_ADDR_TABLE_LOC(master->datstartaddr, index);
+	u32 dat_reg;
+
+	if (master->sw_dat_enabled)
+		dat_reg = master->sw_dat[index].dat;
+	else
+		dat_reg = readl(master->regs + dat_loc);
+
 	dat_reg &= ~DEV_ADDR_TABLE_SIR_REJECT;
 	if (ibi_payload)
 		dat_reg |= DEV_ADDR_TABLE_IBI_WITH_DATA;
 	dat_reg |= DEV_ADDR_TABLE_IBI_PEC_EN;
 
-	writel(dat_reg, master->regs + dat_loc);
+	if (master->sw_dat_enabled) {
+		int hw_dat_index;
+
+		/* If index already linked - unlink it */
+		dw_i3c_master_unlink_index(master, index);
+
+		/* Find HW DAT slot for IBI index */
+		hw_dat_index = dw_i3c_master_find_hw_dat_index_for_ibi(master);
+		if (hw_dat_index < 0)
+			return hw_dat_index;
+
+		/* Update DAT and link index to HW DAT */
+		master->sw_dat[index].dat = dat_reg;
+		dw_i3c_master_link_hw_dat(master, index, hw_dat_index);
+	} else {
+		writel(dat_reg, master->regs + dat_loc);
+	}
+
+	return 0;
 }
 
-static void dw_i3c_master_disable_ibi_in_dat(struct dw_i3c_master *master, u8 pos)
+static void dw_i3c_master_disable_ibi_in_dat(struct dw_i3c_master *master, u8 index)
 {
-	int dat_loc = DEV_ADDR_TABLE_LOC(master->datstartaddr, pos);
+	int dat_loc = DEV_ADDR_TABLE_LOC(master->datstartaddr, index);
 	u32 dat_reg;
 
-	dat_reg = readl(master->regs + dat_loc);
+	if (master->sw_dat_enabled)
+		dat_reg = master->sw_dat[index].dat;
+	else
+		dat_reg = readl(master->regs + dat_loc);
+
 	dat_reg |= DEV_ADDR_TABLE_SIR_REJECT;
 	dat_reg &= ~DEV_ADDR_TABLE_IBI_WITH_DATA;
 	dat_reg &= ~DEV_ADDR_TABLE_IBI_PEC_EN;
-	writel(dat_reg, master->regs + dat_loc);
+
+	if (master->sw_dat_enabled) {
+		dw_i3c_master_unlink_index(master, index);
+		master->sw_dat[index].dat = dat_reg;
+	} else {
+		writel(dat_reg, master->regs + dat_loc);
+	}
+}
+
+static int dw_i3c_master_alloc_and_get_hw_dat_index(struct dw_i3c_master *master, int index)
+{
+	if (!master->sw_dat_enabled)
+		return index;
+
+	/* If HW DAT already link use it */
+	if (master->sw_dat[index].hw_dat_linked)
+		return master->sw_dat[index].hw_dat_index;
+
+	/* If there is no HW DAT link for provided index use HW DAT common slot */
+
+	/* Unlink if there was any link for HW DAT common slot */
+	dw_i3c_master_unlink_hw_dat(master, DEVICE_ADDR_TABLE_COMMON_SLOT);
+
+	/* Link index to HW DAT common slot */
+	dw_i3c_master_link_hw_dat(master, index, DEVICE_ADDR_TABLE_COMMON_SLOT);
+
+	return DEVICE_ADDR_TABLE_COMMON_SLOT;
 }
 
 static void dw_i3c_master_wr_tx_fifo(struct dw_i3c_master *master,
@@ -1474,12 +1620,17 @@ static int dw_i3c_ccc_set(struct dw_i3c_master *master,
 {
 	struct dw_i3c_xfer *xfer;
 	struct dw_i3c_cmd *cmd;
+	int hw_dat_index = 0;
 	int ret, pos = 0;
 
 	if (ccc->id & I3C_CCC_DIRECT) {
 		pos = dw_i3c_master_get_addr_pos(master, ccc->dests[0].addr);
 		if (pos < 0)
 			return pos;
+
+		hw_dat_index = dw_i3c_master_alloc_and_get_hw_dat_index(master, pos);
+		if (hw_dat_index < 0)
+			return hw_dat_index;
 	}
 
 	xfer = dw_i3c_master_alloc_xfer(master, 1);
@@ -1494,7 +1645,7 @@ static int dw_i3c_ccc_set(struct dw_i3c_master *master,
 		      COMMAND_PORT_TRANSFER_ARG;
 
 	cmd->cmd_lo = COMMAND_PORT_CP |
-		      COMMAND_PORT_DEV_INDEX(pos) |
+		      COMMAND_PORT_DEV_INDEX(hw_dat_index) |
 		      COMMAND_PORT_CMD(ccc->id) |
 		      COMMAND_PORT_TOC |
 		      COMMAND_PORT_ROC;
@@ -1519,11 +1670,16 @@ static int dw_i3c_ccc_get(struct dw_i3c_master *master, struct i3c_ccc_cmd *ccc)
 {
 	struct dw_i3c_xfer *xfer;
 	struct dw_i3c_cmd *cmd;
+	int hw_dat_index = 0;
 	int ret, pos;
 
 	pos = dw_i3c_master_get_addr_pos(master, ccc->dests[0].addr);
 	if (pos < 0)
 		return pos;
+
+	hw_dat_index = dw_i3c_master_alloc_and_get_hw_dat_index(master, pos);
+	if (hw_dat_index < 0)
+		return hw_dat_index;
 
 	xfer = dw_i3c_master_alloc_xfer(master, 1);
 	if (!xfer)
@@ -1538,7 +1694,7 @@ static int dw_i3c_ccc_get(struct dw_i3c_master *master, struct i3c_ccc_cmd *ccc)
 
 	cmd->cmd_lo = COMMAND_PORT_READ_TRANSFER |
 		      COMMAND_PORT_CP |
-		      COMMAND_PORT_DEV_INDEX(pos) |
+		      COMMAND_PORT_DEV_INDEX(hw_dat_index) |
 		      COMMAND_PORT_CMD(ccc->id) |
 		      COMMAND_PORT_TOC |
 		      COMMAND_PORT_ROC;
@@ -1632,6 +1788,9 @@ static int dw_i3c_master_daa_single(struct i3c_master_controller *m)
 	for (index = 0; index < newdevs; index++)
 		i3c_master_add_i3c_dev_locked(m, addrs[index]);
 
+	if (master->sw_dat_enabled)
+		dw_i3c_master_unlink_hw_dat(master, DEVICE_ADDR_TABLE_COMMON_SLOT);
+
 	return newdevs;
 }
 
@@ -1670,7 +1829,12 @@ static int dw_i3c_master_priv_xfers(struct i3c_dev_desc *dev,
 	struct dw_i3c_master *master = to_dw_i3c_master(m);
 	unsigned int nrxwords = 0, ntxwords = 0;
 	struct dw_i3c_xfer *xfer;
+	int hw_dat_index;
 	int i, ret = 0;
+
+	hw_dat_index = dw_i3c_master_alloc_and_get_hw_dat_index(master, data->index);
+	if (hw_dat_index < 0)
+		return hw_dat_index;
 
 	if (!i3c_nxfers)
 		return 0;
@@ -1713,7 +1877,7 @@ static int dw_i3c_master_priv_xfers(struct i3c_dev_desc *dev,
 				      COMMAND_PORT_SPEED(dev->info.max_write_ds);
 		}
 
-		cmd->cmd_lo |= COMMAND_PORT_DEV_INDEX(data->index) |
+		cmd->cmd_lo |= COMMAND_PORT_DEV_INDEX(hw_dat_index) |
 			       COMMAND_PORT_ROC;
 
 		if (i == (i3c_nxfers - 1))
@@ -2020,7 +2184,12 @@ static int dw_i3c_master_i2c_xfers(struct i2c_dev_desc *dev,
 	struct dw_i3c_master *master = to_dw_i3c_master(m);
 	unsigned int nrxwords = 0, ntxwords = 0;
 	struct dw_i3c_xfer *xfer;
+	int hw_dat_index;
 	int i, ret = 0;
+
+	hw_dat_index = dw_i3c_master_alloc_and_get_hw_dat_index(master, data->index);
+	if (hw_dat_index < 0)
+		return hw_dat_index;
 
 	if (!i2c_nxfers)
 		return 0;
@@ -2049,7 +2218,7 @@ static int dw_i3c_master_i2c_xfers(struct i2c_dev_desc *dev,
 		cmd->cmd_hi = COMMAND_PORT_ARG_DATA_LEN(i2c_xfers[i].len) |
 			COMMAND_PORT_TRANSFER_ARG;
 
-		cmd->cmd_lo = COMMAND_PORT_DEV_INDEX(data->index) |
+		cmd->cmd_lo = COMMAND_PORT_DEV_INDEX(hw_dat_index) |
 			      COMMAND_PORT_ROC;
 
 		if (i2c_xfers[i].flags & I2C_M_RD) {
@@ -2149,19 +2318,22 @@ static int dw_i3c_master_enable_ibi(struct i3c_dev_desc *dev)
 	if (pos < 0)
 		return pos;
 
-	/*
-	 * Clean-up the bit in IBI_SIR_REQ_REJECT so that the SIR request from the specific
-	 * slave device is acknowledged by the master device.
-	 */
 	spin_lock_irq(&master->ibi.master.lock);
-	reg = readl(master->regs + IBI_SIR_REQ_REJECT) & ~BIT(dev->info.dyn_addr);
-	writel(reg, master->regs + IBI_SIR_REQ_REJECT);
 
 	/*
 	 * Corresponding changes to DAT: ACK the SIR from the specific device;
 	 * One or more data bytes must be present.
 	 */
-	dw_i3c_master_enable_ibi_in_dat(master, pos, dev->info.bcr & I3C_BCR_IBI_PAYLOAD);
+	ret = dw_i3c_master_enable_ibi_in_dat(master, pos, dev->info.bcr & I3C_BCR_IBI_PAYLOAD);
+	if (ret < 0)
+		return ret;
+
+	/*
+	 * Clean-up the bit in IBI_SIR_REQ_REJECT so that the SIR request from the specific
+	 * slave device is acknowledged by the master device.
+	 */
+	reg = readl(master->regs + IBI_SIR_REQ_REJECT) & ~BIT(dev->info.dyn_addr);
+	writel(reg, master->regs + IBI_SIR_REQ_REJECT);
 
 	spin_unlock_irq(&master->ibi.master.lock);
 
@@ -2748,6 +2920,12 @@ static int dw_i3c_probe(struct platform_device *pdev)
 	master->datstartaddr = DEVICE_ADDR_TABLE_ADDR(ret);
 	master->maxdevs = DEVICE_ADDR_TABLE_DEPTH(ret);
 	master->dat_depth = DEVICE_ADDR_TABLE_DEPTH(ret);
+	if (master->maxdevs < MAX_DEVS) {
+		dev_info(master->dev, "HW DAT supports only %i target devices - enabling SW DAT to support %i devices\n",
+			 master->maxdevs, MAX_DEVS);
+		master->maxdevs = MAX_DEVS;
+		master->sw_dat_enabled = true;
+	}
 	master->free_pos = GENMASK(master->maxdevs - 1, 0);
 
 	/* Clear HW DAT */

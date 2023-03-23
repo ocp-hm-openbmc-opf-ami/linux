@@ -656,7 +656,7 @@ peci_platformpower_power_cfg[PECI_PLATFORMPOWER_POWER_CHANNEL_COUNT]
 		{
 			.attribute = hwmon_power_cap,
 			.config = HWMON_P_CAP,
-			.update_interval = UPDATE_INTERVAL_DEFAULT,
+			.update_interval = UPDATE_INTERVAL_100MS,
 			.read = peci_platformpower_get_power_limit,
 			.write = peci_platformpower_set_power_limit,
 		},

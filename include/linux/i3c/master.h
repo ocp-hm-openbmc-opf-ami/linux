@@ -494,6 +494,7 @@ struct i3c_master_controller_ops {
  *	in a thread context. Typical examples are Hot Join processing which
  *	requires taking the bus lock in maintenance, which in turn, can only
  *	be done from a sleep-able context
+ * @daa_lock: protect DAA calls to single DAA at a time.
  * @bus_driver_context: context of the hardware/controller driver, it could be
  *			shared among multiple @i3c_master_controller
  *
@@ -521,6 +522,7 @@ struct i3c_master_controller {
 	struct i3c_bus bus;
 	struct workqueue_struct *wq;
 	void *bus_driver_context;
+	struct mutex daa_lock;
 };
 
 /**

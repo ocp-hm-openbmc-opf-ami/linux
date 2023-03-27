@@ -447,6 +447,7 @@ static int i3c_bus_init(struct i3c_master_controller *master)
 	int ret;
 
 	init_rwsem(&i3cbus->lock);
+	mutex_init(&master->daa_lock);
 	INIT_LIST_HEAD(&i3cbus->devs.i2c);
 	INIT_LIST_HEAD(&i3cbus->devs.i3c);
 	i3c_bus_init_addrslots(i3cbus);
@@ -1761,6 +1762,7 @@ int i3c_master_do_daa(struct i3c_master_controller *master)
 {
 	int ret;
 
+	mutex_lock(&master->daa_lock);
 	i3c_bus_maintenance_lock(&master->bus);
 	if (master->jdec_spd) {
 		ret = i3c_master_sethid_locked(master);
@@ -1776,6 +1778,7 @@ int i3c_master_do_daa(struct i3c_master_controller *master)
 	i3c_bus_normaluse_lock(&master->bus);
 	i3c_master_register_new_i3c_devs(master);
 	i3c_bus_normaluse_unlock(&master->bus);
+	mutex_unlock(&master->daa_lock);
 
 	return 0;
 }

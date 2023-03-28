@@ -153,6 +153,8 @@
 #define  CP_SCL1_LEVEL					BIT(6)
 #define  CP_SEL_PIN_INPUT_CODE_MASK			GENMASK(5, 4)
 #define  CP_SEL_PIN_INPUT_CODE_GET(x)			(((x) & CP_SEL_PIN_INPUT_CODE_MASK) >> 4)
+#define  CP_SDA1_SCL1_PINS_CODE_MASK			GENMASK(7, 6)
+#define  CP_SDA1_SCL1_PINS_CODE_GET(x)			(((x) & CP_SDA1_SCL1_PINS_CODE_MASK) >> 6)
 #define  VCCIO1_PWR_GOOD				BIT(3)
 #define  VCCIO0_PWR_GOOD				BIT(2)
 #define  CP1_VCCIO_PWR_GOOD				BIT(1)
@@ -201,6 +203,10 @@
 #define I3C_HUB_DT_IO_STRENGTH_50_OHM			0x03
 #define I3C_HUB_DT_IO_STRENGTH_NOT_DEFINED		0xFF
 
+/* ID Extraction */
+#define I3C_HUB_ID_CP_SDA_SCL				0x00
+#define I3C_HUB_ID_CP_SEL				0x01
+
 struct tp_setting {
 	u8 mode;
 	u8 pullup_en;
@@ -235,6 +241,10 @@ struct i3c_hub {
 	struct regmap *regmap;
 	struct dt_settings settings;
 	struct delayed_work delayed_work;
+	int hub_pin_sel_id;
+	int hub_pin_cp1_id;
+	int hub_dt_sel_id;
+	int hub_dt_cp1_id;
 
 	struct logical_bus logical_bus[I3C_HUB_LOGICAL_BUS_MAX_COUNT];
 
@@ -680,27 +690,46 @@ static int i3c_hub_read_id(struct device *dev)
 		return -1;
 	}
 
-	return CP_SEL_PIN_INPUT_CODE_GET(reg_val);
+	priv->hub_pin_sel_id = CP_SEL_PIN_INPUT_CODE_GET(reg_val);
+	priv->hub_pin_cp1_id = CP_SDA1_SCL1_PINS_CODE_GET(reg_val);
+	return 0;
 }
 
-static struct device_node *i3c_hub_get_dt_hub_node(struct device_node *node, int id)
+static struct device_node *i3c_hub_get_dt_hub_node(struct device_node *node,
+						   struct i3c_hub *priv)
 {
 	struct device_node *hub_node_no_id = NULL;
 	struct device_node *hub_node;
 	u32 hub_id;
+	int found_id = 0;
 
 	for_each_available_child_of_node(node, hub_node) {
 		if (strstr(hub_node->name, "hub")) {
 			if (!of_property_read_u32(hub_node, "id", &hub_id)) {
-				if (hub_id == (u32)id)
-					return hub_node;
+				if (hub_id == (u32)priv->hub_pin_sel_id)
+					found_id = 1;
+				priv->hub_dt_sel_id = hub_id;
 			} else {
+				priv->hub_dt_sel_id = -1;
+			}
+
+			if (!of_property_read_u32(hub_node, "id-cp1", &hub_id)) {
+				if (hub_id == (u32)priv->hub_pin_cp1_id)
+					found_id = 1;
+				priv->hub_dt_cp1_id = hub_id;
+			} else {
+				priv->hub_dt_cp1_id = -1;
+			}
+
+			if (!found_id) {
 				/*
 				 * Just keep reference to first HUB node with no ID in case no ID
 				 * matching
 				 */
 				if (!hub_node_no_id)
 					hub_node_no_id = hub_node;
+			} else {
+				return hub_node;
 			}
 		}
 	}
@@ -1034,7 +1063,6 @@ static int i3c_hub_probe(struct i3c_device *i3cdev)
 	struct i3c_hub *priv;
 	char hub_id[32];
 	int ret;
-	int id;
 
 	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
@@ -1060,10 +1088,13 @@ static int i3c_hub_probe(struct i3c_device *i3cdev)
 	}
 	priv->regmap = regmap;
 
-	id = i3c_hub_read_id(dev);
-	if (id >= 0)
+	ret = i3c_hub_read_id(dev);
+	if (ret)
+		goto error;
+
+	if (priv->hub_pin_cp1_id >= 0 && priv->hub_pin_sel_id >= 0)
 		/* Find hub node in DT matching HW ID or just first without ID provided in DT */
-		node = i3c_hub_get_dt_hub_node(dev->parent->of_node, id);
+		node = i3c_hub_get_dt_hub_node(dev->parent->of_node, priv);
 
 	if (!node) {
 		dev_info(dev, "No DT entry - running with hardware defaults.\n");

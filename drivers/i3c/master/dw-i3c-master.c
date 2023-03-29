@@ -436,6 +436,7 @@ struct dw_i3c_platform_ops {
 	int (*init)(struct dw_i3c_master *i3c);
 	void (*toggle_scl_in)(struct dw_i3c_master *master, u8 times);
 	void (*isolate_scl_sda)(struct dw_i3c_master *master, bool iso);
+	void (*gen_stop_to_internal)(struct dw_i3c_master *master);
 };
 
 struct dw_i3c_i2c_dev_data {
@@ -540,6 +541,18 @@ static void ast2600_i3c_isolate_scl_sda(struct dw_i3c_master *master, bool iso)
 		regmap_write_bits(pdata->global_regs, AST2600_I3CG_REG1(pdata->global_idx),
 				  SCL_IN_SW_MODE_EN | SDA_IN_SW_MODE_EN, 0);
 	}
+}
+
+static void ast2600_i3c_gen_stop_to_internal(struct dw_i3c_master *master)
+{
+	struct pdata_ast2600 *pdata = &master->pdata.ast2600;
+
+	regmap_write_bits(pdata->global_regs, AST2600_I3CG_REG1(pdata->global_idx),
+			  SCL_IN_SW_MODE_VAL, SCL_IN_SW_MODE_VAL);
+	regmap_write_bits(pdata->global_regs, AST2600_I3CG_REG1(pdata->global_idx),
+			  SDA_IN_SW_MODE_VAL, 0);
+	regmap_write_bits(pdata->global_regs, AST2600_I3CG_REG1(pdata->global_idx),
+			  SDA_IN_SW_MODE_VAL, SDA_IN_SW_MODE_VAL);
 }
 
 static void dw_i3c_master_disable(struct dw_i3c_master *master)
@@ -1232,6 +1245,9 @@ static int dw_i3c_target_bus_init(struct i3c_master_controller *m)
 		dev_warn(master->dev, "Target bus init: failed to enable controller");
 		ret = -EACCES;
 	}
+
+	if (master->platform_ops && master->platform_ops->gen_stop_to_internal)
+		master->platform_ops->gen_stop_to_internal(master);
 
 	if (master->platform_ops && master->platform_ops->isolate_scl_sda)
 		master->platform_ops->isolate_scl_sda(master, false);
@@ -2545,6 +2561,7 @@ static const struct dw_i3c_platform_ops ast2600_platform_ops = {
 	.init = ast2600_i3c_init,
 	.toggle_scl_in = ast2600_i3c_toggle_scl_in,
 	.isolate_scl_sda = ast2600_i3c_isolate_scl_sda,
+	.gen_stop_to_internal = ast2600_i3c_gen_stop_to_internal,
 };
 
 static const struct of_device_id dw_i3c_master_of_match[] = {

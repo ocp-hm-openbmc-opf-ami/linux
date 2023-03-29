@@ -426,7 +426,7 @@ struct dw_i3c_master {
 struct dw_i3c_platform_ops {
 	int (*probe)(struct dw_i3c_master *i3c, struct platform_device *pdev);
 	int (*init)(struct dw_i3c_master *i3c);
-	void (*toggle_scl_in)(struct dw_i3c_master *master);
+	void (*toggle_scl_in)(struct dw_i3c_master *master, u8 times);
 };
 
 struct dw_i3c_i2c_dev_data {
@@ -504,7 +504,7 @@ to_dw_i3c_master(struct i3c_master_controller *master)
 	return (struct dw_i3c_master *)master->bus_driver_context;
 }
 
-static void ast2600_i3c_toggle_scl_in(struct dw_i3c_master *master)
+static void ast2600_i3c_toggle_scl_in(struct dw_i3c_master *master, u8 times)
 {
 	struct pdata_ast2600 *pdata = &master->pdata.ast2600;
 
@@ -512,10 +512,13 @@ static void ast2600_i3c_toggle_scl_in(struct dw_i3c_master *master)
 			  SCL_IN_SW_MODE_VAL, SCL_IN_SW_MODE_VAL);
 	regmap_write_bits(pdata->global_regs, AST2600_I3CG_REG1(pdata->global_idx),
 			  SCL_IN_SW_MODE_EN, SCL_IN_SW_MODE_EN);
-	regmap_write_bits(pdata->global_regs, AST2600_I3CG_REG1(pdata->global_idx),
-			  SCL_IN_SW_MODE_VAL, 0);
-	regmap_write_bits(pdata->global_regs, AST2600_I3CG_REG1(pdata->global_idx),
-			  SCL_IN_SW_MODE_VAL, SCL_IN_SW_MODE_VAL);
+	for (; times; times--) {
+		regmap_write_bits(pdata->global_regs, AST2600_I3CG_REG1(pdata->global_idx),
+				  SCL_IN_SW_MODE_VAL, 0);
+		regmap_write_bits(pdata->global_regs, AST2600_I3CG_REG1(pdata->global_idx),
+				  SCL_IN_SW_MODE_VAL, SCL_IN_SW_MODE_VAL);
+	}
+
 	regmap_write_bits(pdata->global_regs, AST2600_I3CG_REG1(pdata->global_idx),
 			  SCL_IN_SW_MODE_EN, 0);
 }
@@ -540,20 +543,9 @@ static void dw_i3c_master_resume(struct dw_i3c_master *master)
 
 static int dw_i3c_master_poll_enable_bit(struct dw_i3c_master *master)
 {
-	u32 dev_ctrl = readl(master->regs + DEVICE_CTRL) & DEV_CTRL_ENABLE;
-
-	if (dev_ctrl && master->platform_ops && master->platform_ops->toggle_scl_in)
-		master->platform_ops->toggle_scl_in(master);
-	return dev_ctrl;
-}
-
-static int dw_i3c_master_poll_disable_bit(struct dw_i3c_master *master)
-{
-	u32 dev_ctrl = readl(master->regs + DEVICE_CTRL) & DEV_CTRL_ENABLE;
-
-	if (!dev_ctrl && master->platform_ops && master->platform_ops->toggle_scl_in)
-		master->platform_ops->toggle_scl_in(master);
-	return dev_ctrl;
+	if (master->platform_ops && master->platform_ops->toggle_scl_in)
+		master->platform_ops->toggle_scl_in(master, 8);
+	return readl(master->regs + DEVICE_CTRL) & DEV_CTRL_ENABLE;
 }
 
 static int dw_i3c_master_get_addr_pos(struct dw_i3c_master *master, u8 addr)
@@ -1655,19 +1647,15 @@ static int dw_i3c_target_generate_ibi(struct i3c_dev_desc *dev, const u8 *data, 
 	return 0;
 }
 
-static void dw_i3c_target_cleanup_ctrl_queues_on_timeout(struct dw_i3c_master *master)
+static int dw_i3c_target_cleanup_ctrl_queues_on_timeout(struct dw_i3c_master *master)
 {
 	u32 wait_enable_us;
-	int ret;
 
 	dw_i3c_master_disable(master);
-	/*
-	 * It was confirmed by ASPEED that 8 toggle attempts should be enough for I3C
-	 * controller to react.
-	 */
-	if (readx_poll_timeout(dw_i3c_master_poll_enable_bit, master,
-			       ret, !ret, 10, USEC_PER_SEC))
+	if (dw_i3c_master_poll_enable_bit(master)) {
 		dev_warn(master->dev, "Master read timeout: failed to disable controller");
+		return -EACCES;
+	}
 
 	writel(RESET_CTRL_QUEUES, master->regs + RESET_CTRL);
 	dw_i3c_master_enable(master);
@@ -1675,9 +1663,12 @@ static void dw_i3c_target_cleanup_ctrl_queues_on_timeout(struct dw_i3c_master *m
 				      BUS_AVAIL_TIME_GET(readl(master->regs + BUS_FREE_TIMING)),
 				      NSEC_PER_USEC);
 	udelay(wait_enable_us);
-	if (readx_poll_timeout(dw_i3c_master_poll_disable_bit, master,
-			       ret, ret, 10, USEC_PER_SEC))
+	if (!dw_i3c_master_poll_enable_bit(master)) {
 		dev_warn(master->dev, "Master read timeout: failed to enable controller");
+		return -EACCES;
+	}
+
+	return 0;
 }
 
 static int dw_i3c_target_put_read_data(struct i3c_dev_desc *dev, struct i3c_priv_xfer *i3c_xfers,
@@ -1687,7 +1678,7 @@ static int dw_i3c_target_put_read_data(struct i3c_dev_desc *dev, struct i3c_priv
 	struct dw_i3c_master *master = to_dw_i3c_master(m);
 	struct dw_i3c_xfer *xfer;
 	u32 reg, thld_ctrl;
-	int i, ibi_notify;
+	int i, ibi_notify, ret = 0;
 
 	if (!i3c_nxfers)
 		return 0;
@@ -1755,11 +1746,11 @@ static int dw_i3c_target_put_read_data(struct i3c_dev_desc *dev, struct i3c_priv
 	}
 
 	if (!wait_for_completion_timeout(&master->target_read_comp, TARGET_MASTER_READ_TIMEOUT))
-		dw_i3c_target_cleanup_ctrl_queues_on_timeout(master);
+		ret = dw_i3c_target_cleanup_ctrl_queues_on_timeout(master);
 
 	dw_i3c_master_free_xfer(xfer);
 
-	return 0;
+	return ret;
 }
 
 static u8 dw_i3c_target_get_dyn_addr(struct i3c_master_controller *m)

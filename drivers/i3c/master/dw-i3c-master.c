@@ -426,7 +426,7 @@ struct dw_i3c_master {
 struct dw_i3c_platform_ops {
 	int (*probe)(struct dw_i3c_master *i3c, struct platform_device *pdev);
 	int (*init)(struct dw_i3c_master *i3c);
-	int (*toggle_scl_in)(struct dw_i3c_master *master);
+	void (*toggle_scl_in)(struct dw_i3c_master *master);
 };
 
 struct dw_i3c_i2c_dev_data {
@@ -504,7 +504,7 @@ to_dw_i3c_master(struct i3c_master_controller *master)
 	return (struct dw_i3c_master *)master->bus_driver_context;
 }
 
-static int ast2600_i3c_toggle_scl_in(struct dw_i3c_master *master)
+static void ast2600_i3c_toggle_scl_in(struct dw_i3c_master *master)
 {
 	struct pdata_ast2600 *pdata = &master->pdata.ast2600;
 
@@ -518,8 +518,6 @@ static int ast2600_i3c_toggle_scl_in(struct dw_i3c_master *master)
 			  SCL_IN_SW_MODE_VAL, SCL_IN_SW_MODE_VAL);
 	regmap_write_bits(pdata->global_regs, AST2600_I3CG_REG1(pdata->global_idx),
 			  SCL_IN_SW_MODE_EN, 0);
-
-	return 0;
 }
 
 static void dw_i3c_master_disable(struct dw_i3c_master *master)

@@ -25,7 +25,15 @@
 #include <linux/reset.h>
 #include <linux/slab.h>
 
+/*
+ * Below bits are valid for I3Cx Global register (REG1) on AST2600 platform.
+ * It is possible to issue dummy SCL or SDA toggling to the I3C controller without
+ * changing actual bus state.
+ * For successful toggling both _EN and _VAL bits must be 1 for the corresponding line.
+ */
+#define SDA_IN_SW_MODE_EN		BIT(29)
 #define SCL_IN_SW_MODE_EN		BIT(28)
+#define SDA_IN_SW_MODE_VAL		BIT(27)
 #define SCL_IN_SW_MODE_VAL		BIT(23)
 
 #define DEVICE_CTRL			0x0
@@ -427,6 +435,7 @@ struct dw_i3c_platform_ops {
 	int (*probe)(struct dw_i3c_master *i3c, struct platform_device *pdev);
 	int (*init)(struct dw_i3c_master *i3c);
 	void (*toggle_scl_in)(struct dw_i3c_master *master, u8 times);
+	void (*isolate_scl_sda)(struct dw_i3c_master *master, bool iso);
 };
 
 struct dw_i3c_i2c_dev_data {
@@ -508,19 +517,29 @@ static void ast2600_i3c_toggle_scl_in(struct dw_i3c_master *master, u8 times)
 {
 	struct pdata_ast2600 *pdata = &master->pdata.ast2600;
 
-	regmap_write_bits(pdata->global_regs, AST2600_I3CG_REG1(pdata->global_idx),
-			  SCL_IN_SW_MODE_VAL, SCL_IN_SW_MODE_VAL);
-	regmap_write_bits(pdata->global_regs, AST2600_I3CG_REG1(pdata->global_idx),
-			  SCL_IN_SW_MODE_EN, SCL_IN_SW_MODE_EN);
 	for (; times; times--) {
 		regmap_write_bits(pdata->global_regs, AST2600_I3CG_REG1(pdata->global_idx),
 				  SCL_IN_SW_MODE_VAL, 0);
 		regmap_write_bits(pdata->global_regs, AST2600_I3CG_REG1(pdata->global_idx),
 				  SCL_IN_SW_MODE_VAL, SCL_IN_SW_MODE_VAL);
 	}
+}
 
-	regmap_write_bits(pdata->global_regs, AST2600_I3CG_REG1(pdata->global_idx),
-			  SCL_IN_SW_MODE_EN, 0);
+static void ast2600_i3c_isolate_scl_sda(struct dw_i3c_master *master, bool iso)
+{
+	struct pdata_ast2600 *pdata = &master->pdata.ast2600;
+
+	if (iso) {
+		regmap_write_bits(pdata->global_regs, AST2600_I3CG_REG1(pdata->global_idx),
+				  SCL_IN_SW_MODE_VAL | SDA_IN_SW_MODE_VAL,
+				  SCL_IN_SW_MODE_VAL | SDA_IN_SW_MODE_VAL);
+		regmap_write_bits(pdata->global_regs, AST2600_I3CG_REG1(pdata->global_idx),
+				  SCL_IN_SW_MODE_EN | SDA_IN_SW_MODE_EN,
+				  SCL_IN_SW_MODE_EN | SDA_IN_SW_MODE_EN);
+	} else {
+		regmap_write_bits(pdata->global_regs, AST2600_I3CG_REG1(pdata->global_idx),
+				  SCL_IN_SW_MODE_EN | SDA_IN_SW_MODE_EN, 0);
+	}
 }
 
 static void dw_i3c_master_disable(struct dw_i3c_master *master)
@@ -1144,7 +1163,7 @@ static int dw_i3c_target_bus_init(struct i3c_master_controller *m)
 	struct dw_i3c_master *master = to_dw_i3c_master(m);
 	struct i3c_dev_desc *desc = master->base.this;
 	void *rx_buf;
-	u32 reg;
+	u32 reg, wait_enable_us;
 	int ret;
 
 	if (master->platform_ops && master->platform_ops->init) {
@@ -1202,9 +1221,22 @@ static int dw_i3c_target_bus_init(struct i3c_master_controller *m)
 	writel(readl(master->regs + DEVICE_CTRL) | DEV_CTRL_IBI_PAYLOAD_EN,
 	       master->regs + DEVICE_CTRL);
 
+	if (master->platform_ops && master->platform_ops->isolate_scl_sda)
+		master->platform_ops->isolate_scl_sda(master, true);
 	dw_i3c_master_enable(master);
+	wait_enable_us = DIV_ROUND_UP(master->timings.i3c_core_period *
+				      BUS_AVAIL_TIME_GET(readl(master->regs + BUS_FREE_TIMING)),
+				      NSEC_PER_USEC);
+	udelay(wait_enable_us);
+	if (!dw_i3c_master_poll_enable_bit(master)) {
+		dev_warn(master->dev, "Target bus init: failed to enable controller");
+		ret = -EACCES;
+	}
 
-	return 0;
+	if (master->platform_ops && master->platform_ops->isolate_scl_sda)
+		master->platform_ops->isolate_scl_sda(master, false);
+
+	return ret;
 }
 
 static void dw_i3c_target_bus_cleanup(struct i3c_master_controller *m)
@@ -1650,11 +1682,16 @@ static int dw_i3c_target_generate_ibi(struct i3c_dev_desc *dev, const u8 *data, 
 static int dw_i3c_target_cleanup_ctrl_queues_on_timeout(struct dw_i3c_master *master)
 {
 	u32 wait_enable_us;
+	int ret = 0;
+
+	if (master->platform_ops && master->platform_ops->isolate_scl_sda)
+		master->platform_ops->isolate_scl_sda(master, true);
 
 	dw_i3c_master_disable(master);
 	if (dw_i3c_master_poll_enable_bit(master)) {
 		dev_warn(master->dev, "Master read timeout: failed to disable controller");
-		return -EACCES;
+		ret = -EACCES;
+		goto reset_finished;
 	}
 
 	writel(RESET_CTRL_QUEUES, master->regs + RESET_CTRL);
@@ -1665,10 +1702,13 @@ static int dw_i3c_target_cleanup_ctrl_queues_on_timeout(struct dw_i3c_master *ma
 	udelay(wait_enable_us);
 	if (!dw_i3c_master_poll_enable_bit(master)) {
 		dev_warn(master->dev, "Master read timeout: failed to enable controller");
-		return -EACCES;
+		ret = -EACCES;
 	}
 
-	return 0;
+reset_finished:
+	if (master->platform_ops && master->platform_ops->isolate_scl_sda)
+		master->platform_ops->isolate_scl_sda(master, false);
+	return ret;
 }
 
 static int dw_i3c_target_put_read_data(struct i3c_dev_desc *dev, struct i3c_priv_xfer *i3c_xfers,
@@ -2504,6 +2544,7 @@ static const struct dw_i3c_platform_ops ast2600_platform_ops = {
 	.probe = ast2600_i3c_probe,
 	.init = ast2600_i3c_init,
 	.toggle_scl_in = ast2600_i3c_toggle_scl_in,
+	.isolate_scl_sda = ast2600_i3c_isolate_scl_sda,
 };
 
 static const struct of_device_id dw_i3c_master_of_match[] = {

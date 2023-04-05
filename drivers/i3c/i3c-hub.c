@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 /* Copyright (C) 2021 Intel Corporation.*/
 
+#include <linux/ktime.h>
 #include <linux/bitfield.h>
 #include <linux/debugfs.h>
 #include <linux/module.h>
@@ -147,6 +148,12 @@
 #define I3C_HUB_TP7_SMBUS_AGNT_STS			0x6B
 #define I3C_HUB_ONCHIP_TD_AND_SMBUS_AGNT_CONF		0x6C
 
+/* Transaction status checking mask */
+#define I3C_HUB_XFER_SUCCESS				0x01
+#define I3C_HUB_TP_BUFFER_STATUS_MASK			0x0F
+#define I3C_HUB_TP_TRANSACTION_CODE_MASK		0xF0
+#define I3C_HUB_SMBUS_MAX_STATUS_CHECK			10
+
 /* Special Function Registers */
 #define I3C_HUB_LDO_AND_CPSEL_STS			0x79
 #define  CP_SDA1_LEVEL					BIT(7)
@@ -174,6 +181,11 @@
 #define I3C_HUB_DT_LDO_1_2V				0x03
 #define I3C_HUB_DT_LDO_1_8V				0x04
 #define I3C_HUB_DT_LDO_NOT_DEFINED			0xFF
+
+/* Paged Transaction Registers */
+#define I3C_HUB_CONTROLLER_BUFFER_PAGE			0x10
+#define I3C_HUB_CONTROLLER_AGENT_BUFF			0x80
+#define I3C_HUB_CONTROLLER_AGENT_BUFF_DATA		0x84
 
 /* Pull-up DT settings */
 #define I3C_HUB_DT_PULLUP_DISABLED			0x00
@@ -203,6 +215,19 @@
 #define I3C_HUB_DT_IO_STRENGTH_50_OHM			0x03
 #define I3C_HUB_DT_IO_STRENGTH_NOT_DEFINED		0xFF
 
+/* SMBus transaction types fields */
+#define I3C_HUB_SMBUS_400kHz				BIT(2)
+
+/* Hub buffer size */
+#define I3C_HUB_CONTROLLER_BUFFER_SIZE			88
+#define I3C_HUB_SMBUS_DESCRIPTOR_SIZE			4
+#define I3C_HUB_SMBUS_PAYLOAD_SIZE			(I3C_HUB_CONTROLLER_BUFFER_SIZE - \
+							I3C_HUB_SMBUS_DESCRIPTOR_SIZE)
+
+/* Hub SMBus timeout time period in nanoseconds */
+#define I3C_HUB_SMBUS_400kHz_TIMEOUT			(10e9 * 8 * \
+							I3C_HUB_CONTROLLER_BUFFER_SIZE / 4e5)
+
 /* ID Extraction */
 #define I3C_HUB_ID_CP_SDA_SCL				0x00
 #define I3C_HUB_ID_CP_SEL				0x01
@@ -226,11 +251,18 @@ struct dt_settings {
 	struct tp_setting tp[I3C_HUB_TP_MAX_COUNT];
 };
 
+struct i2c_adapter_group {
+	u8 tp_mask;
+	u8 tp_port;
+	u8 used;
+};
+
 struct logical_bus {
 	bool available; /* Indicates that logical bus configuration is available in DT. */
 	bool registered; /* Indicates that logical bus was registered in the framework. */
 	u8 tp_map;
 	struct i3c_master_controller controller;
+	struct i2c_adapter_group smbus_port_adapter;
 	struct device_node *of_node;
 	struct i3c_hub *priv;
 };
@@ -866,6 +898,178 @@ static struct i3c_master_controller *parent_controller_from_i2c_desc(struct i2c_
 	return bus->priv->controller;
 }
 
+static int i3c_hub_read_transaction_status(struct i3c_hub *priv,
+					   u8 target_port_status,
+					   u8 *status)
+{
+	unsigned long time_to_timeout = 0;
+	unsigned int status_read;
+	ktime_t start, end;
+	int ret;
+
+	start = ktime_get_real();
+
+	while (time_to_timeout < (long)I3C_HUB_SMBUS_400kHz_TIMEOUT) {
+		ret = regmap_read(priv->regmap, target_port_status, &status_read);
+		if (ret)
+			return ret;
+
+		*status = (u8)status_read;
+
+		if ((*status & I3C_HUB_TP_BUFFER_STATUS_MASK) == I3C_HUB_XFER_SUCCESS)
+			return 0;
+
+		if (!(*status & I3C_HUB_TP_BUFFER_STATUS_MASK) &&
+			(*status & I3C_HUB_TP_TRANSACTION_CODE_MASK)) {
+			dev_err(&priv->i3cdev->dev, "Invalid transfer status returned\n");
+			return 0;
+		}
+
+		end = ktime_get_real();
+		time_to_timeout = end - start;
+	}
+	dev_err(&priv->i3cdev->dev, "Status read timeout reached\n");
+	return 0;
+}
+
+/*
+ * i3c_hub_smbus_msg() - This starts a smbus write transaction by writing a descriptor
+ * and a message to the hub registers. Controller buffer page is determined by multiplying the
+ * target port index by four and adding the base page number to it.
+ * @priv: a pointer to the i3c hub main structure
+ * @ssport: a number of the port where the transaction will happen
+ * @xfers: i2c_msg struct received from the master_xfers callback
+ * @nxfers_i: the number of the current message
+ * @rw: number informing if the message is of read or write type (0 for write, 1 for read)
+ * @return_status: number passed by reference where the return status code is saved
+ *
+ * Return: on success function returns zero. Otherwise the regmap read or write error code
+ * is returned
+ */
+static int i3c_hub_smbus_msg(struct i3c_hub *priv,
+			     struct i2c_msg *xfers,
+			     u8 target_port,
+			     u8 nxfers_i,
+			     u8 rw,
+			     u8 *return_status)
+{
+	u8 transaction_type = I3C_HUB_SMBUS_400kHz;
+	u8 controller_buffer_page = I3C_HUB_CONTROLLER_BUFFER_PAGE + 4 * target_port;
+	int write_length = xfers[nxfers_i].len;
+	int read_length = xfers[nxfers_i].len;
+	u8 target_port_status = I3C_HUB_TP0_SMBUS_AGNT_STS + target_port;
+	u8 addr = xfers[nxfers_i].addr;
+	u8 target_port_code = BIT(target_port);
+	u8 rw_address = 2 * addr;
+	u8 desc[I3C_HUB_SMBUS_DESCRIPTOR_SIZE] = {0};
+	u8 status;
+	u8 buf_id;
+	int ret;
+	u8 i;
+
+	if (rw)
+		rw_address |= BIT(0);
+	else
+		read_length = 0;
+
+	desc[0] = rw_address;
+	desc[1] = transaction_type;
+	desc[2] = write_length;
+	desc[3] = read_length;
+
+	ret = regmap_write(priv->regmap, target_port_status, I3C_HUB_TP_BUFFER_STATUS_MASK);
+	if (ret)
+		return ret;
+
+	ret = regmap_write(priv->regmap, I3C_HUB_PAGE_PTR, controller_buffer_page);
+	if (ret)
+		return ret;
+
+	buf_id = I3C_HUB_CONTROLLER_AGENT_BUFF;
+	for (i = 0 ; i < I3C_HUB_SMBUS_DESCRIPTOR_SIZE ; i++) {
+		ret = regmap_write(priv->regmap, buf_id + i, desc[i]);
+		if (ret)
+			return ret;
+	}
+
+	buf_id = I3C_HUB_CONTROLLER_AGENT_BUFF_DATA;
+
+	if (!rw) {
+		ret = regmap_bulk_write(priv->regmap,
+					buf_id,
+					xfers[nxfers_i].buf,
+					xfers[nxfers_i].len);
+		if (ret)
+			return ret;
+	}
+
+	ret = regmap_write(priv->regmap, I3C_HUB_TP_SMBUS_AGNT_TRANS_START, target_port_code);
+	if (ret)
+		return ret;
+
+	ret = i3c_hub_read_transaction_status(priv, target_port_status, &status);
+	if (ret)
+		return ret;
+
+	*return_status = status;
+
+	ret = regmap_write(priv->regmap, I3C_HUB_PAGE_PTR, 0x00);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
+/**
+ * i3c_controller_smbus_port_adapter_xfer() - i3c hub smbus transfer logic
+ * @adap: i2c_adapter corresponding with single port in the i3c hub
+ * @xfers: all messages descriptors and data
+ * @nxfers: amount of single messages in a transfer
+ *
+ * Return: function returns the sum of correctly sent messages (only those with hub return
+ * status 0x01)
+ */
+static int i3c_controller_smbus_port_adapter_xfer(struct i2c_adapter *adap,
+						  struct i2c_msg *xfers,
+						  int nxfers)
+{
+	struct i3c_master_controller *controller =
+		container_of(adap, struct i3c_master_controller, i2c);
+	struct logical_bus *bus =
+		container_of(controller, struct logical_bus, controller);
+	struct i3c_hub *priv = bus->priv;
+	int ret_sum = 0;
+	int ret;
+	u8 return_status;
+	u8 nxfers_i;
+	u8 rw;
+
+	for (nxfers_i = 0 ; nxfers_i < nxfers ; nxfers_i++) {
+
+		if (xfers[nxfers_i].len > I3C_HUB_SMBUS_PAYLOAD_SIZE) {
+			dev_err(&adap->dev,
+				"Message nr. %d not sent - length over %d bytes.\n",
+				nxfers_i,
+				I3C_HUB_SMBUS_PAYLOAD_SIZE);
+			continue;
+		}
+
+		rw = xfers[nxfers_i].flags % 2;
+
+		ret = i3c_hub_smbus_msg(priv,
+					xfers,
+					bus->smbus_port_adapter.tp_port,
+					nxfers_i,
+					rw,
+					&return_status);
+		if (ret)
+			return ret;
+		if (return_status == I3C_HUB_XFER_SUCCESS)
+			ret_sum++;
+	}
+	return ret_sum;
+}
+
 static int i3c_hub_bus_init(struct i3c_master_controller *master)
 {
 	struct logical_bus *bus = container_of(master, struct logical_bus, controller);
@@ -1011,12 +1215,73 @@ static const struct i3c_master_controller_ops i3c_hub_i3c_ops = {
 	.recycle_ibi_slot = i3c_hub_recycle_ibi_slot,
 };
 
+/* SMBus virtual i3c_master_controller_ops */
+
+static int i3c_hub_do_daa_smbus(struct i3c_master_controller *master)
+{
+	return 0;
+}
+
+static bool i3c_hub_supports_ccc_cmd_smbus(struct i3c_master_controller *master,
+					   const struct i3c_ccc_cmd *cmd)
+{
+	return true;
+}
+
+static int i3c_hub_send_ccc_cmd_smbus(struct i3c_master_controller *master,
+				      struct i3c_ccc_cmd *cmd)
+{
+	return 0;
+}
+
+static int i3c_hub_priv_xfers_smbus(struct i3c_dev_desc *dev,
+				    struct i3c_priv_xfer *xfers,
+				    int nxfers)
+{
+	return 0;
+}
+
+static int i3c_hub_i2c_xfers_smbus(struct i2c_dev_desc *dev,
+				   const struct i2c_msg *xfers,
+				   int nxfers)
+{
+	return 0;
+}
+
+static const struct i3c_master_controller_ops i3c_hub_i3c_ops_smbus = {
+	.bus_init = i3c_hub_bus_init,
+	.bus_cleanup = i3c_hub_bus_cleanup,
+	.do_daa = i3c_hub_do_daa_smbus,
+	.supports_ccc_cmd = i3c_hub_supports_ccc_cmd_smbus,
+	.send_ccc_cmd = i3c_hub_send_ccc_cmd_smbus,
+	.priv_xfers = i3c_hub_priv_xfers_smbus,
+	.i2c_xfers = i3c_hub_i2c_xfers_smbus,
+};
+
 int i3c_hub_logic_register(struct i3c_master_controller *master,
 			   struct i3c_master_controller *top_master, struct device *parent)
 {
 	master->bus_driver_context = top_master->bus_driver_context;
 	return i3c_master_register(master, parent, &i3c_hub_i3c_ops, false);
 }
+
+int i3c_hub_logic_register_smbus(struct i3c_master_controller *master,
+				 struct i3c_master_controller *top_master,
+				 struct device *parent)
+{
+	master->bus_driver_context = top_master->bus_driver_context;
+	return i3c_master_register(master, parent, &i3c_hub_i3c_ops_smbus, false);
+}
+
+static u32 i3c_controller_smbus_funcs(struct i2c_adapter *adapter)
+{
+	return I2C_FUNC_SMBUS_EMUL | I2C_FUNC_I2C;
+}
+
+static const struct i2c_algorithm i3c_controller_smbus_algo = {
+	.master_xfer = i3c_controller_smbus_port_adapter_xfer,
+	.functionality = i3c_controller_smbus_funcs,
+};
 
 static void i3c_hub_delayed_work(struct work_struct *work)
 {
@@ -1049,6 +1314,74 @@ static void i3c_hub_delayed_work(struct work_struct *work)
 	ret = i3c_master_do_daa(priv->controller);
 	if (ret)
 		dev_warn(dev, "Failed to run DAA\n");
+
+	for (i = 0 ; i < I3C_HUB_TP_MAX_COUNT ; i++) {
+		if (!priv->logical_bus[i].smbus_port_adapter.used)
+			continue;
+
+		priv->logical_bus[i].controller.i2c.algo = &i3c_controller_smbus_algo;
+	}
+}
+
+static int i3c_hub_register_smbus_controller(struct i3c_hub *priv, int i)
+{
+	struct device *dev = i3cdev_to_dev(priv->i3cdev);
+	int ret;
+
+	ret = regmap_write(priv->regmap,
+			   I3C_HUB_TP_NET_CON_CONF,
+			   priv->logical_bus[i].smbus_port_adapter.tp_mask);
+	if (ret) {
+		dev_warn(dev, "Failed to open Target Port");
+		return ret;
+	}
+
+	ret = i3c_hub_logic_register_smbus(&priv->logical_bus[i].controller,
+					   priv->controller, dev);
+	if (ret) {
+		dev_warn(dev, "Failed to register i3c controller\n");
+		return ret;
+	}
+
+	ret = regmap_write(priv->regmap, I3C_HUB_TP_NET_CON_CONF, 0x00);
+	if (ret) {
+		dev_warn(dev, "Failed to close Target Port");
+		return ret;
+	}
+
+	return 0;
+}
+
+static int i3c_hub_smbus_tp_algo(struct i3c_hub *priv, int i)
+{
+	int ret;
+
+	if (priv->hub_dt_cp1_id != priv->hub_pin_cp1_id)
+		return 1;
+
+	priv->logical_bus[i].priv = priv;
+	priv->logical_bus[i].smbus_port_adapter.tp_port = i;
+	priv->logical_bus[i].smbus_port_adapter.tp_mask = BIT(i);
+
+	/* Register controller for target port*/
+	ret = i3c_hub_register_smbus_controller(priv, i);
+	if (ret)
+		return ret;
+
+	priv->logical_bus[i].smbus_port_adapter.used = 1;
+
+	priv->logical_bus[i].controller.i2c.dev.parent =
+		priv->logical_bus[i].controller.dev.parent;
+	priv->logical_bus[i].controller.i2c.owner =
+		priv->logical_bus[i].controller.dev.parent->driver->owner;
+
+	sprintf(priv->logical_bus[i].controller.i2c.name, "hub0x%X.port%d",
+		priv->hub_dt_cp1_id, i);
+
+	priv->logical_bus[i].controller.i2c.timeout = 1000;
+	priv->logical_bus[i].controller.i2c.retries = 3;
+
+	return 0;
 }
 
 static int i3c_hub_probe(struct i3c_device *i3cdev)
@@ -1063,6 +1396,7 @@ static int i3c_hub_probe(struct i3c_device *i3cdev)
 	struct i3c_hub *priv;
 	char hub_id[32];
 	int ret;
+	int i;
 
 	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
@@ -1112,6 +1446,13 @@ static int i3c_hub_probe(struct i3c_device *i3cdev)
 		goto error;
 	}
 
+	/* Register logic for native smbus ports */
+	for (i = 0 ; i < I3C_HUB_TP_MAX_COUNT ; i++) {
+		priv->logical_bus[i].smbus_port_adapter.used = 0;
+		if (priv->settings.tp[i].mode == I3C_HUB_DT_TP_MODE_SMBUS)
+			ret = i3c_hub_smbus_tp_algo(priv, i);
+	}
+
 	ret = i3c_hub_configure_hw(dev);
 	if (ret) {
 		dev_err(dev, "Failed to configure the HUB\n");
@@ -1141,10 +1482,11 @@ static void i3c_hub_remove(struct i3c_device *i3cdev)
 	struct i3c_hub *priv = i3cdev_get_drvdata(i3cdev);
 	int i;
 
-	for (i = 0; i < I3C_HUB_LOGICAL_BUS_MAX_COUNT; ++i) {
-		if (priv->logical_bus[i].registered)
+	for (i = 0; i < I3C_HUB_TP_MAX_COUNT ; i++) {
+		if (priv->logical_bus[i].smbus_port_adapter.used || priv->logical_bus[i].registered)
 			i3c_master_unregister(&priv->logical_bus[i].controller);
 	}
+
 	cancel_delayed_work_sync(&priv->delayed_work);
 	debugfs_remove_recursive(priv->debug_dir);
 }

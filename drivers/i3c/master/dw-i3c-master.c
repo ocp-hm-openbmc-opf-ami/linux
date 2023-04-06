@@ -9,6 +9,7 @@
 #include <linux/bitfield.h>
 #include <linux/clk.h>
 #include <linux/completion.h>
+#include <linux/debugfs.h>
 #include <linux/err.h>
 #include <linux/errno.h>
 #include <linux/i3c/master.h>
@@ -93,6 +94,7 @@
 #define RESPONSE_ERROR_OVER_UNDER_FLOW	6
 #define RESPONSE_ERROR_TRANSF_ABORT	8
 #define RESPONSE_ERROR_I2C_W_NACK_ERR	9
+#define RESPONSE_ERROR_PEC_ERR		12
 #define RESPONSE_PORT_TID(x)		(((x) & GENMASK(27, 24)) >> 24)
 #define TID_SLAVE_IBI			0x1
 #define TID_MASTER_READ			0x2
@@ -450,6 +452,9 @@ struct dw_i3c_master {
 		bool hw_dat_linked;
 		int hw_dat_index;
 	} sw_dat[MAX_DEVS];
+	u64 err_stats[16];
+
+	struct dentry *debugfs;
 };
 
 struct dw_i3c_platform_ops {
@@ -1038,6 +1043,7 @@ static void dw_i3c_master_end_xfer_locked(struct dw_i3c_master *master, u32 isr)
 		if (cmd->rx_len && !cmd->error)
 			dw_i3c_master_read_rx_fifo(master, cmd->rx_buf,
 						   cmd->rx_len);
+		master->err_stats[cmd->error]++;
 	}
 
 	for (i = 0; i < nresp; i++) {
@@ -2871,6 +2877,48 @@ static const struct of_device_id dw_i3c_master_of_match[] = {
 };
 MODULE_DEVICE_TABLE(of, dw_i3c_master_of_match);
 
+static int dw_i3c_debugfs_init(struct dw_i3c_master *master)
+{
+	struct dentry *dw_i3c_dir, *err_stats_dir;
+	char dir_name[19];
+
+	sprintf(dir_name, "dw-i3c-%d", master->base.bus_id);
+	dw_i3c_dir = debugfs_create_dir(dir_name, NULL);
+	if (IS_ERR(dw_i3c_dir))
+		return PTR_ERR(dw_i3c_dir);
+
+	err_stats_dir = debugfs_create_dir("err-stats", dw_i3c_dir);
+	if (IS_ERR(err_stats_dir)) {
+		debugfs_remove_recursive(dw_i3c_dir);
+		return PTR_ERR(err_stats_dir);
+	}
+
+	debugfs_create_u64("no_err", 0400, err_stats_dir,
+			   &master->err_stats[RESPONSE_NO_ERROR]);
+	debugfs_create_u64("crc_err", 0400, err_stats_dir,
+			   &master->err_stats[RESPONSE_ERROR_CRC]);
+	debugfs_create_u64("parity_err", 0400, err_stats_dir,
+			   &master->err_stats[RESPONSE_ERROR_PARITY]);
+	debugfs_create_u64("frame_err", 0400, err_stats_dir,
+			   &master->err_stats[RESPONSE_ERROR_FRAME]);
+	debugfs_create_u64("i3c_broadcast_adrr_nack", 0400, err_stats_dir,
+			   &master->err_stats[RESPONSE_ERROR_IBA_NACK]);
+	debugfs_create_u64("addr_nack", 0400, err_stats_dir,
+			   &master->err_stats[RESPONSE_ERROR_ADDRESS_NACK]);
+	debugfs_create_u64("rxbuf_overflow_txbuf_underflow", 0400, err_stats_dir,
+			   &master->err_stats[RESPONSE_ERROR_OVER_UNDER_FLOW]);
+	debugfs_create_u64("transfer_aborted", 0400, err_stats_dir,
+			   &master->err_stats[RESPONSE_ERROR_TRANSF_ABORT]);
+	debugfs_create_u64("i2c_slave_wr_data_nack", 0400, err_stats_dir,
+			   &master->err_stats[RESPONSE_ERROR_I2C_W_NACK_ERR]);
+	debugfs_create_u64("pec_err", 0400, err_stats_dir,
+			   &master->err_stats[RESPONSE_ERROR_PEC_ERR]);
+
+	master->debugfs = dw_i3c_dir;
+
+	return 0;
+}
+
 static int dw_i3c_probe(struct platform_device *pdev)
 {
 	const struct of_device_id *match;
@@ -2966,6 +3014,10 @@ static int dw_i3c_probe(struct platform_device *pdev)
 	if (ret)
 		goto err_assert_rst;
 
+	ret = dw_i3c_debugfs_init(master);
+	if (ret)
+		dev_warn(master->dev, "Failed to initialize debug FS, ret=%i\n", ret);
+
 	dev_info(&pdev->dev, "i3c bus %d registered, irq %d\n",
 		 master->base.bus_id, irq);
 
@@ -2984,6 +3036,8 @@ static int dw_i3c_remove(struct platform_device *pdev)
 {
 	struct dw_i3c_master *master = platform_get_drvdata(pdev);
 	int ret;
+
+	debugfs_remove_recursive(master->debugfs);
 
 	ret = i3c_unregister(&master->base);
 	if (ret)

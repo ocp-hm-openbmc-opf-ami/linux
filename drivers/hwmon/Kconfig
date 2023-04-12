@@ -2419,6 +2419,16 @@ config SENSORS_XGENE
 	  If you say yes here you get support for the temperature
 	  and power sensors for APM X-Gene SoC.
 
+config SENSORS_PIC32
+	tristate "PIC32 MCU Fan controller"
+	depends on I2C
+	default y
+	help
+	  This driver provides support for the Microchip Integrated
+	  PIC32MX130F128L. This controller is used on Optimus
+	  Beach (OPB) Power distribution board to control/monitor
+	  fans.
+
 config SENSORS_INTEL_M10_BMC_HWMON
 	tristate "Intel MAX10 BMC Hardware Monitoring"
 	depends on MFD_INTEL_M10_BMC

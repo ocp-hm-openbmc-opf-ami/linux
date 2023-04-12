@@ -595,9 +595,11 @@ static void ast2600_i3c_gen_stop_to_internal(struct dw_i3c_master *master)
 	struct pdata_ast2600 *pdata = &master->pdata.ast2600;
 
 	regmap_write_bits(pdata->global_regs, AST2600_I3CG_REG1(pdata->global_idx),
-			  SCL_IN_SW_MODE_VAL, SCL_IN_SW_MODE_VAL);
+			  SCL_IN_SW_MODE_VAL, 0);
 	regmap_write_bits(pdata->global_regs, AST2600_I3CG_REG1(pdata->global_idx),
 			  SDA_IN_SW_MODE_VAL, 0);
+	regmap_write_bits(pdata->global_regs, AST2600_I3CG_REG1(pdata->global_idx),
+			  SCL_IN_SW_MODE_VAL, SCL_IN_SW_MODE_VAL);
 	regmap_write_bits(pdata->global_regs, AST2600_I3CG_REG1(pdata->global_idx),
 			  SDA_IN_SW_MODE_VAL, SDA_IN_SW_MODE_VAL);
 }
@@ -622,29 +624,78 @@ static void ast2600_i3c_gen_tbits_in(struct dw_i3c_master *master)
 			  SDA_IN_SW_MODE_EN, 0);
 }
 
-static void dw_i3c_master_disable(struct dw_i3c_master *master)
+static int dw_i3c_master_poll_enable_bit(struct dw_i3c_master *master)
 {
-	writel(readl(master->regs + DEVICE_CTRL) & ~DEV_CTRL_ENABLE,
-	       master->regs + DEVICE_CTRL);
+	return readl(master->regs + DEVICE_CTRL) & DEV_CTRL_ENABLE;
 }
 
-static void dw_i3c_master_enable(struct dw_i3c_master *master)
+static int dw_i3c_master_disable(struct dw_i3c_master *master)
 {
-	writel(readl(master->regs + DEVICE_CTRL) | DEV_CTRL_ENABLE,
-	       master->regs + DEVICE_CTRL);
+	int ret = 0;
+
+	if (master->base.target && master->platform_ops && master->platform_ops->isolate_scl_sda)
+		master->platform_ops->isolate_scl_sda(master, true);
+
+	writel(readl(master->regs + DEVICE_CTRL) & ~DEV_CTRL_ENABLE, master->regs + DEVICE_CTRL);
+
+	if (master->base.target) {
+		if (master->platform_ops && master->platform_ops->toggle_scl_in)
+			master->platform_ops->toggle_scl_in(master, 8);
+		if (master->platform_ops && master->platform_ops->gen_stop_to_internal)
+			master->platform_ops->gen_stop_to_internal(master);
+		if (dw_i3c_master_poll_enable_bit(master)) {
+			dev_warn(master->dev, "Failed to disable controller");
+			ret = -EACCES;
+		}
+
+		if (master->platform_ops && master->platform_ops->isolate_scl_sda)
+			master->platform_ops->isolate_scl_sda(master, false);
+	}
+
+	return ret;
+}
+
+static int dw_i3c_master_enable(struct dw_i3c_master *master)
+{
+	u32 wait_enable_us;
+	int ret = 0;
+
+	if (master->base.target && master->platform_ops && master->platform_ops->isolate_scl_sda)
+		master->platform_ops->isolate_scl_sda(master, true);
+
+	writel(readl(master->regs + DEVICE_CTRL) | DEV_CTRL_ENABLE, master->regs + DEVICE_CTRL);
+
+	if (master->base.target) {
+		wait_enable_us =
+			DIV_ROUND_UP(master->timings.i3c_core_period *
+				     BUS_AVAIL_TIME_GET(readl(master->regs + BUS_FREE_TIMING)),
+				     NSEC_PER_USEC);
+		udelay(wait_enable_us);
+
+		if (master->platform_ops && master->platform_ops->toggle_scl_in)
+			master->platform_ops->toggle_scl_in(master, 8);
+
+		if (!dw_i3c_master_poll_enable_bit(master)) {
+			dev_warn(master->dev, "Failed to enable controller");
+			ret = -EACCES;
+			goto release_scl_sda;
+		}
+
+		if (master->platform_ops && master->platform_ops->gen_stop_to_internal)
+			master->platform_ops->gen_stop_to_internal(master);
+
+release_scl_sda:
+		if (master->platform_ops && master->platform_ops->isolate_scl_sda)
+			master->platform_ops->isolate_scl_sda(master, false);
+	}
+
+	return ret;
 }
 
 static void dw_i3c_master_resume(struct dw_i3c_master *master)
 {
 	writel(readl(master->regs + DEVICE_CTRL) | DEV_CTRL_RESUME,
 	       master->regs + DEVICE_CTRL);
-}
-
-static int dw_i3c_master_poll_enable_bit(struct dw_i3c_master *master)
-{
-	if (master->platform_ops && master->platform_ops->toggle_scl_in)
-		master->platform_ops->toggle_scl_in(master, 8);
-	return readl(master->regs + DEVICE_CTRL) & DEV_CTRL_ENABLE;
 }
 
 static int dw_i3c_master_get_addr_pos(struct dw_i3c_master *master, u8 addr)
@@ -1465,7 +1516,7 @@ static int dw_i3c_target_bus_init(struct i3c_master_controller *m)
 	struct dw_i3c_master *master = to_dw_i3c_master(m);
 	struct i3c_dev_desc *desc = master->base.this;
 	void *rx_buf;
-	u32 reg, wait_enable_us;
+	u32 reg;
 	int ret;
 
 	if (master->platform_ops && master->platform_ops->init) {
@@ -1491,7 +1542,9 @@ static int dw_i3c_target_bus_init(struct i3c_master_controller *m)
 
 	master->target_rx.buf = rx_buf;
 
-	dw_i3c_master_disable(master);
+	ret = dw_i3c_master_disable(master);
+	if (ret)
+		return ret;
 
 	reg = readl(master->regs + QUEUE_THLD_CTRL) & ~QUEUE_THLD_CTRL_RESP_BUF_MASK;
 	writel(reg, master->regs + QUEUE_THLD_CTRL);
@@ -1523,25 +1576,7 @@ static int dw_i3c_target_bus_init(struct i3c_master_controller *m)
 	writel(readl(master->regs + DEVICE_CTRL) | DEV_CTRL_IBI_PAYLOAD_EN,
 	       master->regs + DEVICE_CTRL);
 
-	if (master->platform_ops && master->platform_ops->isolate_scl_sda)
-		master->platform_ops->isolate_scl_sda(master, true);
-	dw_i3c_master_enable(master);
-	wait_enable_us = DIV_ROUND_UP(master->timings.i3c_core_period *
-				      BUS_AVAIL_TIME_GET(readl(master->regs + BUS_FREE_TIMING)),
-				      NSEC_PER_USEC);
-	udelay(wait_enable_us);
-	if (!dw_i3c_master_poll_enable_bit(master)) {
-		dev_warn(master->dev, "Target bus init: failed to enable controller");
-		ret = -EACCES;
-	}
-
-	if (master->platform_ops && master->platform_ops->gen_stop_to_internal)
-		master->platform_ops->gen_stop_to_internal(master);
-
-	if (master->platform_ops && master->platform_ops->isolate_scl_sda)
-		master->platform_ops->isolate_scl_sda(master, false);
-
-	return ret;
+	return dw_i3c_master_enable(master);
 }
 
 static void dw_i3c_target_bus_cleanup(struct i3c_master_controller *m)
@@ -1557,7 +1592,7 @@ static int dw_i3c_master_bus_init(struct i3c_master_controller *m)
 	struct dw_i3c_master *master = to_dw_i3c_master(m);
 	struct i3c_device_info info = { };
 	u32 thld_ctrl;
-	int ret;
+	int ret = 0;
 
 	if (master->platform_ops && master->platform_ops->init) {
 		ret = master->platform_ops->init(master);
@@ -1614,13 +1649,7 @@ static int dw_i3c_master_bus_init(struct i3c_master_controller *m)
 	writel(readl(master->regs + DEVICE_CTRL) | DEV_CTRL_HOT_JOIN_NACK,
 	       master->regs + DEVICE_CTRL);
 
-	if (!master->base.jdec_spd)
-		writel(readl(master->regs + DEVICE_CTRL) | DEV_CTRL_IBA_INCLUDE,
-		       master->regs + DEVICE_CTRL);
-
-	dw_i3c_master_enable(master);
-
-	return 0;
+	return dw_i3c_master_enable(master);
 }
 
 static void dw_i3c_master_bus_cleanup(struct i3c_master_controller *m)
@@ -2018,34 +2047,15 @@ static int dw_i3c_target_generate_ibi(struct i3c_dev_desc *dev, const u8 *data, 
 
 static int dw_i3c_target_cleanup_ctrl_queues_on_timeout(struct dw_i3c_master *master)
 {
-	u32 wait_enable_us;
 	int ret = 0;
 
-	if (master->platform_ops && master->platform_ops->isolate_scl_sda)
-		master->platform_ops->isolate_scl_sda(master, true);
-
-	dw_i3c_master_disable(master);
-	if (dw_i3c_master_poll_enable_bit(master)) {
-		dev_warn(master->dev, "Master read timeout: failed to disable controller");
-		ret = -EACCES;
-		goto reset_finished;
-	}
+	ret = dw_i3c_master_disable(master);
+	if (ret)
+		return ret;
 
 	writel(RESET_CTRL_QUEUES, master->regs + RESET_CTRL);
-	dw_i3c_master_enable(master);
-	wait_enable_us = DIV_ROUND_UP(master->timings.i3c_core_period *
-				      BUS_AVAIL_TIME_GET(readl(master->regs + BUS_FREE_TIMING)),
-				      NSEC_PER_USEC);
-	udelay(wait_enable_us);
-	if (!dw_i3c_master_poll_enable_bit(master)) {
-		dev_warn(master->dev, "Master read timeout: failed to enable controller");
-		ret = -EACCES;
-	}
 
-reset_finished:
-	if (master->platform_ops && master->platform_ops->isolate_scl_sda)
-		master->platform_ops->isolate_scl_sda(master, false);
-	return ret;
+	return dw_i3c_master_enable(master);
 }
 
 static int dw_i3c_target_put_read_data(struct i3c_dev_desc *dev, struct i3c_priv_xfer *i3c_xfers,

@@ -651,6 +651,7 @@ static int aspeed_spi_dirmap_create(struct spi_mem_dirmap_desc *desc)
 	struct aspeed_spi_chip *chip = &aspi->chips[desc->mem->spi->chip_select];
 	struct spi_mem_op *op = &desc->info.op_tmpl;
 	u32 ctl_val;
+	u32 spi_bus_width = 0;
 	int ret = 0;
 
 	dev_dbg(aspi->dev,
@@ -705,9 +706,11 @@ static int aspeed_spi_dirmap_create(struct spi_mem_dirmap_desc *desc)
 
 	ret = aspeed_spi_do_calibration(chip);
 
-	dev_info(aspi->dev, "CE%d read buswidth:%d [0x%08x]\n",
-		 chip->cs, op->data.buswidth, chip->ctl_val[ASPEED_SPI_READ]);
-
+	/*Read from physical register to determine the SPI bus width*/
+	ctl_val = readl(chip->ctl);
+	spi_bus_width = (ctl_val >> 28) & ~(0x1);
+	dev_info(aspi->dev, "CE%d tx width:%d [0x%08x]\n", chip->cs,
+		 spi_bus_width, ctl_val);
 	return ret;
 }
 

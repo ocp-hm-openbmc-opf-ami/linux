@@ -901,7 +901,7 @@ static int i3c_mctp_probe(struct i3c_device *i3cdev)
 
 	ret = i3c_device_getmrl_ccc(i3cdev, &info);
 	if (ret || info.max_read_len < I3C_MCTP_MIN_TRANSFER_SIZE)
-		ret = i3c_device_setmrl_ccc(i3cdev, &info, I3C_MCTP_MIN_TRANSFER_SIZE,
+		ret = i3c_device_setmrl_ccc(i3cdev, &info, cpu_to_be16(I3C_MCTP_MIN_TRANSFER_SIZE),
 					    I3C_MCTP_IBI_PAYLOAD_SIZE);
 	if (ret && info.max_read_len < I3C_MCTP_MIN_TRANSFER_SIZE) {
 		dev_info(dev, "Failed to set MRL, ret = %d, running with default: %d\n", ret,
@@ -912,7 +912,7 @@ static int i3c_mctp_probe(struct i3c_device *i3cdev)
 
 	ret = i3c_device_getmwl_ccc(i3cdev, &info);
 	if (ret || info.max_write_len < I3C_MCTP_MIN_TRANSFER_SIZE)
-		ret = i3c_device_setmwl_ccc(i3cdev, &info, I3C_MCTP_MIN_TRANSFER_SIZE);
+		ret = i3c_device_setmwl_ccc(i3cdev, &info, cpu_to_be16(I3C_MCTP_MIN_TRANSFER_SIZE));
 	if (ret && info.max_write_len < I3C_MCTP_MIN_TRANSFER_SIZE) {
 		dev_info(dev, "Failed to set MWL, ret = %d, running with default: %d\n", ret,
 			 I3C_MCTP_MIN_TRANSFER_SIZE);

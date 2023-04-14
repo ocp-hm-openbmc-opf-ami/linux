@@ -105,6 +105,7 @@
 #define IBI_QUEUE_STATUS		0x18
 #define IBI_QUEUE_STATUS_RSP_NACK	BIT(31)
 #define IBI_QUEUE_STATUS_PEC_ERR	BIT(30)
+#define IBI_QUEUE_STATUS_LAST_FRAG	BIT(24)
 #define IBI_QUEUE_STATUS_IBI_ID(x)	(((x) & GENMASK(15, 8)) >> 8)
 #define IBI_QUEUE_STATUS_DATA_LEN(x)	((x) & GENMASK(7, 0))
 
@@ -205,6 +206,7 @@
 #define PRESENT_STATE			0x54
 #define PRESENT_STATE_CM_TFR_STS(x)	(((x) & GENMASK(13, 8)) >> 8)
 #define CM_TFR_STS_SLAVE_HALT		0x6
+#define CM_TFR_STS_MASTER_SERV_IBI	0xe
 #define CCC_DEVICE_STATUS		0x58
 #define DEVICE_ADDR_TABLE_POINTER	0x5c
 #define DEVICE_ADDR_TABLE_DEPTH(x)	(((x) & GENMASK(31, 16)) >> 16)
@@ -387,6 +389,7 @@ struct dw_i3c_master {
 	union {
 		struct {
 			struct i3c_dev_desc *slots[MAX_DEVS];
+			u32 received_ibi_len[MAX_DEVS];
 			/*
 			 * Prevents simultaneous access to IBI related registers
 			 * and slots array.
@@ -437,6 +440,7 @@ struct dw_i3c_platform_ops {
 	void (*toggle_scl_in)(struct dw_i3c_master *master, u8 times);
 	void (*isolate_scl_sda)(struct dw_i3c_master *master, bool iso);
 	void (*gen_stop_to_internal)(struct dw_i3c_master *master);
+	void (*gen_tbits_in)(struct dw_i3c_master *master);
 };
 
 struct dw_i3c_i2c_dev_data {
@@ -514,6 +518,17 @@ to_dw_i3c_master(struct i3c_master_controller *master)
 	return (struct dw_i3c_master *)master->bus_driver_context;
 }
 
+static bool dw_i3c_master_fsm_is_idle(struct dw_i3c_master *master)
+{
+	/*
+	 * Clear the IBI queue to enable the hardware to generate SCL and
+	 * begin detecting the T-bit low to stop reading IBI data.
+	 */
+	readl(master->regs + IBI_QUEUE_DATA);
+
+	return !PRESENT_STATE_CM_TFR_STS(readl(master->regs + PRESENT_STATE));
+}
+
 static void ast2600_i3c_toggle_scl_in(struct dw_i3c_master *master, u8 times)
 {
 	struct pdata_ast2600 *pdata = &master->pdata.ast2600;
@@ -553,6 +568,26 @@ static void ast2600_i3c_gen_stop_to_internal(struct dw_i3c_master *master)
 			  SDA_IN_SW_MODE_VAL, 0);
 	regmap_write_bits(pdata->global_regs, AST2600_I3CG_REG1(pdata->global_idx),
 			  SDA_IN_SW_MODE_VAL, SDA_IN_SW_MODE_VAL);
+}
+
+static void ast2600_i3c_gen_tbits_in(struct dw_i3c_master *master)
+{
+	struct pdata_ast2600 *pdata = &master->pdata.ast2600;
+	bool is_idle;
+
+	regmap_write_bits(pdata->global_regs, AST2600_I3CG_REG1(pdata->global_idx),
+			  SDA_IN_SW_MODE_VAL, SDA_IN_SW_MODE_VAL);
+	regmap_write_bits(pdata->global_regs, AST2600_I3CG_REG1(pdata->global_idx),
+			  SDA_IN_SW_MODE_EN, SDA_IN_SW_MODE_EN);
+	regmap_write_bits(pdata->global_regs, AST2600_I3CG_REG1(pdata->global_idx),
+			  SDA_IN_SW_MODE_VAL, 0);
+	if (readx_poll_timeout_atomic(dw_i3c_master_fsm_is_idle, master, is_idle,
+				      is_idle, 0, 2000000))
+		dev_err(master->dev,
+			"Failed to recover the i3c fsm from %lx to idle",
+			PRESENT_STATE_CM_TFR_STS(readl(master->regs + PRESENT_STATE)));
+	regmap_write_bits(pdata->global_regs, AST2600_I3CG_REG1(pdata->global_idx),
+			  SDA_IN_SW_MODE_EN, 0);
 }
 
 static void dw_i3c_master_disable(struct dw_i3c_master *master)
@@ -1997,6 +2032,7 @@ static int dw_i3c_master_request_ibi(struct i3c_dev_desc *dev,
 		if (!master->ibi.master.slots[i]) {
 			data->ibi = i;
 			master->ibi.master.slots[i] = dev;
+			master->ibi.master.received_ibi_len[i] = 0;
 			break;
 		}
 	}
@@ -2213,6 +2249,17 @@ static void dw_i3c_master_sir_handler(struct dw_i3c_master *master,
 		dev_warn(master->dev, "no free ibi slot\n");
 		goto err;
 	}
+
+	master->ibi.master.received_ibi_len[addr] += length;
+	if (master->ibi.master.received_ibi_len[addr] >
+	    slot->dev->ibi->max_payload_len) {
+		dev_dbg(master->dev, "received ibi payload %d > device requested buffer %d",
+			master->ibi.master.received_ibi_len[addr],
+			slot->dev->ibi->max_payload_len);
+		goto err;
+	}
+	if (ibi_status & IBI_QUEUE_STATUS_LAST_FRAG)
+		master->ibi.master.received_ibi_len[addr] = 0;
 	buf = slot->data;
 	/* prepend ibi status */
 	memcpy(buf, &ibi_status, sizeof(ibi_status));
@@ -2232,6 +2279,11 @@ static void dw_i3c_master_sir_handler(struct dw_i3c_master *master,
 
 err:
 	dw_i3c_master_flush_ibi_fifo(master, length);
+	if ((PRESENT_STATE_CM_TFR_STS(readl(master->regs + PRESENT_STATE)) ==
+	     CM_TFR_STS_MASTER_SERV_IBI) && master->platform_ops &&
+	    master->platform_ops->gen_tbits_in)
+		master->platform_ops->gen_tbits_in(master);
+	master->ibi.master.received_ibi_len[addr] = 0;
 }
 
 static void dw_i3c_master_demux_ibis(struct dw_i3c_master *master)
@@ -2562,6 +2614,7 @@ static const struct dw_i3c_platform_ops ast2600_platform_ops = {
 	.toggle_scl_in = ast2600_i3c_toggle_scl_in,
 	.isolate_scl_sda = ast2600_i3c_isolate_scl_sda,
 	.gen_stop_to_internal = ast2600_i3c_gen_stop_to_internal,
+	.gen_tbits_in = ast2600_i3c_gen_tbits_in,
 };
 
 static const struct of_device_id dw_i3c_master_of_match[] = {

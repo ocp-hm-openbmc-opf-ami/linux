@@ -203,8 +203,8 @@
 #define DATA_BUFFER_STATUS_LEVEL_TX(x)	((x) & GENMASK(7, 0))
 
 #define PRESENT_STATE			0x54
-#define PRESENT_STATE_CM_ST_STS(x)	(((x) & GENMASK(13, 8)) >> 8)
-#define CM_ST_STS_HALT			0x6
+#define PRESENT_STATE_CM_TFR_STS(x)	(((x) & GENMASK(13, 8)) >> 8)
+#define CM_TFR_STS_SLAVE_HALT		0x6
 #define CCC_DEVICE_STATUS		0x58
 #define DEVICE_ADDR_TABLE_POINTER	0x5c
 #define DEVICE_ADDR_TABLE_DEPTH(x)	(((x) & GENMASK(31, 16)) >> 16)
@@ -2275,9 +2275,9 @@ static void dw_i3c_target_event_handler(struct dw_i3c_master *master)
 {
 	u32 event = readl(master->regs + SLV_EVENT_CTRL);
 	u32 cm_state =
-		PRESENT_STATE_CM_ST_STS(readl(master->regs + PRESENT_STATE));
+		PRESENT_STATE_CM_TFR_STS(readl(master->regs + PRESENT_STATE));
 
-	if (cm_state == CM_ST_STS_HALT) {
+	if (cm_state == CM_TFR_STS_SLAVE_HALT) {
 		dev_dbg(master->dev, "slave in halt state\n");
 		dw_i3c_master_resume(master);
 	}

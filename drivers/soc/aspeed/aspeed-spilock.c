@@ -28,7 +28,8 @@
 #define AQCD00 0x150
 #define AQCD01 0x154
 #define ENB_CMD_FLT 0x1
-#define ENB_ADDR_FLT 0xF
+#define ENB_ADDR_FLT1 0x3
+#define ENB_ADDR_FLT2 0xC
 #define CMD_READ 0x8000006B
 #define CMD_PROG 0x80000202
 #define CMD_ERASE 0x8000D8D8
@@ -70,24 +71,24 @@ static inline void aspeed_spilock_write(struct device *dev, u32 reg, u32 val)
 
 static void lock_spi_region(struct device *dev, enum spi_region region, bool lock)
 {
+	int addr_ctrl = aspeed_spilock_read(dev, ADDR_FLT_CTRL);
+
 	switch (region) {
 	case ROT_P:
 		if (lock) {
-			aspeed_spilock_write(dev, ADDR_FLT_REG1,
-					     SEG_WRITE_FILTER(ROT_P_START, ROT_P_END));
+			aspeed_spilock_write(dev, ADDR_FLT_CTRL, addr_ctrl | ENB_ADDR_FLT1);
 			dev_dbg(dev, "Locked ROT-P Region successfully\n");
 		} else {
-			aspeed_spilock_write(dev, ADDR_FLT_REG1, 0x0);
+			aspeed_spilock_write(dev, ADDR_FLT_CTRL, addr_ctrl & ~ENB_ADDR_FLT1);
 			dev_dbg(dev, "Unlocked ROT-P Region successfully\n");
 		}
 		break;
 	case ROT_S:
 		if (lock) {
-			aspeed_spilock_write(dev, ADDR_FLT_REG2,
-					     SEG_WRITE_FILTER(ROT_S_START, ROT_S_END));
+			aspeed_spilock_write(dev, ADDR_FLT_CTRL, addr_ctrl | ENB_ADDR_FLT2);
 			dev_dbg(dev, "Locked ROT-S Region successfully\n");
 		} else {
-			aspeed_spilock_write(dev, ADDR_FLT_REG2, 0x0);
+			aspeed_spilock_write(dev, ADDR_FLT_CTRL, addr_ctrl & ~ENB_ADDR_FLT2);
 			dev_dbg(dev, "Unlocked ROT-S Region successfully\n");
 		}
 		break;
@@ -96,7 +97,8 @@ static void lock_spi_region(struct device *dev, enum spi_region region, bool loc
 		return;
 	}
 
-	aspeed_spilock_write(dev, ADDR_FLT_CTRL, ENB_ADDR_FLT);
+	aspeed_spilock_write(dev, ADDR_FLT_REG1, SEG_WRITE_FILTER(ROT_P_START, ROT_P_END));
+	aspeed_spilock_write(dev, ADDR_FLT_REG2, SEG_WRITE_FILTER(ROT_S_START, ROT_S_END));
 	aspeed_spilock_write(dev, FQCD07, CMD_READ);
 	aspeed_spilock_write(dev, AQCD00, CMD_PROG);
 	aspeed_spilock_write(dev, AQCD01, CMD_ERASE);
@@ -106,9 +108,9 @@ static void lock_spi_region(struct device *dev, enum spi_region region, bool loc
 static ssize_t lock_ROT_P_region_show(struct device *dev,
 				      struct device_attribute *attr, char *buf)
 {
-	int val = aspeed_spilock_read(dev, ADDR_FLT_REG1);
+	int val = aspeed_spilock_read(dev, ADDR_FLT_CTRL);
 
-	return sprintf(buf, "%d", val ? 1 : 0);
+	return sprintf(buf, "%d", (val & ENB_ADDR_FLT1) == ENB_ADDR_FLT1 ? 1 : 0);
 }
 
 static ssize_t lock_ROT_P_region_store(struct device *dev,
@@ -130,9 +132,9 @@ static ssize_t lock_ROT_P_region_store(struct device *dev,
 static ssize_t lock_ROT_S_region_show(struct device *dev,
 				      struct device_attribute *attr, char *buf)
 {
-	int val = aspeed_spilock_read(dev, ADDR_FLT_REG2);
+	int val = aspeed_spilock_read(dev, ADDR_FLT_CTRL);
 
-	return sprintf(buf, "%d", val ? 1 : 0);
+	return sprintf(buf, "%d", (val & ENB_ADDR_FLT2) == ENB_ADDR_FLT2 ? 1 : 0);
 }
 
 static ssize_t lock_ROT_S_region_store(struct device *dev,

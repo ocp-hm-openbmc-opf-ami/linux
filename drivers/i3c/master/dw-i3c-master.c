@@ -45,6 +45,7 @@
 #define DEV_CTRL_HOT_JOIN_NACK		BIT(8)
 #define DEV_CTRL_I2C_SLAVE_PRESENT	BIT(7)
 #define DEV_CTRL_IBI_DATA_EN		BIT(1)
+#define DEV_CTRL_IBA_INCLUDE		BIT(0)
 
 #define DEVICE_ADDR			0x4
 #define DEV_ADDR_DYNAMIC_ADDR_VALID	BIT(31)
@@ -1359,6 +1360,10 @@ static int dw_i3c_master_bus_init(struct i3c_master_controller *m)
 	/* For now don't support Hot-Join */
 	writel(readl(master->regs + DEVICE_CTRL) | DEV_CTRL_HOT_JOIN_NACK,
 	       master->regs + DEVICE_CTRL);
+
+	if (!master->base.jdec_spd)
+		writel(readl(master->regs + DEVICE_CTRL) | DEV_CTRL_IBA_INCLUDE,
+		       master->regs + DEVICE_CTRL);
 
 	dw_i3c_master_enable(master);
 

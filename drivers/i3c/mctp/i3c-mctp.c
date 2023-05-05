@@ -471,12 +471,9 @@ i3c_mctp_set_eid_info(struct i3c_mctp *priv, struct i3c_mctp_set_eid_info __user
 	struct list_head list = LIST_HEAD_INIT(list);
 	struct i3c_mctp_set_eid_info set_eid;
 	struct i3c_mctp_endpoint *endpoint;
-	struct i3c_device_info info;
 	void *user_ptr;
 	int ret = 0;
 	size_t i;
-
-	i3c_device_get_info(priv->i3c, &info);
 
 	if (copy_from_user(&set_eid, userbuf, sizeof(set_eid))) {
 		dev_err(priv->dev, "copy from user failed\n");

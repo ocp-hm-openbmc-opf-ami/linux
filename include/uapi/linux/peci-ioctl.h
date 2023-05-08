@@ -21,9 +21,10 @@
 
 /* Device Specific Completion Code (CC) Definition */
 #define PECI_DEV_CC_SUCCESS				0x40
-#define PECI_DEV_CC_NEED_RETRY				0x80
+#define PECI_DEV_CC_RESPONSE_TIMEOUT			0x80
 #define PECI_DEV_CC_OUT_OF_RESOURCE			0x81
 #define PECI_DEV_CC_UNAVAIL_RESOURCE			0x82
+#define PECI_DEV_CC_NEED_RETRY				0x83
 #define PECI_DEV_CC_INVALID_REQ				0x90
 #define PECI_DEV_CC_MCA_ERROR				0x91
 #define PECI_DEV_CC_CATASTROPHIC_MCA_ERROR		0x93

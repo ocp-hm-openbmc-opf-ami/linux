@@ -217,6 +217,8 @@ static int __peci_xfer(struct peci_adapter *adapter, struct peci_xfer_msg *msg,
 	ulong timeout = jiffies;
 	u8 aw_fcs, node_id, domain_id;
 	int ret;
+	bool abort_retry = false;
+	u8 rx_cc;
 
 	/*
 	 * In case if adapter uses DMA, check at here whether tx and rx buffers
@@ -271,19 +273,38 @@ static int __peci_xfer(struct peci_adapter *adapter, struct peci_xfer_msg *msg,
 		if (!do_retry || ret || !msg->rx_buf)
 			break;
 
-		if ((msg->rx_buf[0] & PECI_DEV_CC_RETRY_CHECK_MASK) ==
-		    PECI_DEV_CC_NEED_RETRY)
-			total_retry_cc_count++;
-		else if (msg->rx_buf[0] == PECI_DEV_CC_SUCCESS)
+		rx_cc = msg->rx_buf[0];
+
+		if (msg->rx_buf[0] == PECI_DEV_CC_SUCCESS)
 			total_success_cc_count++;
 
-		/* Retry is needed when completion code is 0x8x */
-		if ((msg->rx_buf[0] & PECI_DEV_CC_RETRY_CHECK_MASK) !=
-		    PECI_DEV_CC_NEED_RETRY)
+		switch (rx_cc) {
+		case PECI_DEV_CC_RESPONSE_TIMEOUT:
+			/* Block PECI calls for 1.4 seconds and abort retrying */
+			msleep(1400);
+			abort_retry = true;
 			break;
 
-		/* Set the retry bit to indicate a retry attempt */
-		msg->tx_buf[1] |= PECI_DEV_RETRY_BIT;
+		case PECI_DEV_CC_OUT_OF_RESOURCE:
+		case PECI_DEV_CC_UNAVAIL_RESOURCE:
+			/* usleep_range() adds a delay and retries the command */
+			break;
+
+		case PECI_DEV_CC_NEED_RETRY:
+			/* Set the retry bit to indicate a retry attempt */
+			msg->tx_buf[1] |= PECI_DEV_RETRY_BIT;
+			break;
+
+		default:
+			/* Do not retry for any other error CCs*/
+			abort_retry = true;
+			break;
+		}
+
+		if (abort_retry)
+			break;
+
+		total_retry_cc_count++;
 
 		/* Recalculate the AW FCS if it has one */
 		if (has_aw_fcs) {

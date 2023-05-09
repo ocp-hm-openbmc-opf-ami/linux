@@ -672,7 +672,7 @@ static inline int peci_pcs_calc_acc_eng(struct device *dev,
 	 * and power calculation does not overflow or underflow).
 	 */
 	if (curr_energy_val > 0 && prev_energy->last_updated > 0 &&
-	    elapsed < (HZ * 17 * 60)) {
+	    elapsed < ((u64)time_unit * 17 * 60)) {
 		u32 energy_consumed;
 		u64 energy_consumed_in_uJ;
 

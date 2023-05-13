@@ -939,14 +939,11 @@
 			espi: espi@1e6ee000 {
 				compatible = "aspeed,ast2600-espi-slave", "syscon";
 				reg = <0x1e6ee000 0x200>;
-				interrupts-extended = <&gic GIC_SPI 42 IRQ_TYPE_LEVEL_HIGH>,
-					<&gpio0 ASPEED_GPIO(W, 7) IRQ_TYPE_EDGE_FALLING>;
+				interrupts = <GIC_SPI 42 IRQ_TYPE_LEVEL_HIGH>;
 				status = "disabled";
 				clocks = <&syscon ASPEED_CLK_GATE_ESPICLK>;
-				resets = <&syscon ASPEED_RESET_ESPI>;
 				pinctrl-names = "default";
-				pinctrl-0 = <&pinctrl_espi_default>,
-					    <&pinctrl_espialt_default>;
+				pinctrl-0 = <&pinctrl_espi_default>;
 			};
 
 			mmbi: mmbi@1e6ee800 {

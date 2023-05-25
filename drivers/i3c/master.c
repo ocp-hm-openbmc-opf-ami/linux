@@ -2120,10 +2120,8 @@ int i3c_master_add_i3c_dev_locked(struct i3c_master_controller *master,
 				  u8 addr)
 {
 	struct i3c_device_info info = { .dyn_addr = addr };
-	struct i3c_dev_desc *newdev, *olddev;
+	struct i3c_dev_desc *newdev, *olddev, *tmpdev;
 	u8 old_dyn_addr = addr, expected_dyn_addr;
-	struct i3c_ibi_setup ibireq = { };
-	bool enable_ibi = false;
 	int ret;
 
 	if (!master)
@@ -2142,39 +2140,12 @@ int i3c_master_add_i3c_dev_locked(struct i3c_master_controller *master,
 		goto err_detach_dev;
 
 	i3c_master_attach_boardinfo(newdev);
-
 	olddev = i3c_master_search_i3c_dev_duplicate(newdev);
 	if (olddev) {
-		newdev->dev = olddev->dev;
-		newdev->event_cb = olddev->event_cb;
-		if (newdev->dev)
-			newdev->dev->desc = newdev;
-
-		/*
-		 * We need to restore the IBI state too, so let's save the
-		 * IBI information and try to restore them after olddev has
-		 * been detached+released and its IBI has been stopped and
-		 * the associated resources have been freed.
-		 */
-		mutex_lock(&olddev->ibi_lock);
-		if (olddev->ibi) {
-			ibireq.handler = olddev->ibi->handler;
-			ibireq.max_payload_len = olddev->ibi->max_payload_len;
-			ibireq.num_slots = olddev->ibi->num_slots;
-
-			if (olddev->ibi->enabled) {
-				enable_ibi = true;
-				i3c_dev_disable_ibi_locked(olddev);
-			}
-
-			i3c_dev_free_ibi_locked(olddev);
-		}
-		mutex_unlock(&olddev->ibi_lock);
-
 		old_dyn_addr = olddev->info.dyn_addr;
-
-		i3c_master_detach_i3c_dev(olddev);
-		i3c_master_free_i3c_dev(olddev);
+		tmpdev = olddev;
+		olddev = newdev;
+		newdev = tmpdev;
 	} else {
 		ret = i3c_master_reattach_i3c_dev(newdev, old_dyn_addr);
 		if (ret)
@@ -2191,23 +2162,23 @@ int i3c_master_add_i3c_dev_locked(struct i3c_master_controller *master,
 	 * - in any other case, keep the address automatically assigned by the
 	 *   master
 	 */
-	if (old_dyn_addr && old_dyn_addr != newdev->info.dyn_addr)
+	if (old_dyn_addr && old_dyn_addr != addr)
 		expected_dyn_addr = old_dyn_addr;
 	else if (newdev->boardinfo && newdev->boardinfo->init_dyn_addr)
 		expected_dyn_addr = newdev->boardinfo->init_dyn_addr;
 	else
-		expected_dyn_addr = newdev->info.dyn_addr;
+		expected_dyn_addr = addr;
 
-	if (newdev->info.dyn_addr != expected_dyn_addr) {
+	if (addr != expected_dyn_addr) {
 		/*
 		 * Try to apply the expected dynamic address. If it fails, keep
 		 * the address assigned by the master.
 		 */
 		ret = i3c_master_setnewda_locked(master,
-						 newdev->info.dyn_addr,
+						 addr,
 						 expected_dyn_addr);
 		if (!ret) {
-			old_dyn_addr = newdev->info.dyn_addr;
+			old_dyn_addr = addr;
 			newdev->info.dyn_addr = expected_dyn_addr;
 			i3c_master_reattach_i3c_dev(newdev, old_dyn_addr);
 		} else {
@@ -2217,28 +2188,9 @@ int i3c_master_add_i3c_dev_locked(struct i3c_master_controller *master,
 		}
 	}
 
-	/*
-	 * Now is time to try to restore the IBI setup. If we're lucky,
-	 * everything works as before, otherwise, all we can do is complain.
-	 * FIXME: maybe we should add callback to inform the driver that it
-	 * should request the IBI again instead of trying to hide that from
-	 * him.
-	 */
-	if (ibireq.handler) {
-		mutex_lock(&newdev->ibi_lock);
-		ret = i3c_dev_request_ibi_locked(newdev, &ibireq);
-		if (ret) {
-			dev_err(&master->dev,
-				"Failed to request IBI on device %d-%llx",
-				master->bus_id, newdev->info.pid);
-		} else if (enable_ibi) {
-			ret = i3c_dev_enable_ibi_locked(newdev);
-			if (ret)
-				dev_err(&master->dev,
-					"Failed to re-enable IBI on device %d-%llx",
-					master->bus_id, newdev->info.pid);
-		}
-		mutex_unlock(&newdev->ibi_lock);
+	if (olddev) {
+		i3c_master_detach_i3c_dev(olddev);
+		i3c_master_free_i3c_dev(olddev);
 	}
 
 	return 0;

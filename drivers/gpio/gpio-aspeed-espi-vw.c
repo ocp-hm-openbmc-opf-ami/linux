@@ -63,7 +63,7 @@ static int aspeed_espi_vw_gpio_enable(struct regmap *map, u32 dir_mask)
 
 	regmap_update_bits(map, ASPEED_ESPI_CTRL, ASPEED_ESPI_CTRL_VW_SW_RDY,
 			   ASPEED_ESPI_CTRL_VW_SW_RDY);
-	/* TODO: Write direction register */
+	regmap_write(map, ASPEED_ESPI_VW_GPIO_DIR, ~dir_mask);
 	regmap_write(map, ASPEED_ESPI_VW_GPIO_RESET_SELECTION,
 		     ASPEED_ESPI_VW_RESET_BY_ESPI);
 	return 0;

@@ -10,12 +10,26 @@
 	aliases {
 		i2c16 = &i2c6_mux_ch0;
 		i2c17 = &i2c6_mux_ch1;
+		i2c18 = &i2c9_mux_ch0;
 	};
 };
 
 &mac3 {
 	/* OCP NIC is not supported by AVC 2SPC platforms */
 	status = "disabled";
+};
+
+&i2c9 {
+	/*
+	 * WA - fix channel numbers for downstream mux channels
+	 */
+	pca9846@59 {
+		compatible = "nxp,pca9846";
+		reg = <0x59>;
+		i2c9_mux_ch0: i2c@0 {
+			reg = <0>;
+		};
+	};
 };
 
 &i2c6 {

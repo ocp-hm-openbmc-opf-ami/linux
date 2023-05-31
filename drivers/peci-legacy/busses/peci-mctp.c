@@ -294,6 +294,10 @@ static void mctp_peci_cpu_discovery(struct peci_adapter *adapter)
 
 		if (node_id < PECI_OFFSET_MAX) {
 			for (domain_id = 0; domain_id < DOMAIN_OFFSET_MAX; domain_id++) {
+
+				if (priv->cpus[node_id][domain_id].eid)
+					continue;
+
 				ret = aspeed_mctp_get_eid(priv->peci_client,
 							  cpu.bdf, domain_id,
 							  &cpu.eid);
@@ -304,13 +308,16 @@ static void mctp_peci_cpu_discovery(struct peci_adapter *adapter)
 
 				is_discovery_done = true;
 				priv->cpus[node_id][domain_id] = cpu;
+				dev_info(priv->dev, "Found EID for node_id=%d (EID=%d), domain=%d\n",
+					node_id, cpu.eid, domain_id);
 			}
 		} else {
 			dev_dbg(priv->dev, "Incorrect node_id=%d (EID=%d)\n",
 				node_id, cpu.eid);
 		}
 	}
-	priv->is_discovery_done = is_discovery_done;
+	if (!priv->is_discovery_done)
+		priv->is_discovery_done = is_discovery_done;
 }
 
 static int
@@ -320,15 +327,18 @@ mctp_peci_get_address(struct peci_adapter *adapter, u8 peci_addr, u8 domain_id,
 	struct mctp_peci *priv = peci_get_adapdata(adapter);
 	int node_id = peci_addr - 0x30;
 
+	if (node_id >= PECI_OFFSET_MAX || domain_id >= DOMAIN_OFFSET_MAX)
+		return -EINVAL;
+
 	/*
 	 * XXX: Is it possible we're able to communicate with CPU 0 before other
 	 * CPUs are up? Make sure we're always discovering all CPUs.
 	 */
-	if (!priv->is_discovery_done)
+	if (!priv->is_discovery_done || !priv->cpus[node_id][domain_id].eid)
+	/* WA - CPU domainId-EID is not populated, then retry to populate the table */
 		mctp_peci_cpu_discovery(adapter);
 
-	if (node_id < PECI_OFFSET_MAX && domain_id < DOMAIN_OFFSET_MAX &&
-	    priv->is_discovery_done && priv->cpus[node_id][domain_id].eid) {
+	if (priv->is_discovery_done && priv->cpus[node_id][domain_id].eid) {
 		*cpu = priv->cpus[node_id][domain_id];
 		return 0;
 	}

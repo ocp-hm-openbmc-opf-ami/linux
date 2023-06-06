@@ -153,6 +153,9 @@
 #define I3C_HUB_TP_BUFFER_STATUS_MASK			0x0F
 #define I3C_HUB_TP_TRANSACTION_CODE_MASK		0xF0
 #define I3C_HUB_SMBUS_MAX_STATUS_CHECK			10
+#define I3C_HUB_TARGET_BUF_0_RECEIVE			BIT(1)
+#define I3C_HUB_TARGET_BUF_1_RECEIVE			BIT(2)
+#define I3C_HUB_TARGET_BUF_OVRFL			BIT(3)
 
 /* Special Function Registers */
 #define I3C_HUB_LDO_AND_CPSEL_STS			0x79
@@ -186,6 +189,9 @@
 #define I3C_HUB_CONTROLLER_BUFFER_PAGE			0x10
 #define I3C_HUB_CONTROLLER_AGENT_BUFF			0x80
 #define I3C_HUB_CONTROLLER_AGENT_BUFF_DATA		0x84
+#define I3C_HUB_TARGET_BUFF_LENGTH			0x80
+#define I3C_HUB_TARGET_BUFF_ADDRESS			0x81
+#define I3C_HUB_TARGET_BUFF_DATA			0x82
 
 /* Pull-up DT settings */
 #define I3C_HUB_DT_PULLUP_DISABLED			0x00
@@ -215,14 +221,19 @@
 #define I3C_HUB_DT_IO_STRENGTH_50_OHM			0x03
 #define I3C_HUB_DT_IO_STRENGTH_NOT_DEFINED		0xFF
 
+/* SMBus polling */
+#define I3C_HUB_POLLING_ROLL_PERIOD_MS			10
+
 /* SMBus transaction types fields */
 #define I3C_HUB_SMBUS_400kHz				BIT(2)
 
 /* Hub buffer size */
 #define I3C_HUB_CONTROLLER_BUFFER_SIZE			88
+#define I3C_HUB_TARGET_BUFFER_SIZE			80
 #define I3C_HUB_SMBUS_DESCRIPTOR_SIZE			4
 #define I3C_HUB_SMBUS_PAYLOAD_SIZE			(I3C_HUB_CONTROLLER_BUFFER_SIZE - \
 							I3C_HUB_SMBUS_DESCRIPTOR_SIZE)
+#define I3C_HUB_SMBUS_TARGET_PAYLOAD_SIZE		(I3C_HUB_TARGET_BUFFER_SIZE - 2)
 
 /* Hub SMBus timeout time period in nanoseconds */
 #define I3C_HUB_SMBUS_400kHz_TIMEOUT			(10e9 * 8 * \
@@ -255,6 +266,12 @@ struct i2c_adapter_group {
 	u8 tp_mask;
 	u8 tp_port;
 	u8 used;
+
+	struct delayed_work delayed_work_polling;
+	struct i2c_client *client;
+	const char *compatible;
+	u8 polling_last_status;
+	int addr;
 };
 
 struct logical_bus {
@@ -1288,15 +1305,28 @@ static u32 i3c_controller_smbus_funcs(struct i2c_adapter *adapter)
 	return I2C_FUNC_SMBUS_EMUL | I2C_FUNC_I2C;
 }
 
+static int reg_i2c_target(struct i2c_client *client)
+{
+	return 0;
+}
+
+static int unreg_i2c_target(struct i2c_client *client)
+{
+	return 0;
+}
+
 static const struct i2c_algorithm i3c_controller_smbus_algo = {
 	.master_xfer = i3c_controller_smbus_port_adapter_xfer,
 	.functionality = i3c_controller_smbus_funcs,
+	.reg_slave = reg_i2c_target,
+	.unreg_slave = unreg_i2c_target,
 };
 
 static void i3c_hub_delayed_work(struct work_struct *work)
 {
 	struct i3c_hub *priv = container_of(work, typeof(*priv), delayed_work.work);
 	struct device *dev = i3cdev_to_dev(priv->i3cdev);
+	struct i2c_board_info host_notify_board_info;
 	int ret;
 	int i;
 
@@ -1330,6 +1360,26 @@ static void i3c_hub_delayed_work(struct work_struct *work)
 			continue;
 
 		priv->logical_bus[i].controller.i2c.algo = &i3c_controller_smbus_algo;
+
+		if (!priv->logical_bus[i].smbus_port_adapter.compatible)
+			continue;
+
+		host_notify_board_info.addr = priv->logical_bus[i].smbus_port_adapter.addr;
+		host_notify_board_info.flags = I2C_CLIENT_SLAVE;
+		snprintf(host_notify_board_info.type,
+			 I2C_NAME_SIZE,
+			 priv->logical_bus[i].smbus_port_adapter.compatible);
+
+		priv->logical_bus[i].smbus_port_adapter.client =
+			i2c_new_client_device(&priv->logical_bus[i].controller.i2c,
+					      &host_notify_board_info);
+		if (IS_ERR(priv->logical_bus[i].smbus_port_adapter.client)) {
+			dev_warn(dev, "Error while registering backend\n");
+			return;
+		}
+
+		schedule_delayed_work(&priv->logical_bus[i].smbus_port_adapter.delayed_work_polling,
+					msecs_to_jiffies(I3C_HUB_POLLING_ROLL_PERIOD_MS));
 	}
 }
 
@@ -1362,6 +1412,81 @@ static int i3c_hub_register_smbus_controller(struct i3c_hub *priv, int i)
 	return 0;
 }
 
+/**
+ * i3c_hub_delayed_work_polling() - This delayed work is a polling mechanism to
+ * find if any transaction happened. After a transaction was found it is saved with
+ * the slave-mqueue backend and can be read from the fs. Controller buffer page is
+ * determined by adding the first buffer page number to port index multiplied by four.
+ * The two target buffer page numbers are determined the same way but they are offset
+ * by 2 and 3 from the controller page.
+ */
+static void i3c_hub_delayed_work_polling(struct work_struct *work)
+{
+	struct i2c_adapter_group *g_adap = container_of(work,
+							typeof(*g_adap),
+							delayed_work_polling.work);
+	struct logical_bus *bus = container_of(g_adap, struct logical_bus, smbus_port_adapter);
+	u8 controller_buffer_page = I3C_HUB_CONTROLLER_BUFFER_PAGE + 4 * g_adap->tp_port;
+	u8 target_port_status = I3C_HUB_TP0_SMBUS_AGNT_STS + g_adap->tp_port;
+	u8 local_buffer[I3C_HUB_SMBUS_TARGET_PAYLOAD_SIZE] = {0};
+	u8 target_buffer_page, address, test, len, tmp;
+	struct i3c_hub *priv = bus->priv;
+	struct device *dev = i3cdev_to_dev(priv->i3cdev);
+	u32 local_last_status, i;
+
+	regmap_read(priv->regmap, target_port_status, &local_last_status);
+
+	tmp = local_last_status;
+	if (tmp & I3C_HUB_TARGET_BUF_OVRFL) {
+		regmap_write(priv->regmap, I3C_HUB_PAGE_PTR, 0x00);
+		regmap_write(priv->regmap, target_port_status, I3C_HUB_TP_BUFFER_STATUS_MASK);
+		regmap_read(priv->regmap, target_port_status, &local_last_status);
+		g_adap->polling_last_status = local_last_status;
+	} else if (local_last_status != g_adap->polling_last_status) {
+		if (tmp & I3C_HUB_TARGET_BUF_0_RECEIVE)
+			target_buffer_page = controller_buffer_page + 2;
+		else if (tmp & I3C_HUB_TARGET_BUF_1_RECEIVE)
+			target_buffer_page = controller_buffer_page + 3;
+		else
+			goto reschedule;
+
+		regmap_write(priv->regmap, I3C_HUB_PAGE_PTR, target_buffer_page);
+
+		regmap_read(priv->regmap, I3C_HUB_TARGET_BUFF_LENGTH, &local_last_status);
+
+		len = local_last_status - 1;
+		if (len > I3C_HUB_SMBUS_TARGET_PAYLOAD_SIZE) {
+			dev_err(dev, "Received message too big for hub buffer\n");
+			goto reschedule;
+		}
+
+		regmap_read(priv->regmap, I3C_HUB_TARGET_BUFF_ADDRESS, &local_last_status);
+
+		address = local_last_status;
+		if ((address >> 1) != g_adap->addr)
+			goto reschedule;
+
+		regmap_bulk_read(priv->regmap, I3C_HUB_TARGET_BUFF_DATA, local_buffer, len);
+
+		i2c_slave_event(g_adap->client, I2C_SLAVE_WRITE_RECEIVED, &address);
+
+		for (i = 0 ; i < len ; i++) {
+			tmp = local_buffer[i];
+			i2c_slave_event(g_adap->client, I2C_SLAVE_WRITE_RECEIVED, &tmp);
+		}
+		i2c_slave_event(g_adap->client, I2C_SLAVE_STOP, &test);
+
+reschedule:
+		regmap_write(priv->regmap, I3C_HUB_PAGE_PTR, 0x00);
+		regmap_write(priv->regmap, target_port_status, I3C_HUB_TP_BUFFER_STATUS_MASK);
+		regmap_read(priv->regmap, target_port_status, &local_last_status);
+		g_adap->polling_last_status = local_last_status;
+	}
+
+	schedule_delayed_work(&g_adap->delayed_work_polling,
+			      msecs_to_jiffies(I3C_HUB_POLLING_ROLL_PERIOD_MS));
+}
+
 static int i3c_hub_smbus_tp_algo(struct i3c_hub *priv, int i)
 {
 	int ret;
@@ -1380,6 +1505,9 @@ static int i3c_hub_smbus_tp_algo(struct i3c_hub *priv, int i)
 
 	priv->logical_bus[i].smbus_port_adapter.used = 1;
 
+	INIT_DELAYED_WORK(&priv->logical_bus[i].smbus_port_adapter.delayed_work_polling,
+			  i3c_hub_delayed_work_polling);
+
 	priv->logical_bus[i].controller.i2c.dev.parent =
 		priv->logical_bus[i].controller.dev.parent;
 	priv->logical_bus[i].controller.i2c.owner =
@@ -1392,6 +1520,74 @@ static int i3c_hub_smbus_tp_algo(struct i3c_hub *priv, int i)
 	priv->logical_bus[i].controller.i2c.retries = 3;
 
 	return 0;
+}
+
+static int read_backend_from_i3c_hub_dts(struct device_node *i3c_node_target,
+					 struct i3c_hub *priv)
+{
+	struct device_node *i3c_node_tp;
+	const char *compatible;
+	int tp_port, ret;
+	u32 addr_dts;
+
+	if (sscanf(i3c_node_target->full_name, "target-port@%d", &tp_port) == 0)
+		return -EINVAL;
+
+	if (tp_port > I3C_HUB_TP_MAX_COUNT)
+		return -ERANGE;
+
+	if (tp_port < 0)
+		return -EINVAL;
+
+	for_each_available_child_of_node(i3c_node_target, i3c_node_tp) {
+		if (strcmp(i3c_node_tp->full_name, "backend@0,0"))
+			continue;
+
+		ret = of_property_read_u32(i3c_node_tp, "target_reg", &addr_dts);
+		if (ret)
+			return ret;
+
+		ret = of_property_read_string(i3c_node_tp, "compatible", &compatible);
+		if (ret)
+			return ret;
+
+		/* Currently only the slave-mqueue backend is supported */
+		if (strcmp("slave-mqueue", compatible))
+			return -EINVAL;
+
+		priv->logical_bus[tp_port].smbus_port_adapter.addr = addr_dts;
+		priv->logical_bus[tp_port].smbus_port_adapter.compatible = compatible;
+
+		break;
+	}
+	return 0;
+}
+
+/**
+ * This function saves information about the i3c_hub's ports
+ * working in slave mode. It takes its data from the DTs
+ * (aspeed-bmc-intel-avc.dts) and saves the parameters
+ * into the coresponding target port i2c_adapter_group structure
+ * in the i3c_hub
+ *
+ * @dev: device used by i3c_hub
+ * @i3c_node_hub: device node pointing to the hub
+ * @priv: pointer to the i3c_hub structure
+ */
+static void i3c_hub_parse_dt_tp(struct device *dev,
+				const struct device_node *i3c_node_hub,
+				struct i3c_hub *priv)
+{
+	struct device_node *i3c_node_target;
+	int ret;
+
+	for_each_available_child_of_node(i3c_node_hub, i3c_node_target) {
+		if (!strcmp(i3c_node_target->name, "target-port")) {
+			ret = read_backend_from_i3c_hub_dts(i3c_node_target, priv);
+			if (ret)
+				dev_err(dev, "DTS entry invalid - error %d", ret);
+		}
+	}
 }
 
 static int i3c_hub_probe(struct i3c_device *i3cdev)
@@ -1447,6 +1643,9 @@ static int i3c_hub_probe(struct i3c_device *i3cdev)
 		i3c_hub_of_get_conf_static(dev, node);
 		i3c_hub_of_get_conf_runtime(dev, node);
 		of_node_put(node);
+
+		/* Parse DTS to find data on the SMBus target mode */
+		i3c_hub_parse_dt_tp(dev, node, priv);
 	}
 
 	/* Unlock access to protected registers */
@@ -1490,9 +1689,16 @@ error:
 static void i3c_hub_remove(struct i3c_device *i3cdev)
 {
 	struct i3c_hub *priv = i3cdev_get_drvdata(i3cdev);
+	struct i2c_adapter_group *g_adap;
 	int i;
 
 	for (i = 0; i < I3C_HUB_TP_MAX_COUNT ; i++) {
+		if (priv->logical_bus[i].smbus_port_adapter.used) {
+			g_adap = &priv->logical_bus[i].smbus_port_adapter;
+			cancel_delayed_work_sync(&g_adap->delayed_work_polling);
+			i2c_unregister_device(g_adap->client);
+		}
+
 		if (priv->logical_bus[i].smbus_port_adapter.used || priv->logical_bus[i].registered)
 			i3c_master_unregister(&priv->logical_bus[i].controller);
 	}

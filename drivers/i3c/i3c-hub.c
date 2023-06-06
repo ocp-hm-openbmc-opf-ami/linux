@@ -152,7 +152,6 @@
 #define I3C_HUB_XFER_SUCCESS				0x01
 #define I3C_HUB_TP_BUFFER_STATUS_MASK			0x0F
 #define I3C_HUB_TP_TRANSACTION_CODE_MASK		0xF0
-#define I3C_HUB_SMBUS_MAX_STATUS_CHECK			10
 #define I3C_HUB_TARGET_BUF_0_RECEIVE			BIT(1)
 #define I3C_HUB_TARGET_BUF_1_RECEIVE			BIT(2)
 #define I3C_HUB_TARGET_BUF_OVRFL			BIT(3)
@@ -860,9 +859,9 @@ err_remove:
 	return PTR_ERR(entry);
 }
 
-static void i3c_hub_trans_pre_cb(struct i3c_master_controller *master)
+static void i3c_hub_trans_pre_cb(struct i3c_master_controller *controller)
 {
-	struct logical_bus *bus = container_of(master, struct logical_bus, controller);
+	struct logical_bus *bus = container_of(controller, struct logical_bus, controller);
 	struct i3c_hub *priv = bus->priv;
 	struct device *dev = i3cdev_to_dev(priv->i3cdev);
 	int ret;
@@ -872,9 +871,9 @@ static void i3c_hub_trans_pre_cb(struct i3c_master_controller *master)
 		dev_warn(dev, "Failed to open Target Port(s)\n");
 }
 
-static void i3c_hub_trans_post_cb(struct i3c_master_controller *master)
+static void i3c_hub_trans_post_cb(struct i3c_master_controller *controller)
 {
-	struct logical_bus *bus = container_of(master, struct logical_bus, controller);
+	struct logical_bus *bus = container_of(controller, struct logical_bus, controller);
 	struct i3c_hub *priv = bus->priv;
 	struct device *dev = i3cdev_to_dev(priv->i3cdev);
 	int ret;
@@ -1030,7 +1029,6 @@ static int i3c_hub_smbus_msg(struct i3c_hub *priv,
 
 	*return_status = status;
 
-
 	if (rw) {
 		ret = regmap_bulk_read(priv->regmap,
 				       I3C_HUB_CONTROLLER_AGENT_BUFF_DATA,
@@ -1072,7 +1070,6 @@ static int i3c_controller_smbus_port_adapter_xfer(struct i2c_adapter *adap,
 	u8 rw;
 
 	for (nxfers_i = 0 ; nxfers_i < nxfers ; nxfers_i++) {
-
 		if (xfers[nxfers_i].len > I3C_HUB_SMBUS_PAYLOAD_SIZE) {
 			dev_err(&adap->dev,
 				"Message nr. %d not sent - length over %d bytes.\n",
@@ -1097,17 +1094,17 @@ static int i3c_controller_smbus_port_adapter_xfer(struct i2c_adapter *adap,
 	return ret_sum;
 }
 
-static int i3c_hub_bus_init(struct i3c_master_controller *master)
+static int i3c_hub_bus_init(struct i3c_master_controller *controller)
 {
-	struct logical_bus *bus = container_of(master, struct logical_bus, controller);
+	struct logical_bus *bus = container_of(controller, struct logical_bus, controller);
 
-	master->this = bus->priv->i3cdev->desc;
+	controller->this = bus->priv->i3cdev->desc;
 	return 0;
 }
 
-static void i3c_hub_bus_cleanup(struct i3c_master_controller *master)
+static void i3c_hub_bus_cleanup(struct i3c_master_controller *controller)
 {
-	master->this = NULL;
+	controller->this = NULL;
 }
 
 static int i3c_hub_attach_i3c_dev(struct i3c_dev_desc *dev)
@@ -1131,26 +1128,26 @@ static void i3c_hub_detach_i3c_dev(struct i3c_dev_desc *dev)
 	parent->ops->detach_i3c_dev(dev);
 }
 
-static int i3c_hub_do_daa(struct i3c_master_controller *master)
+static int i3c_hub_do_daa(struct i3c_master_controller *controller)
 {
-	struct i3c_master_controller *parent = parent_from_controller(master);
+	struct i3c_master_controller *parent = parent_from_controller(controller);
 
-	return parent->ops->do_daa(master);
+	return parent->ops->do_daa(controller);
 }
 
-static bool i3c_hub_supports_ccc_cmd(struct i3c_master_controller *master,
+static bool i3c_hub_supports_ccc_cmd(struct i3c_master_controller *controller,
 				     const struct i3c_ccc_cmd *cmd)
 {
-	struct i3c_master_controller *parent = parent_from_controller(master);
+	struct i3c_master_controller *parent = parent_from_controller(controller);
 
-	return parent->ops->supports_ccc_cmd(master, cmd);
+	return parent->ops->supports_ccc_cmd(controller, cmd);
 }
 
-static int i3c_hub_send_ccc_cmd(struct i3c_master_controller *master, struct i3c_ccc_cmd *cmd)
+static int i3c_hub_send_ccc_cmd(struct i3c_master_controller *controller, struct i3c_ccc_cmd *cmd)
 {
-	struct i3c_master_controller *parent = parent_from_controller(master);
+	struct i3c_master_controller *parent = parent_from_controller(controller);
 
-	return parent->ops->send_ccc_cmd(master, cmd);
+	return parent->ops->send_ccc_cmd(controller, cmd);
 }
 
 static int i3c_hub_priv_xfers(struct i3c_dev_desc *dev, struct i3c_priv_xfer *xfers, int nxfers)
@@ -1244,7 +1241,7 @@ static const struct i3c_master_controller_ops i3c_hub_i3c_ops = {
 
 /* SMBus virtual i3c_master_controller_ops */
 
-static int i3c_hub_do_daa_smbus(struct i3c_master_controller *master)
+static int i3c_hub_do_daa_smbus(struct i3c_master_controller *controller)
 {
 	return 0;
 }
@@ -1255,7 +1252,7 @@ static bool i3c_hub_supports_ccc_cmd_smbus(struct i3c_master_controller *master,
 	return true;
 }
 
-static int i3c_hub_send_ccc_cmd_smbus(struct i3c_master_controller *master,
+static int i3c_hub_send_ccc_cmd_smbus(struct i3c_master_controller *controller,
 				      struct i3c_ccc_cmd *cmd)
 {
 	return 0;
@@ -1285,19 +1282,19 @@ static const struct i3c_master_controller_ops i3c_hub_i3c_ops_smbus = {
 	.i2c_xfers = i3c_hub_i2c_xfers_smbus,
 };
 
-int i3c_hub_logic_register(struct i3c_master_controller *master,
-			   struct i3c_master_controller *top_master, struct device *parent)
+int i3c_hub_logic_register(struct i3c_master_controller *controller,
+			   struct i3c_master_controller *top_controller, struct device *parent)
 {
-	master->bus_driver_context = top_master->bus_driver_context;
-	return i3c_master_register(master, parent, &i3c_hub_i3c_ops, false);
+	controller->bus_driver_context = top_controller->bus_driver_context;
+	return i3c_master_register(controller, parent, &i3c_hub_i3c_ops, false);
 }
 
-int i3c_hub_logic_register_smbus(struct i3c_master_controller *master,
-				 struct i3c_master_controller *top_master,
+int i3c_hub_logic_register_smbus(struct i3c_master_controller *controller,
+				 struct i3c_master_controller *top_controller,
 				 struct device *parent)
 {
-	master->bus_driver_context = top_master->bus_driver_context;
-	return i3c_master_register(master, parent, &i3c_hub_i3c_ops_smbus, false);
+	controller->bus_driver_context = top_controller->bus_driver_context;
+	return i3c_master_register(controller, parent, &i3c_hub_i3c_ops_smbus, false);
 }
 
 static u32 i3c_controller_smbus_funcs(struct i2c_adapter *adapter)

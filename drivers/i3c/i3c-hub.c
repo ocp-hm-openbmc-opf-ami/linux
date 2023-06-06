@@ -1013,6 +1013,16 @@ static int i3c_hub_smbus_msg(struct i3c_hub *priv,
 
 	*return_status = status;
 
+
+	if (rw) {
+		ret = regmap_bulk_read(priv->regmap,
+				       I3C_HUB_CONTROLLER_AGENT_BUFF_DATA,
+				       xfers[nxfers_i].buf,
+				       xfers[nxfers_i].len);
+		if (ret)
+			return ret;
+	}
+
 	ret = regmap_write(priv->regmap, I3C_HUB_PAGE_PTR, 0x00);
 	if (ret)
 		return ret;

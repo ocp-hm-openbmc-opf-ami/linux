@@ -8,6 +8,7 @@
 	compatible = "intel,bncm-bmc", "aspeed,ast2600";
 	aliases {
 		i2c16 = &i2c9_mux_ch7;
+		i2c17 = &i2c9_mux_ch3;
 	};
 };
 
@@ -22,6 +23,13 @@
 		reg = <0x70>;
 		i2c9_mux_ch7: i2c@7 {
 			reg = <7>;
+		};
+	};
+	pca9544@74 {
+		compatible = "nxp,pca9544";
+		reg = <0x74>;
+		i2c9_mux_ch3: i2c@3 {
+			reg = <3>;
 		};
 	};
 };

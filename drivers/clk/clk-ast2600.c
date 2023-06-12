@@ -50,6 +50,19 @@
 #define ASPEED_G6_DEF_MAC34_DELAY_1G	0x00104208
 #define ASPEED_G6_DEF_MAC34_DELAY_100M	0x00104208
 #define ASPEED_G6_DEF_MAC34_DELAY_10M	0x00104208
+#define   I3C_CLK_SELECTION_SHIFT	31
+#define   I3C_CLK_SELECTION		BIT(31)
+#define     I3C_CLK_SELECT_HCLK		(0 << I3C_CLK_SELECTION_SHIFT)
+#define     I3C_CLK_SELECT_APLL_DIV	(1 << I3C_CLK_SELECTION_SHIFT)
+#define   APLL_DIV_SELECTION_SHIFT	28
+#define   APLL_DIV_SELECTION		GENMASK(30, 28)
+#define     APLL_DIV_2			(0b001 << APLL_DIV_SELECTION_SHIFT)
+#define     APLL_DIV_3			(0b010 << APLL_DIV_SELECTION_SHIFT)
+#define     APLL_DIV_4			(0b011 << APLL_DIV_SELECTION_SHIFT)
+#define     APLL_DIV_5			(0b100 << APLL_DIV_SELECTION_SHIFT)
+#define     APLL_DIV_6			(0b101 << APLL_DIV_SELECTION_SHIFT)
+#define     APLL_DIV_7			(0b110 << APLL_DIV_SELECTION_SHIFT)
+#define     APLL_DIV_8			(0b111 << APLL_DIV_SELECTION_SHIFT)
 
 #define ASPEED_HPLL_PARAM		0x200
 #define ASPEED_APLL_PARAM		0x210
@@ -112,6 +125,27 @@ union mac_delay_100_10 {
 	} b;
 };
 /*
+ * The majority of the clocks in the system are gates paired with a reset
+ * controller that holds the IP in reset; this is represented by the @reset_idx
+ * member of entries here.
+ *
+ * This borrows from clk_hw_register_gate, but registers two 'gates', one
+ * to control the clock enable register and the other to control the reset
+ * IP. This allows us to enforce the ordering:
+ *
+ * 1. Place IP in reset
+ * 2. Enable clock
+ * 3. Delay
+ * 4. Release reset
+ *
+ * Consequently, if reset_idx is set, reset control is implicit: the clock
+ * consumer does not need its own reset handling, as enabling the clock will
+ * also deassert reset.
+ *
+ * There are some gates that do not have an associated reset; these are
+ * handled by using -1 as the index for the reset, and the consumer must
+ * explictly assert/deassert reset lines as required.
+ *
  * Clocks marked with CLK_IS_CRITICAL:
  *
  *  ref0 and ref1 are essential for the SoC to operate
@@ -717,6 +751,9 @@ static int aspeed_g6_clk_probe(struct platform_device *pdev)
 	for (i = 0; i < ARRAY_SIZE(aspeed_g6_gates); i++) {
 		const struct aspeed_gate_data *gd = &aspeed_g6_gates[i];
 		u32 gate_flags;
+
+		if (!gd->name)
+			continue;
 
 		/*
 		 * Special case: the USB port 1 clock (bit 14) is always

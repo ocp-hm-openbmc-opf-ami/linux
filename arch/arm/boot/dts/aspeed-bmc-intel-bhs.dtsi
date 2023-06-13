@@ -377,6 +377,11 @@
 		bit-mask = <0x1F>;
 		bit-shift = <4>;
 	};
+	sio29_status {
+		offset = <0x170>;
+		bit-mask = <0xFF>;
+		bit-shift = <8>;
+	};
 };
 
 &lpc_sio {

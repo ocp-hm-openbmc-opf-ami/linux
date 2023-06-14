@@ -1761,7 +1761,7 @@ i3c_master_register_new_i3c_devs(struct i3c_master_controller *master)
  */
 int i3c_master_do_daa(struct i3c_master_controller *master)
 {
-	int ret;
+	int ret = 0;
 
 	mutex_lock(&master->daa_lock);
 	i3c_bus_maintenance_lock(&master->bus);
@@ -1774,12 +1774,13 @@ int i3c_master_do_daa(struct i3c_master_controller *master)
 	i3c_bus_maintenance_unlock(&master->bus);
 
 	if (ret)
-		return ret;
+		goto mutex_unlock;
 
 	i3c_master_register_new_i3c_devs(master);
+mutex_unlock:
 	mutex_unlock(&master->daa_lock);
 
-	return 0;
+	return ret;
 }
 EXPORT_SYMBOL_GPL(i3c_master_do_daa);
 

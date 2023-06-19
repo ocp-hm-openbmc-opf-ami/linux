@@ -401,6 +401,7 @@ struct dw_i3c_master {
 		} target;
 	} ibi;
 	struct completion target_read_comp;
+	u32 target_read_timeout;
 	struct dw_i3c_master_caps caps;
 	void __iomem *regs;
 	struct reset_control *core_rst;
@@ -1840,7 +1841,7 @@ static int dw_i3c_target_put_read_data(struct i3c_dev_desc *dev, struct i3c_priv
 		}
 	}
 
-	if (!wait_for_completion_timeout(&master->target_read_comp, TARGET_MASTER_READ_TIMEOUT))
+	if (!wait_for_completion_timeout(&master->target_read_comp, master->target_read_timeout))
 		ret = dw_i3c_target_cleanup_ctrl_queues_on_timeout(master);
 
 	dw_i3c_master_free_xfer(xfer);
@@ -2495,6 +2496,11 @@ static void dw_i3c_master_of_timings(struct dw_i3c_master *master,
 
 	if (!of_property_read_u32(node, "sda-tx-hold-ns", &val))
 		master->timings.sda_tx_hold = val;
+
+	if (!of_property_read_u32(node, "target-read-timeout", &val))
+		master->target_read_timeout = msecs_to_jiffies(val);
+	else
+		master->target_read_timeout = TARGET_MASTER_READ_TIMEOUT;
 }
 
 static const struct i3c_target_ops dw_mipi_i3c_target_ops = {

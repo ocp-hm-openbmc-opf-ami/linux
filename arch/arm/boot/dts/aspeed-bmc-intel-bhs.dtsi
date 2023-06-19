@@ -566,6 +566,7 @@
 	/* I3C_PFR_BMC */
 	status = "okay";
 	initial-role = "target";
+	target-read-timeout = <100>;
 	dcr = <0xCC>;
 	pid = <0x020a 0x00000000>;
 };

@@ -55,6 +55,14 @@ properties:
 
       May not be supported by all controllers.
 
+   target-read-timeout:
+    description: |
+      This field is used only in target mode.
+      Timeout value in ms to wait for a private read from master after acknowledging IBI.
+      The default value is 100ms.
+
+      May not be supported by all controllers.
+
   initial-role:
     enum:
       - primary

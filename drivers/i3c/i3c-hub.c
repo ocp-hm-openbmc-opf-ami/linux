@@ -979,9 +979,7 @@ static int i3c_hub_smbus_msg(struct i3c_hub *priv,
 	u8 rw_address = 2 * addr;
 	u8 desc[I3C_HUB_SMBUS_DESCRIPTOR_SIZE] = {0};
 	u8 status;
-	u8 buf_id;
 	int ret;
-	u8 i;
 
 	if (rw)
 		rw_address |= BIT(0);
@@ -1001,18 +999,16 @@ static int i3c_hub_smbus_msg(struct i3c_hub *priv,
 	if (ret)
 		return ret;
 
-	buf_id = I3C_HUB_CONTROLLER_AGENT_BUFF;
-	for (i = 0 ; i < I3C_HUB_SMBUS_DESCRIPTOR_SIZE ; i++) {
-		ret = regmap_write(priv->regmap, buf_id + i, desc[i]);
-		if (ret)
-			return ret;
-	}
-
-	buf_id = I3C_HUB_CONTROLLER_AGENT_BUFF_DATA;
+	ret = regmap_bulk_write(priv->regmap,
+				I3C_HUB_CONTROLLER_AGENT_BUFF,
+				desc,
+				I3C_HUB_SMBUS_DESCRIPTOR_SIZE);
+	if (ret)
+		return ret;
 
 	if (!rw) {
 		ret = regmap_bulk_write(priv->regmap,
-					buf_id,
+					I3C_HUB_CONTROLLER_AGENT_BUFF_DATA,
 					xfers[nxfers_i].buf,
 					xfers[nxfers_i].len);
 		if (ret)
@@ -1246,12 +1242,6 @@ static int i3c_hub_do_daa_smbus(struct i3c_master_controller *controller)
 	return 0;
 }
 
-static bool i3c_hub_supports_ccc_cmd_smbus(struct i3c_master_controller *master,
-					   const struct i3c_ccc_cmd *cmd)
-{
-	return true;
-}
-
 static int i3c_hub_send_ccc_cmd_smbus(struct i3c_master_controller *controller,
 				      struct i3c_ccc_cmd *cmd)
 {
@@ -1276,7 +1266,6 @@ static const struct i3c_master_controller_ops i3c_hub_i3c_ops_smbus = {
 	.bus_init = i3c_hub_bus_init,
 	.bus_cleanup = i3c_hub_bus_cleanup,
 	.do_daa = i3c_hub_do_daa_smbus,
-	.supports_ccc_cmd = i3c_hub_supports_ccc_cmd_smbus,
 	.send_ccc_cmd = i3c_hub_send_ccc_cmd_smbus,
 	.priv_xfers = i3c_hub_priv_xfers_smbus,
 	.i2c_xfers = i3c_hub_i2c_xfers_smbus,

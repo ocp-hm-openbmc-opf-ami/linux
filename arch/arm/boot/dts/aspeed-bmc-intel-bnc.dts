@@ -8,6 +8,8 @@
 	compatible = "intel,bnc-bmc", "aspeed,ast2600";
 	aliases {
 		i2c16 = &i2c9_mux_ch7;
+		i2c17 = &i2c9_mux_ch0;
+		i2c22 = &i2c9_mux_ch4;
 		i2c18 = &i2c9_mux0_ch0;
 		i2c19 = &i2c9_mux0_ch1;
 		i2c20 = &i2c9_mux0_ch2;
@@ -26,6 +28,12 @@
 		reg = <0x70>;
 		i2c9_mux_ch7: i2c@7 {
 			reg = <7>;
+		};
+		i2c9_mux_ch0: i2c@0 {
+			reg = <0>;
+		};
+		i2c9_mux_ch4: i2c@4 {
+			reg = <4>;
 		};
 	};
 

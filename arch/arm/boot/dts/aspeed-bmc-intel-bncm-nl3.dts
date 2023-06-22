@@ -2,6 +2,7 @@
 /dts-v1/;
 
 #include "aspeed-bmc-intel-bhs.dtsi"
+#include "aspeed-bmc-intel-bncm.dtsi"
 
 / {
 	model = "Intel Beechnut City Modular BMC Non-Legacy 3";

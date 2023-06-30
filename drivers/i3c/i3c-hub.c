@@ -933,16 +933,13 @@ static int i3c_hub_read_transaction_status(struct i3c_hub *priv,
 			return 0;
 
 		if (!(*status & I3C_HUB_TP_BUFFER_STATUS_MASK) &&
-			(*status & I3C_HUB_TP_TRANSACTION_CODE_MASK)) {
-			dev_err(&priv->i3cdev->dev, "Invalid transfer status returned\n");
-			return 0;
-		}
+			(*status & I3C_HUB_TP_TRANSACTION_CODE_MASK))
+			return -EINVAL;
 
 		end = ktime_get_real();
 		time_to_timeout = end - start;
 	}
-	dev_err(&priv->i3cdev->dev, "Status read timeout reached\n");
-	return 0;
+	return -ETIME;
 }
 
 /*
@@ -1014,7 +1011,7 @@ static int i3c_hub_smbus_msg(struct i3c_hub *priv,
 
 	ret = regmap_write(priv->regmap, I3C_HUB_TP_SMBUS_AGNT_TRANS_START, target_port_code);
 	if (ret)
-		return ret;
+		goto error;
 
 	ret = i3c_hub_read_transaction_status(priv, target_port_status, &status);
 	if (ret)
@@ -1031,11 +1028,9 @@ static int i3c_hub_smbus_msg(struct i3c_hub *priv,
 			return ret;
 	}
 
+error:
 	ret = regmap_write(priv->regmap, I3C_HUB_PAGE_PTR, 0x00);
-	if (ret)
-		return ret;
-
-	return 0;
+	return ret;
 }
 
 /**

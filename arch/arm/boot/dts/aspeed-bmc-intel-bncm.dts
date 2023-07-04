@@ -104,50 +104,6 @@
 		};
 	};
 
-	/* HUB on MISC IO Board */
-	hub1@0,0 {
-		cp0-ldo = "disabled";
-		cp1-ldo = "disabled";
-		tp0145-ldo = "disabled";
-		tp2367-ldo = "disabled";
-		tp0145-pullup = "2k";
-		tp2367-pullup = "2k";
-		id = <1>;
-
-		target-port@0 {
-			mode = "disabled";
-			pullup = "enabled";
-		};
-		target-port@1 {
-			mode = "i3c";
-			pullup = "enabled";
-		};
-		target-port@2 {
-			mode = "disabled";
-			pullup = "enabled";
-		};
-		target-port@3 {
-			mode = "disabled";
-			pullup = "enabled";
-		};
-		target-port@4 {
-			mode = "disabled";
-			pullup = "enabled";
-		};
-		target-port@5 {
-			mode = "disabled";
-			pullup = "enabled";
-		};
-		target-port@6 {
-			mode = "disabled";
-			pullup = "enabled";
-		};
-		target-port@7 {
-			mode = "disabled";
-			pullup = "enabled";
-		};
-	};
-
 	/* HUB on non-Legacy Board */
 	hub2@0,0 {
 		cp0-ldo = "disabled";

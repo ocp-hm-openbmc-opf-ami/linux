@@ -888,12 +888,6 @@ static int i3c_mctp_probe(struct i3c_device *i3cdev)
 	if (IS_ERR(priv->i3c_peci))
 		dev_warn(priv->dev, "failed to register peci-i3c device\n");
 
-	i3c_device_register_event_cb(i3cdev, i3c_mctp_i3c_event_cb);
-	if (i3c_mctp_enable_ibi(i3cdev)) {
-		INIT_DELAYED_WORK(&priv->polling_work, i3c_mctp_polling_work);
-		schedule_delayed_work(&priv->polling_work, msecs_to_jiffies(POLLING_TIMEOUT_MS));
-	}
-
 	i3c_device_get_info(i3cdev, &info);
 
 	ret = i3c_device_getmrl_ccc(i3cdev, &info);
@@ -916,6 +910,12 @@ static int i3c_mctp_probe(struct i3c_device *i3cdev)
 		info.max_write_len = I3C_MCTP_MIN_TRANSFER_SIZE;
 	}
 	priv->max_write_len = info.max_write_len;
+
+	i3c_device_register_event_cb(i3cdev, i3c_mctp_i3c_event_cb);
+	if (i3c_mctp_enable_ibi(i3cdev)) {
+		INIT_DELAYED_WORK(&priv->polling_work, i3c_mctp_polling_work);
+		schedule_delayed_work(&priv->polling_work, msecs_to_jiffies(POLLING_TIMEOUT_MS));
+	}
 
 	return 0;
 

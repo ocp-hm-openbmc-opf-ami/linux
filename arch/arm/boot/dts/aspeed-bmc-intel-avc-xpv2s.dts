@@ -15,8 +15,6 @@
 
 &i3c2 {
 	/* I3C_MNG_LVC18 */
-	i3c-scl-hz = <8690000>;
-	i3c-pp-scl-high-ns = <45>;
 
 	hub@0,0 {
 		cp0-ldo = "disabled";

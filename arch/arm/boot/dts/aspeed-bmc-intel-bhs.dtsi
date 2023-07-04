@@ -574,8 +574,11 @@
 	/* I3C_MNG_LVC18 */
 	status = "okay";
 	is-mng;
-	i3c-scl-hz = <10000000>;
-	sda-tx-hold-ns = <30>;
+	i3c-scl-hz = <7692000>;
+	i3c-pp-scl-high-ns = <50>;
+	i2c-scl-hz = <400000>;
+	i3c-od-scl-high-ns = <1000>;
+	sda-tx-hold-ns = <40>;
 };
 
 &i3c3 {

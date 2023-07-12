@@ -757,16 +757,12 @@ static struct device_node *i3c_hub_get_dt_hub_node(struct device_node *node,
 				if (hub_id == (u32)priv->hub_pin_sel_id)
 					found_id = 1;
 				priv->hub_dt_sel_id = hub_id;
-			} else {
-				priv->hub_dt_sel_id = -1;
 			}
 
 			if (!of_property_read_u32(hub_node, "id-cp1", &hub_id)) {
 				if (hub_id == (u32)priv->hub_pin_cp1_id)
 					found_id = 1;
 				priv->hub_dt_cp1_id = hub_id;
-			} else {
-				priv->hub_dt_cp1_id = -1;
 			}
 
 			if (!found_id) {
@@ -774,7 +770,8 @@ static struct device_node *i3c_hub_get_dt_hub_node(struct device_node *node,
 				 * Just keep reference to first HUB node with no ID in case no ID
 				 * matching
 				 */
-				if (!hub_node_no_id)
+				if (!hub_node_no_id && priv->hub_dt_sel_id == -1 &&
+				    priv->hub_dt_cp1_id == -1)
 					hub_node_no_id = hub_node;
 			} else {
 				return hub_node;
@@ -1618,6 +1615,8 @@ static int i3c_hub_probe(struct i3c_device *i3cdev)
 	if (ret)
 		goto error;
 
+	priv->hub_dt_sel_id = -1;
+	priv->hub_dt_cp1_id = -1;
 	if (priv->hub_pin_cp1_id >= 0 && priv->hub_pin_sel_id >= 0)
 		/* Find hub node in DT matching HW ID or just first without ID provided in DT */
 		node = i3c_hub_get_dt_hub_node(dev->parent->of_node, priv);

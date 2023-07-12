@@ -13,5 +13,5 @@
 	/* I3C_MNG_LVC18 */
 	initial-role = "target";
 	dcr = <0xCC>;
-	pid = <0x020a 0x00002000>;
+	pid = <0x020a 0x0000200b>;
 };

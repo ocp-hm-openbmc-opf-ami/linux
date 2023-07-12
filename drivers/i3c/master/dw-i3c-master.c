@@ -556,7 +556,7 @@ to_dw_i3c_master(struct i3c_master_controller *master)
 	return (struct dw_i3c_master *)master->bus_driver_context;
 }
 
-static bool dw_i3c_master_fsm_is_idle(struct dw_i3c_master *master)
+static u32 dw_i3c_master_fsm(struct dw_i3c_master *master)
 {
 	/*
 	 * Clear the IBI queue to enable the hardware to generate SCL and
@@ -564,7 +564,7 @@ static bool dw_i3c_master_fsm_is_idle(struct dw_i3c_master *master)
 	 */
 	readl(master->regs + IBI_QUEUE_DATA);
 
-	return !PRESENT_STATE_CM_TFR_STS(readl(master->regs + PRESENT_STATE));
+	return PRESENT_STATE_CM_TFR_STS(readl(master->regs + PRESENT_STATE));
 }
 
 static void ast2600_i3c_toggle_scl_in(struct dw_i3c_master *master, u8 times)
@@ -613,7 +613,7 @@ static void ast2600_i3c_gen_stop_to_internal(struct dw_i3c_master *master)
 static void ast2600_i3c_gen_tbits_in(struct dw_i3c_master *master)
 {
 	struct pdata_ast2600 *pdata = &master->pdata.ast2600;
-	bool is_idle;
+	u32 cm_tfr_status;
 
 	regmap_write_bits(pdata->global_regs, AST2600_I3CG_REG1(pdata->global_idx),
 			  SDA_IN_SW_MODE_VAL, SDA_IN_SW_MODE_VAL);
@@ -621,10 +621,10 @@ static void ast2600_i3c_gen_tbits_in(struct dw_i3c_master *master)
 			  SDA_IN_SW_MODE_EN, SDA_IN_SW_MODE_EN);
 	regmap_write_bits(pdata->global_regs, AST2600_I3CG_REG1(pdata->global_idx),
 			  SDA_IN_SW_MODE_VAL, 0);
-	if (readx_poll_timeout_atomic(dw_i3c_master_fsm_is_idle, master, is_idle,
-				      is_idle, 0, 2000000))
+	if (readx_poll_timeout_atomic(dw_i3c_master_fsm, master, cm_tfr_status,
+				      cm_tfr_status != CM_TFR_STS_MASTER_SERV_IBI, 0, 2000000))
 		dev_err(master->dev,
-			"Failed to recover the i3c fsm from %lx to idle",
+			"Failed to recover the i3c fsm from %lx",
 			PRESENT_STATE_CM_TFR_STS(readl(master->regs + PRESENT_STATE)));
 	regmap_write_bits(pdata->global_regs, AST2600_I3CG_REG1(pdata->global_idx),
 			  SDA_IN_SW_MODE_EN, 0);

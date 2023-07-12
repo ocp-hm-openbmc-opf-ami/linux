@@ -65,6 +65,24 @@ struct smart_peci_entry {
 	struct list_head node;
 };
 
+struct smart_psu_state_word {
+	u16 none_of_the_above : 1;
+	u16 cml : 1;
+	u16 temperature : 1;
+	u16 vin_uv_fault : 1;
+	u16 iout_oc_fault : 1;
+	u16 vout_ov_fault : 1;
+	u16 off : 1;
+	u16 busy : 1;
+	u16 unknown : 1;
+	u16 other : 1;
+	u16 fans : 1;
+	u16 power_good : 1;
+	u16 mfr_specific : 1;
+	u16 input : 1;
+	u16 iout_pout : 1;
+	u16 vout : 1;
+};
 struct smart_psu_state_input {
 	u8 pin_op_warning : 1;
 	u8 iin_oc_warning : 1;
@@ -97,7 +115,10 @@ struct smart_psu_state_temperature {
 
 union smart_psu_event {
 	struct {
-		u8 vout;
+		union {
+			struct smart_psu_state_word bit;
+			u16 all;
+		} word;
 		union {
 			struct smart_psu_state_input bit;
 			u8 all;
@@ -111,7 +132,7 @@ union smart_psu_event {
 			u8 all;
 		} temperature;
 	};
-	u32 all;
+	u64 all;
 };
 
 /**
@@ -159,6 +180,7 @@ struct smart_psu_entry {
 	bool uv_timestamp_saved;
 	ktime_t ot_start_timestamp;
 	bool ot_timestamp_saved;
+	bool fault_state;
 	struct list_head node;
 };
 
@@ -229,6 +251,7 @@ struct smart_data {
 	struct delayed_work powergood_work;
 	struct workqueue_struct *workqueue;
 	bool event_logged;
+	bool throttling_active;
 	union smart_psu_event throttling_reason;
 	bool additional_throttling_not_done;
 };
@@ -250,12 +273,15 @@ static int smart_read_byte(const struct i2c_client *client, u8 command)
 	data.block[0] = 2;
 	data.block[1] = SMART_PMBUS_PAGE;
 	data.block[2] = command;
+
 	ret = i2c_smbus_xfer(client->adapter, client->addr, client->flags,
 			     I2C_SMBUS_WRITE, PMBUS_PAGE_PLUS_READ,
 			     I2C_SMBUS_BLOCK_PROC_CALL, &data);
 
 	if (ret < 0) {
-		dev_dbg(&client->dev, "%s failed with status %d\n", __func__, ret);
+		dev_dbg(&client->dev, "%s failed with status %d for command %x\n", __func__, ret,
+				command);
+
 		return ret;
 	}
 
@@ -276,6 +302,7 @@ static int smart_read_word(const struct i2c_client *client, u8 command)
 
 	if (ret < 0) {
 		dev_dbg(&client->dev, "%s failed with status %d\n", __func__, ret);
+
 		return ret;
 	}
 
@@ -360,10 +387,11 @@ static union smart_psu_event smart_read_event(const struct smart_psu_entry *psu)
 	union smart_psu_event event;
 	int ret;
 
-	event.all = 0;
-	ret = smart_read_byte(i2c, PMBUS_STATUS_VOUT);
+	event = psu->current_event;
+
+	ret = smart_read_word(i2c, PMBUS_STATUS_WORD);
 	if (ret >= 0)
-		event.vout = (u8)ret;
+		event.word.all = (u16)ret;
 	ret = smart_read_byte(i2c, PMBUS_STATUS_INPUT);
 	if (ret >= 0)
 		event.input.all = (u8)ret;
@@ -632,6 +660,8 @@ static void smart_request_max_throttling(const struct list_head *list)
 		if (ret)
 			dev_dbg(peci->dev, "throttling enabling failed, ret: %d", ret);
 	}
+
+	smart_data->throttling_active = true;
 }
 
 static void smart_remove_max_throttling(const struct list_head *list)
@@ -644,6 +674,13 @@ static void smart_remove_max_throttling(const struct list_head *list)
 		if (ret)
 			dev_dbg(peci->dev, "throttling disabling failed, ret: %d", ret);
 	}
+
+	smart_data->throttling_active = false;
+}
+
+static bool smart_is_throttling_active(void)
+{
+	return smart_data->throttling_active;
 }
 
 static bool smart_check_powergood(const struct i2c_client *client)
@@ -855,30 +892,53 @@ static void smart_check_ot_time(struct smart_psu_entry *psu, struct list_head *l
 	}
 }
 
-static void smart_handle_uv_event(struct smart_psu_entry *psu, union smart_psu_event event)
+static bool smart_is_psu_in_fault_state(struct smart_psu_entry *psu, union smart_psu_event event)
+{
+	return event.input.bit.unit_off_low_voltage || event.word.bit.vout ||
+	    (psu->uv_timestamp_saved &&
+	     ktime_after(ktime_get(),
+			 ktime_add_ms(psu->uv_start_timestamp, max_undervoltage_time.value)));
+}
+
+static bool smart_is_any_psu_in_fault_state(void)
+{
+	struct smart_psu_entry *psu;
+
+	list_for_each_entry(psu, &smart_data->psu_list, node) {
+		if (psu->fault_state)
+			return true;
+	}
+
+	return false;
+}
+
+static void smart_handle_uv_event(struct smart_psu_entry *psu, union smart_psu_event *event)
 {
 	struct i2c_client *i2c = to_i2c_client(psu->dev);
 
-	if (event.input.bit.unit_off_low_voltage || event.vout ||
-	    (psu->uv_timestamp_saved &&
-	     ktime_after(ktime_get(),
-			 ktime_add_ms(psu->uv_start_timestamp, max_undervoltage_time.value)))) {
+	if (smart_is_psu_in_fault_state(psu, *event)) {
+		psu->fault_state = true;
 		if (!psu->overtemperature_masked) {
 			smart_write_smbalert_mask(i2c, PMBUS_STATUS_TEMPERATURE,
 						  SMART_STATUS_MASK_ALL);
 			psu->overtemperature_masked = true;
 			dev_dbg(psu->dev, "mask OT");
+			event->temperature.all = 0;
 		}
 		if (!psu->overcurrent_masked) {
 			smart_write_smbalert_mask(i2c, PMBUS_STATUS_IOUT, SMART_STATUS_MASK_ALL);
 			psu->overcurrent_masked = true;
 			dev_dbg(psu->dev, "mask OC");
+			event->iout.all = 0;
 		}
 		if (!psu->undervoltage_masked) {
 			smart_write_smbalert_mask(i2c, PMBUS_STATUS_INPUT, SMART_STATUS_MASK_ALL);
 			psu->undervoltage_masked = true;
 			dev_dbg(psu->dev, "mask UV");
+			event->input.all = 0;
 		}
+	} else {
+		psu->fault_state = false;
 	}
 }
 
@@ -927,12 +987,29 @@ static void smart_schedule_poll_or_remove_throttling(const ktime_t psu_poll_star
 							    diff));
 		}
 	} else {
-		smart_log_stop_event();
-		status = IDLE;
-		smart_remove_max_throttling(&smart_data->peci_list);
-		smart_data->event_logged = false;
-		smart_enable_smbalert_generation();
-		queue_delayed_work(smart_data->workqueue, &smart_data->powergood_work, 0);
+		if (smart_is_throttling_active()) {
+			smart_log_stop_event();
+			smart_remove_max_throttling(&smart_data->peci_list);
+		}
+
+		if (smart_is_any_psu_in_fault_state()) {
+			s64 diff = ktime_ms_delta(ktime_get(), psu_poll_start_timestamp);
+
+			dev_dbg(smart_data->dev, "smart_psu_polling execution time: %lld [ms]",
+					diff);
+			if (diff >= smart_psu_polling_interval_time.value) {
+				queue_delayed_work(smart_data->workqueue, &smart_data->work, 0);
+			} else {
+				queue_delayed_work(smart_data->workqueue, &smart_data->work,
+					msecs_to_jiffies(
+						smart_psu_polling_interval_time.value - diff));
+			}
+		} else {
+			status = IDLE;
+			smart_data->event_logged = false;
+			smart_enable_smbalert_generation();
+			queue_delayed_work(smart_data->workqueue, &smart_data->powergood_work, 0);
+		}
 	}
 }
 
@@ -974,6 +1051,7 @@ static void smart_psu_polling(struct work_struct *work)
 	mutex_unlock(&smart_data->mutex);
 
 	mutex_lock(&smart_data->device_access_mutex);
+
 	smart_request_max_throttling(&smart_data->peci_list);
 
 	list_for_each_entry(psu, &smart_data->psu_list, node) {
@@ -981,8 +1059,9 @@ static void smart_psu_polling(struct work_struct *work)
 			smart_clear_events(psu);
 		event = smart_read_event(psu);
 		events.all |= event.all;
+
+		smart_handle_uv_event(psu, &event);
 		smart_save_psu_event(psu, event);
-		smart_handle_uv_event(psu, event);
 		smart_check_ot_time(psu, &list);
 	}
 

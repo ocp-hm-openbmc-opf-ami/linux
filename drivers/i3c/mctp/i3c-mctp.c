@@ -834,11 +834,11 @@ static void i3c_mctp_i3c_event_cb(struct i3c_device *dev, enum i3c_event event)
 		/*
 		 * Disable IBI and polling mode blindly.
 		 */
-		i3c_mctp_disable_ibi(dev);
+		i3c_device_disable_ibi(dev);
 		cancel_delayed_work(&priv->polling_work);
 		break;
 	case i3c_event_rescan_done:
-		if (i3c_mctp_enable_ibi(dev)) {
+		if (i3c_device_enable_ibi(dev)) {
 			INIT_DELAYED_WORK(&priv->polling_work,
 					  i3c_mctp_polling_work);
 			schedule_delayed_work(&priv->polling_work,

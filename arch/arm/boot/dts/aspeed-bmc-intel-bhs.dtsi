@@ -117,7 +117,7 @@
 
 	beeper {
 		compatible = "pwm-beeper";
-		pwms = <&pwm_tacho 7 1000000 0>;
+		pwms = <&pwm 7 1000000 0>;
 	};
 
 	smart {
@@ -609,10 +609,8 @@
  * TODO BHS: Removed PWM/TACH for fans, leaving beeper only.
  * Need to add I2C Fan controller to DTS or JSON
  */
-&pwm_tacho {
+&pwm {
 	status = "okay";
-	#pwm-cells = <3>;
-	aspeed,pwm-outputs = <7>;
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_pwm7_default>;
 };

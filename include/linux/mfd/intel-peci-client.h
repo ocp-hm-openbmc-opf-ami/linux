@@ -25,6 +25,7 @@
 #define INTEL_FAM6_EMERALDRAPIDS	0xCF
 #define INTEL_FAM6_RAPTORLAKE_S		0xB7
 #define INTEL_FAM6_GRANITERAPIDS	0xAD
+#define INTEL_FAM6_GRANITERAPIDSD	0xAE
 #define INTEL_FAM6_ALDERLAKE_S		0x97
 #define INTEL_FAM6_SIERRAFOREST		0xAF
 #endif
@@ -70,6 +71,10 @@
 #define CORE_MASK_BITS_ON_GNR  64 /* X1 now, will update to 128 for X2 and X3 */
 #define CHAN_RANK_MAX_ON_GNR   12 /* Max number of channel ranks on Granite Rapids */
 #define DIMM_IDX_MAX_ON_GNR    2  /* Max DIMM index per channel on Granite Rapids */
+
+#define CORE_MASK_BITS_ON_GNRD  64
+#define CHAN_RANK_MAX_ON_GNRD   8 /* Max number of channel ranks on Granite Rapids D */
+#define DIMM_IDX_MAX_ON_GNRD    2  /* Max DIMM index per channel on Granite Rapids D */
 
 #define CORE_MASK_BITS_ON_SRF  64 /* will update when more core is available */
 #define CHAN_RANK_MAX_ON_SRF   12 /* Max number of channel ranks on Sierra Forest */

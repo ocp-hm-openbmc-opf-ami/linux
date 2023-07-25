@@ -62,6 +62,11 @@ struct peci_cpupower {
 #endif /* CONFIG_SMART_MODULE */
 };
 
+static const u8 peci_extended_energy_support_models[] = {
+	INTEL_FAM6_GRANITERAPIDS,
+	INTEL_FAM6_GRANITERAPIDSD,
+};
+
 static const char *peci_cpupower_labels[PECI_CPUPOWER_SENSOR_TYPES_COUNT] = {
 	"cpu power",
 	"cpu energy",
@@ -777,6 +782,7 @@ static int peci_cpupower_probe(struct platform_device *pdev)
 	u32 power_cfg_idx = 0;
 	u32 energy_cfg_idx = 0;
 	u32 cmd_mask;
+	int iter;
 #ifdef CONFIG_SMART_MODULE
 	int ret;
 #endif /* CONFIG_SMART_MODULE */
@@ -812,11 +818,14 @@ static int peci_cpupower_probe(struct platform_device *pdev)
 	priv->energy_info.type = hwmon_energy;
 	priv->energy_info.config = priv->energy_config;
 
-	/* Extended energy read is supported on GNR. */
-	if (mgr->gen_info->model == INTEL_FAM6_GRANITERAPIDS)
-		priv->extended_energy_supported = true;
-	else
-		priv->extended_energy_supported = false;
+	/* Extended energy read is supported on specific CPU Models. */
+	priv->extended_energy_supported = false;
+	for (iter = 0; iter < ARRAY_SIZE(peci_extended_energy_support_models); ++iter) {
+		if (mgr->gen_info->model == peci_extended_energy_support_models[iter]) {
+			priv->extended_energy_supported = true;
+			break;
+		}
+	}
 
 	priv->chip.ops = &peci_cpupower_ops;
 	priv->chip.info = priv->info;

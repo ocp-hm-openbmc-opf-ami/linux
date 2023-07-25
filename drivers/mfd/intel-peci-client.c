@@ -87,6 +87,12 @@ static const struct cpu_gen_info cpu_gen_info_table[] = {
 		.core_mask_bits = CORE_MASK_BITS_ON_GNR,
 		.chan_rank_max  = CHAN_RANK_MAX_ON_GNR,
 		.dimm_idx_max   = DIMM_IDX_MAX_ON_GNR },
+	{ /* Granite Rapids D */
+		.family         = INTEL_FAM6,
+		.model          = INTEL_FAM6_GRANITERAPIDSD,
+		.core_mask_bits = CORE_MASK_BITS_ON_GNRD,
+		.chan_rank_max  = CHAN_RANK_MAX_ON_GNRD,
+		.dimm_idx_max   = DIMM_IDX_MAX_ON_GNRD },
 	{ /* Alderlake */
 		.family         = INTEL_FAM6,
 		.model          = INTEL_FAM6_ALDERLAKE_S,

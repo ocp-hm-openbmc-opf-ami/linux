@@ -49,6 +49,7 @@ static const u8 support_model[] = {
 	INTEL_FAM6_SAPPHIRERAPIDS,
 	INTEL_FAM6_EMERALDRAPIDS,
 	INTEL_FAM6_GRANITERAPIDS,
+	INTEL_FAM6_GRANITERAPIDSD,
 	INTEL_FAM6_SIERRAFOREST,
 	INTEL_FAM6_RAPTORLAKE_S,
 	INTEL_FAM6_ALDERLAKE_S,
@@ -80,6 +81,7 @@ static int get_dimm_temp(struct peci_dimmtemp *priv, int dimm_no)
 	int chan_rank = dimm_no / priv->gen_info->dimm_idx_max;
 	struct peci_rd_pci_cfg_local_msg rp_msg;
 	struct peci_rd_end_pt_cfg_msg re_msg;
+	u8 model = priv->gen_info->model;
 	u32 bios_reset_cpl_cfg;
 	u8  cfg_data[4];
 	u8  cpu_seg, cpu_bus;
@@ -102,7 +104,7 @@ static int get_dimm_temp(struct peci_dimmtemp *priv, int dimm_no)
 	 * CPU can return invalid temperatures prior to BIOS-PCU handshake
 	 * RST_CPL4 completion so filter the invalid readings out.
 	 */
-	switch (priv->gen_info->model) {
+	switch (model) {
 	case INTEL_FAM6_SAPPHIRERAPIDS:
 	case INTEL_FAM6_EMERALDRAPIDS:
 	case INTEL_FAM6_ICELAKE_X:
@@ -137,11 +139,12 @@ static int get_dimm_temp(struct peci_dimmtemp *priv, int dimm_no)
 		break;
 	}
 
-	switch (priv->gen_info->model) {
+	switch (model) {
 	case INTEL_FAM6_RAPTORLAKE_S:
 	case INTEL_FAM6_ALDERLAKE_S:
 		break;
 	case INTEL_FAM6_GRANITERAPIDS:
+	case INTEL_FAM6_GRANITERAPIDSD:
 	case INTEL_FAM6_SIERRAFOREST:
 		re_msg.addr = priv->mgr->client->addr;
 		re_msg.rx_len = 4;
@@ -198,6 +201,8 @@ static int get_dimm_temp(struct peci_dimmtemp *priv, int dimm_no)
 		re_msg.params.mmio.bar = 0;
 		re_msg.params.mmio.addr_type = PECI_ENDPTCFG_ADDR_TYPE_MMIO_Q;
 		re_msg.params.mmio.offset = 0x19a8 + dimm_order * 4;
+		if (model == INTEL_FAM6_GRANITERAPIDSD)
+			re_msg.params.mmio.offset = 0x1039a8 + dimm_order * 4;
 
 		ret = peci_command(priv->mgr->client->adapter,
 				   PECI_CMD_RD_END_PT_CFG, sizeof(re_msg),
@@ -513,6 +518,7 @@ static int check_populated_dimms(struct peci_dimmtemp *priv)
 
 	switch (priv->gen_info->model) {
 	case INTEL_FAM6_GRANITERAPIDS:
+	case INTEL_FAM6_GRANITERAPIDSD:
 	case INTEL_FAM6_SIERRAFOREST:
 		empty_data_wa = 0xFF;
 		break;

@@ -99,17 +99,21 @@ static s32 ten_dot_six_to_millidegree(s32 val)
 static int get_bios_reset_cfg(struct peci_cputemp *priv)
 {
 	struct peci_rd_end_pt_cfg_msg re_msg;
+	u8 model = priv->gen_info->model;
 	u32 bios_reset_cpl_cfg;
 	int ret;
 
-	switch (priv->gen_info->model) {
+	switch (model) {
 	case INTEL_FAM6_GRANITERAPIDS:
+	case INTEL_FAM6_GRANITERAPIDSD:
 	case INTEL_FAM6_SIERRAFOREST:
 		re_msg.addr = priv->mgr->client->addr;
 		re_msg.msg_type = PECI_ENDPTCFG_TYPE_LOCAL_PCI;
 		re_msg.params.pci_cfg.seg = 0;
 		re_msg.params.pci_cfg.bus = 30;
 		re_msg.params.pci_cfg.device = 5;
+		if (model == INTEL_FAM6_GRANITERAPIDSD)
+			re_msg.params.pci_cfg.device = 6;
 		re_msg.params.pci_cfg.function = 0;
 		re_msg.params.pci_cfg.reg = 0x198;
 		re_msg.rx_len = 4;
@@ -412,13 +416,15 @@ static int check_resolved_cores(struct peci_cputemp *priv)
 {
 	struct peci_rd_pci_cfg_local_msg msg;
 	struct peci_rd_end_pt_cfg_msg re_msg;
+	u8 model = priv->gen_info->model;
 	int ret, i;
 	u32 pkg_cfg;
 	u32 core_count;
 
 	/* Get the RESOLVED_CORES register value */
-	switch (priv->gen_info->model) {
+	switch (model) {
 	case INTEL_FAM6_GRANITERAPIDS:
+	case INTEL_FAM6_GRANITERAPIDSD:
 	case INTEL_FAM6_SIERRAFOREST:
 		dev_dbg(priv->dev,
 			"resolved cores scan is not supported on model 0x%x\n",

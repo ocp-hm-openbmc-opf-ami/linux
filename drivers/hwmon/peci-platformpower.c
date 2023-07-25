@@ -144,7 +144,13 @@ static const u8 peci_platformpower_models[] = {
 	INTEL_FAM6_SAPPHIRERAPIDS,
 	INTEL_FAM6_EMERALDRAPIDS,
 	INTEL_FAM6_GRANITERAPIDS,
+	INTEL_FAM6_GRANITERAPIDSD,
 	INTEL_FAM6_SIERRAFOREST,
+};
+
+static const u8 peci_extended_energy_support_models[] = {
+	INTEL_FAM6_GRANITERAPIDS,
+	INTEL_FAM6_GRANITERAPIDSD,
 };
 
 static const char
@@ -1007,11 +1013,14 @@ static int peci_platformpower_probe(struct platform_device *pdev)
 	priv->energy_info.type = hwmon_energy;
 	priv->energy_info.config = priv->energy_config;
 
-	/* Extended energy read is supported on GNR. */
-	if (mgr->gen_info->model == INTEL_FAM6_GRANITERAPIDS)
-		priv->extended_energy_supported = true;
-	else
-		priv->extended_energy_supported = false;
+	/* Extended energy read is supported on specific CPU Models. */
+	priv->extended_energy_supported = false;
+	for (iter = 0; iter < ARRAY_SIZE(peci_extended_energy_support_models); ++iter) {
+		if (mgr->gen_info->model == peci_extended_energy_support_models[iter]) {
+			priv->extended_energy_supported = true;
+			break;
+		}
+	}
 
 	priv->chip.ops = &peci_platformpower_ops;
 	priv->chip.info = priv->info;

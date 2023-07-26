@@ -206,9 +206,6 @@
 #define I3C_HUB_DT_TP_MODE_I3C_PERF			0x02
 #define I3C_HUB_DT_TP_MODE_SMBUS			0x03
 #define I3C_HUB_DT_TP_MODE_GPIO				0x04
-#define I3C_HUB_DT_TP_MODE_AUTO				0x05
-#define I3C_HUB_DT_TP_MODE_AUTO_I3C			0x06
-#define I3C_HUB_DT_TP_MODE_AUTO_SMBUS			0x07
 #define I3C_HUB_DT_TP_MODE_NOT_DEFINED			0xFF
 
 /* TP pull-up status */
@@ -244,10 +241,6 @@
 /* ID Extraction */
 #define I3C_HUB_ID_CP_SDA_SCL				0x00
 #define I3C_HUB_ID_CP_SEL				0x01
-
-/* Discovery algorithm constants */
-#define I3C_HUB_ALGO_START_SMBUS_ADDR			0x0A
-#define I3C_HUB_ALGO_END_SMBUS_ADDR			0x7E
 
 struct tp_setting {
 	u8 mode;
@@ -335,7 +328,6 @@ static const struct hub_setting tp_mode_settings[] = {
 	{"i3c-perf",	I3C_HUB_DT_TP_MODE_I3C_PERF},
 	{"smbus",	I3C_HUB_DT_TP_MODE_SMBUS},
 	{"gpio",	I3C_HUB_DT_TP_MODE_GPIO},
-	{"auto",	I3C_HUB_DT_TP_MODE_AUTO},
 };
 
 static const struct hub_setting tp_pullup_settings[] = {
@@ -643,9 +635,7 @@ static int i3c_hub_hw_configure_tp(struct device *dev)
 
 			if (priv->settings.tp[i].mode == I3C_HUB_DT_TP_MODE_I3C)
 				i3c_val |= TPn_NET_CON(i);
-			else if (priv->settings.tp[i].mode == I3C_HUB_DT_TP_MODE_SMBUS ||
-				 priv->settings.tp[i].mode == I3C_HUB_DT_TP_MODE_AUTO ||
-				 priv->settings.tp[i].mode == I3C_HUB_DT_TP_MODE_AUTO_I3C)
+			else if (priv->settings.tp[i].mode == I3C_HUB_DT_TP_MODE_SMBUS)
 				smbus_val |= TPn_SMBUS_MODE_EN(i);
 			else if (priv->settings.tp[i].mode == I3C_HUB_DT_TP_MODE_GPIO)
 				gpio_val |= TPn_GPIO_MODE_EN(i);
@@ -1310,8 +1300,6 @@ static const struct i2c_algorithm i3c_controller_smbus_algo = {
 	.unreg_slave = unreg_i2c_target,
 };
 
-static int hub_ports_algo(struct i3c_hub *priv);
-
 static void i3c_hub_delayed_work(struct work_struct *work)
 {
 	struct i3c_hub *priv = container_of(work, typeof(*priv), delayed_work.work);
@@ -1340,10 +1328,6 @@ static void i3c_hub_delayed_work(struct work_struct *work)
 				dev_warn(dev, "Failed to close Target Port(s)\n");
 		}
 	}
-
-	ret = hub_ports_algo(priv);
-	if (ret)
-		dev_warn(dev, "Port mode discovery algorithm failed - error %d\n", ret);
 
 	ret = i3c_master_do_daa(priv->controller);
 	if (ret)
@@ -1582,128 +1566,6 @@ static void i3c_hub_parse_dt_tp(struct device *dev,
 				dev_err(dev, "DTS entry invalid - error %d", ret);
 		}
 	}
-}
-
-/**
- * hub_ports_algo() - function executes algorithm logic that determines what
- * mode a hub port should follow. It does this for ports declared as "auto" in
- * the DTS but also sends DISEC CCCs under smbus voltage to i3c only devices to
- * disable their smbus interfaces and enable the i3c ones.
- *
- * For ports declared as auto the following is true:
- * Ports are set as not defined if nothing acks neither the
- * first DISEC nor any address in the smbus discovery.
- * Ports are set as smbus if they nack the first DISEC and ack any address
- * during smbus discovery.
- * Finally ports are set in i3c mode if they both ack the first DISEC and
- * nack every address in smbus discovery.
- *
- * @priv: pointer to i3c hub that is running the algorithm
- *
- * Return: zero on success, and negative error codes if regmaps or hardware
- * configuration fail
- */
-static int hub_ports_algo(struct i3c_hub *priv)
-{
-	struct device *dev = i3cdev_to_dev(priv->i3cdev);
-	u8 buf_disec[] = {0x01, 0x08};
-	u8 buf_discovery[] = {0x00};
-	int i, j, ret;
-	struct i2c_msg xfers_discovery[] = {{.addr  = 0x0A,
-					     .buf   = buf_discovery,
-					     .flags = 1,
-					     .len   = 1}};
-	struct i2c_msg xfers_disec[] = {{.addr  = 0x7E,
-					 .buf   = buf_disec,
-					 .flags = 0,
-					 .len   = 2}};
-
-	mutex_lock(&priv->controller->daa_lock);
-
-	/* Unlock access to protected registers */
-	ret = regmap_write(priv->regmap, I3C_HUB_PROTECTION_CODE, REGISTERS_UNLOCK_CODE);
-
-	if (ret)
-		goto error;
-	for (i = 0; i < I3C_HUB_LOGICAL_BUS_MAX_COUNT; ++i)
-		switch (priv->settings.tp[i].mode) {
-		case I3C_HUB_DT_TP_MODE_I3C:
-			priv->settings.tp[i].mode = I3C_HUB_DT_TP_MODE_AUTO_I3C;
-			ret = i3c_hub_smbus_tp_algo(priv, i);
-			break;
-		case I3C_HUB_DT_TP_MODE_AUTO:
-			ret = i3c_hub_smbus_tp_algo(priv, i);
-			break;
-		default:
-			break;
-		}
-
-	ret = i3c_hub_configure_hw(dev);
-
-	for (i = 0; i < I3C_HUB_LOGICAL_BUS_MAX_COUNT; ++i) {
-		if (priv->settings.tp[i].mode != I3C_HUB_DT_TP_MODE_AUTO &&
-		    priv->settings.tp[i].mode != I3C_HUB_DT_TP_MODE_AUTO_I3C)
-			continue;
-
-		ret = i3c_controller_smbus_port_adapter_xfer(&priv->logical_bus[i].controller.i2c,
-							     xfers_disec, 1);
-		if (ret <= 0 && priv->settings.tp[i].mode == I3C_HUB_DT_TP_MODE_AUTO)
-			priv->settings.tp[i].mode = I3C_HUB_DT_TP_MODE_AUTO_SMBUS;
-	}
-
-	for (i = 0; i < I3C_HUB_LOGICAL_BUS_MAX_COUNT; ++i) {
-		if (priv->settings.tp[i].mode != I3C_HUB_DT_TP_MODE_AUTO &&
-		    priv->settings.tp[i].mode != I3C_HUB_DT_TP_MODE_AUTO_SMBUS)
-			continue;
-
-		if (priv->settings.tp[i].mode == I3C_HUB_DT_TP_MODE_AUTO_SMBUS)
-			priv->settings.tp[i].mode = I3C_HUB_DT_TP_MODE_NOT_DEFINED;
-
-		for (j = I3C_HUB_ALGO_START_SMBUS_ADDR ; j < I3C_HUB_ALGO_END_SMBUS_ADDR ; j++) {
-			xfers_discovery[0].addr = j;
-			ret = i3c_controller_smbus_port_adapter_xfer
-				(&priv->logical_bus[i].controller.i2c, xfers_discovery, 1);
-			if (ret == 1) {
-				priv->settings.tp[i].mode = I3C_HUB_DT_TP_MODE_SMBUS;
-				break;
-			}
-		}
-		if (priv->settings.tp[i].mode == I3C_HUB_DT_TP_MODE_AUTO)
-			priv->settings.tp[i].mode = I3C_HUB_DT_TP_MODE_AUTO_I3C;
-	}
-
-	for (i = 0; i < I3C_HUB_LOGICAL_BUS_MAX_COUNT; ++i) {
-		if (priv->settings.tp[i].mode != I3C_HUB_DT_TP_MODE_AUTO_I3C)
-			continue;
-
-		i3c_controller_smbus_port_adapter_xfer(&priv->logical_bus[i].controller.i2c,
-						       xfers_disec, 1);
-	}
-
-	for (i = 0 ; i < I3C_HUB_TP_MAX_COUNT ; i++)
-		if (priv->settings.tp[i].mode != I3C_HUB_DT_TP_MODE_SMBUS &&
-		    priv->logical_bus[i].smbus_port_adapter.used) {
-			i3c_master_unregister(&priv->logical_bus[i].controller);
-			priv->logical_bus[i].smbus_port_adapter.used = 0;
-
-			if (priv->settings.tp[i].mode == I3C_HUB_DT_TP_MODE_AUTO_I3C)
-				priv->settings.tp[i].mode = I3C_HUB_DT_TP_MODE_I3C;
-		}
-
-	ret = i3c_hub_configure_hw(dev);
-	if (ret) {
-		dev_err(dev, "Failed to configure the HUB\n");
-		goto error;
-	}
-
-	/* Lock access to protected registers */
-	ret = regmap_write(priv->regmap, I3C_HUB_PROTECTION_CODE, REGISTERS_LOCK_CODE);
-	if (ret)
-		goto error;
-
-error:
-	mutex_unlock(&priv->controller->daa_lock);
-	return ret;
 }
 
 static int i3c_hub_probe(struct i3c_device *i3cdev)

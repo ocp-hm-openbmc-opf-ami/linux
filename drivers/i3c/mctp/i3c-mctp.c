@@ -851,10 +851,11 @@ static void i3c_mctp_i3c_event_cb(struct i3c_device *dev, enum i3c_event event)
 	case i3c_event_rescan_done:
 		i3c_device_get_info(dev, &info);
 		if (IS_BMC_NON_LEGACY(info.pid) || i3c_mctp_enable_ibi(dev)) {
-			INIT_DELAYED_WORK(&priv->polling_work,
-					  i3c_mctp_polling_work);
-			schedule_delayed_work(&priv->polling_work,
-					      msecs_to_jiffies(POLLING_TIMEOUT_MS));
+			if (!delayed_work_pending(&priv->polling_work)) {
+				INIT_DELAYED_WORK(&priv->polling_work, i3c_mctp_polling_work);
+				schedule_delayed_work(&priv->polling_work,
+						      msecs_to_jiffies(POLLING_TIMEOUT_MS));
+			}
 		}
 		break;
 	default:

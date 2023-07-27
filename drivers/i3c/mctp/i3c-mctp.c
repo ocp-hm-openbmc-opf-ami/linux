@@ -272,10 +272,10 @@ static void i3c_mctp_polling_work(struct work_struct *work)
 	i3c_device_get_info(i3cdev, &info);
 	ret = i3c_device_getstatus_ccc(i3cdev, &info);
 	if (ret)
-		return;
+		goto out;
 
 	if (CCC_DEVICE_STATUS_PENDING_INTR(info.status) != MCTP_INTERRUPT_NUMBER)
-		return;
+		goto out;
 
 	rx_packet = i3c_mctp_read_packet(i3cdev);
 	if (IS_ERR(rx_packet))

@@ -923,11 +923,11 @@ static int i3c_mctp_probe(struct i3c_device *i3cdev)
 	}
 	priv->max_write_len = info.max_write_len;
 
-	i3c_device_register_event_cb(i3cdev, i3c_mctp_i3c_event_cb);
 	if (IS_BMC_NON_LEGACY(info.pid) || i3c_mctp_enable_ibi(i3cdev)) {
 		INIT_DELAYED_WORK(&priv->polling_work, i3c_mctp_polling_work);
 		schedule_delayed_work(&priv->polling_work, msecs_to_jiffies(POLLING_TIMEOUT_MS));
 	}
+	i3c_device_register_event_cb(i3cdev, i3c_mctp_i3c_event_cb);
 
 	return 0;
 

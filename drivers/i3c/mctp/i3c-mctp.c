@@ -64,6 +64,7 @@ struct i3c_mctp {
 	 */
 	spinlock_t file_lock;
 	u8 process_count;
+	bool ibi_enabled;
 };
 
 struct i3c_mctp_client {
@@ -701,27 +702,34 @@ static void i3c_mctp_free(struct i3c_driver *drv)
 
 static int i3c_mctp_enable_ibi(struct i3c_device *i3cdev)
 {
+	struct i3c_mctp *priv = i3cdev_get_drvdata(i3cdev);
 	struct i3c_ibi_setup ibireq = {
 		.handler = i3c_mctp_ibi_handler,
 		.max_payload_len = 2,
 		.num_slots = 10,
 	};
-	int ret;
+	int ret = 0;
 
+	if (priv->ibi_enabled)
+		return ret;
 	ret = i3c_device_request_ibi(i3cdev, &ibireq);
 	if (ret)
 		return ret;
 	ret = i3c_device_enable_ibi(i3cdev);
 	if (ret)
 		i3c_device_free_ibi(i3cdev);
+	else
+		priv->ibi_enabled = true;
 
 	return ret;
 }
 
 static void i3c_mctp_disable_ibi(struct i3c_device *i3cdev)
 {
+	struct i3c_mctp *priv = i3cdev_get_drvdata(i3cdev);
 	i3c_device_disable_ibi(i3cdev);
 	i3c_device_free_ibi(i3cdev);
+	priv->ibi_enabled = false;
 }
 
 /**

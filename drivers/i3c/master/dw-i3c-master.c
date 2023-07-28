@@ -2481,14 +2481,14 @@ static void dw_i3c_master_sir_handler(struct dw_i3c_master *master,
 
 	dev = dw_get_i3c_dev_by_addr(master, addr);
 	if (!dev) {
-		dev_warn(master->dev, "no matching dev\n");
+		dev_warn_ratelimited(master->dev, "no matching dev for addr = 0x%02x\n", addr);
 		goto err;
 	}
 
 	data = i3c_dev_get_master_data(dev);
 	slot = i3c_generic_ibi_get_free_slot(data->ibi_pool);
 	if (!slot) {
-		dev_warn(master->dev, "no free ibi slot\n");
+		dev_warn_ratelimited(master->dev, "no free ibi slot\n");
 		goto err;
 	}
 

@@ -896,12 +896,13 @@ static int i3c_mctp_probe(struct i3c_device *i3cdev)
 
 	i3cdev_set_drvdata(i3cdev, priv);
 
-	priv->i3c_peci = platform_device_register_data(i3cdev_to_dev(i3cdev), "peci-i3c", priv->id,
-						       NULL, 0);
+	i3c_device_get_info(i3cdev, &info);
+
+	if (!IS_BMC_NON_LEGACY(info.pid))
+		priv->i3c_peci = platform_device_register_data(i3cdev_to_dev(i3cdev), "peci-i3c",
+							       priv->id, NULL, 0);
 	if (IS_ERR(priv->i3c_peci))
 		dev_warn(priv->dev, "failed to register peci-i3c device\n");
-
-	i3c_device_get_info(i3cdev, &info);
 
 	ret = i3c_device_getmrl_ccc(i3cdev, &info);
 	if (ret || info.max_read_len < I3C_MCTP_MIN_TRANSFER_SIZE)

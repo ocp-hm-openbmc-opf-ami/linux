@@ -2325,8 +2325,10 @@ static int dw_i3c_master_enable_ibi(struct i3c_dev_desc *dev)
 	 * One or more data bytes must be present.
 	 */
 	ret = dw_i3c_master_enable_ibi_in_dat(master, pos, dev->info.bcr & I3C_BCR_IBI_PAYLOAD);
-	if (ret < 0)
+	if (ret < 0) {
+		spin_unlock_irq(&master->ibi.master.lock);
 		return ret;
+	}
 
 	/*
 	 * Clean-up the bit in IBI_SIR_REQ_REJECT so that the SIR request from the specific

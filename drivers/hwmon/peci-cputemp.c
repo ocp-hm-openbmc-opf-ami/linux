@@ -420,39 +420,11 @@ static int check_resolved_cores(struct peci_cputemp *priv)
 	switch (priv->gen_info->model) {
 	case INTEL_FAM6_GRANITERAPIDS:
 	case INTEL_FAM6_SIERRAFOREST:
-		re_msg.addr = priv->mgr->client->addr;
-		re_msg.msg_type = PECI_ENDPTCFG_TYPE_LOCAL_PCI;
-		re_msg.params.pci_cfg.seg = 0;
-		re_msg.params.pci_cfg.bus = 30;
-		re_msg.params.pci_cfg.device = 5;
-		re_msg.params.pci_cfg.function = 0;
-		re_msg.params.pci_cfg.reg = 0x48c;
-		re_msg.rx_len = 4;
-
-		ret = peci_command(priv->mgr->client->adapter,
-				   PECI_CMD_RD_END_PT_CFG, sizeof(re_msg),
-				   &re_msg);
-		if (ret || re_msg.cc != PECI_DEV_CC_SUCCESS)
-			ret = -EAGAIN;
-		if (ret)
-			return ret;
-
-		priv->core_mask = le32_to_cpup((__le32 *)re_msg.data);
-		priv->core_mask <<= 32;
-
-		re_msg.params.pci_cfg.reg = 0x488;
-
-		ret = peci_command(priv->mgr->client->adapter,
-				   PECI_CMD_RD_END_PT_CFG, sizeof(re_msg),
-				   &re_msg);
-		if (ret || re_msg.cc != PECI_DEV_CC_SUCCESS)
-			ret = -EAGAIN;
-		if (ret) {
-			priv->core_mask = 0;
-			return ret;
-		}
-
-		priv->core_mask |= le32_to_cpup((__le32 *)re_msg.data);
+		dev_dbg(priv->dev,
+			"resolved cores scan is not supported on model 0x%x\n",
+			priv->gen_info->model);
+		priv->core_mask = 0;
+		return -EPERM;
 		break;
 	case INTEL_FAM6_ALDERLAKE_S:
 	case INTEL_FAM6_RAPTORLAKE_S:

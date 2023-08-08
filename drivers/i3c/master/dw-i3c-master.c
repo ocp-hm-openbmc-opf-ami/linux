@@ -144,6 +144,12 @@
 #define RESET_CTRL_RESP_QUEUE		BIT(2)
 #define RESET_CTRL_CMD_QUEUE		BIT(1)
 #define RESET_CTRL_SOFT			BIT(0)
+#define RESET_CTRL_ALL			(RESET_CTRL_IBI_QUEUE	|\
+					 RESET_CTRL_RX_FIFO	|\
+					 RESET_CTRL_TX_FIFO	|\
+					 RESET_CTRL_RESP_QUEUE	|\
+					 RESET_CTRL_CMD_QUEUE	|\
+					 RESET_CTRL_SOFT)
 #define RESET_CTRL_QUEUES		(RESET_CTRL_IBI_QUEUE |	\
 					 RESET_CTRL_RX_FIFO |	\
 					 RESET_CTRL_TX_FIFO |	\
@@ -2929,6 +2935,7 @@ static int dw_i3c_probe(struct platform_device *pdev)
 	struct dw_i3c_master *master;
 	int ret, irq;
 	int pos;
+	u32 reg;
 
 	master = devm_kzalloc(&pdev->dev, sizeof(*master), GFP_KERNEL);
 	if (!master)
@@ -2997,6 +3004,12 @@ static int dw_i3c_probe(struct platform_device *pdev)
 		if (ret)
 			goto err_assert_rst;
 	}
+
+	writel(RESET_CTRL_ALL, master->regs + RESET_CTRL);
+	ret = readl_poll_timeout_atomic(master->regs + RESET_CTRL, reg,
+					!reg, 10, 1000000);
+	if (ret)
+		dev_warn(master->dev, "Failed to reset ctrl = %x", reg);
 
 	writel(INTR_ALL, master->regs + INTR_STATUS);
 	irq = platform_get_irq(pdev, 0);

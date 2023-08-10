@@ -2517,7 +2517,7 @@ static void dw_i3c_master_sir_handler(struct dw_i3c_master *master,
 	buf += sizeof(ibi_status);
 	slot->len = sizeof(ibi_status);
 
-	if (of_property_read_bool(master->dev->of_node, "is-mng")) {
+	if (master->base.is_mng) {
 		memcpy(buf, &mdb, sizeof(mdb));
 		buf += sizeof(mdb);
 		slot->len += sizeof(mdb);
@@ -3010,6 +3010,8 @@ static int dw_i3c_probe(struct platform_device *pdev)
 	master->ver_type = I3C_VER_RELEASE_TYPE(ret);
 
 	dw_i3c_master_of_timings(master, pdev->dev.of_node);
+	if (of_property_read_bool(master->dev->of_node, "is-mng"))
+		master->base.is_mng = 1;
 
 	master->base.pec_supported = true;
 

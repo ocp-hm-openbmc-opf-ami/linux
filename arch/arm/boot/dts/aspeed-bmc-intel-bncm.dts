@@ -68,6 +68,10 @@
 		tp2367-ldo = "disabled";
 		tp0145-pullup = "2k";
 		tp2367-pullup = "2k";
+		cp0-io-strength = "50Ohms";
+		cp1-io-strength = "50Ohms";
+		tp0145-io-strength = "50Ohms";
+		tp2367-io-strength = "50Ohms";
 		id = <0>;
 
 		target-port@0 {
@@ -112,6 +116,10 @@
 		tp2367-ldo = "disabled";
 		tp0145-pullup = "2k";
 		tp2367-pullup = "2k";
+		cp0-io-strength = "50Ohms";
+		cp1-io-strength = "50Ohms";
+		tp0145-io-strength = "50Ohms";
+		tp2367-io-strength = "50Ohms";
 		id = <3>;
 
 		target-port@0 {

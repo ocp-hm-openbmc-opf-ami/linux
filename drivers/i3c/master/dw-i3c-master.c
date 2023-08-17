@@ -2512,15 +2512,16 @@ static void dw_i3c_master_sir_handler(struct dw_i3c_master *master,
 	/* prepend ibi status */
 	memcpy(buf, &ibi_status, sizeof(ibi_status));
 	buf += sizeof(ibi_status);
+	slot->len = sizeof(ibi_status);
 
 	if (of_property_read_bool(master->dev->of_node, "is-mng")) {
 		memcpy(buf, &mdb, sizeof(mdb));
 		buf += sizeof(mdb);
+		slot->len += sizeof(mdb);
 	}
 
 	dw_i3c_master_read_ibi_fifo(master, buf, length);
-
-	slot->len = length + sizeof(ibi_status) + sizeof(mdb);
+	slot->len += length;
 
 	i3c_master_queue_ibi(dev, slot);
 	return;

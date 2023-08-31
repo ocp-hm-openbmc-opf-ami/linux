@@ -592,7 +592,7 @@
 &i3c4 {
 	/* I3C_DEBUG_STBY_LVC18 */
 	status = "disabled";
-	i3c-scl-hz = <10000000>;
+	i3c-scl-hz = <3000000>;
 };
 
 &i3c5 {

@@ -48,6 +48,16 @@ config I3C_HUB
 	  I3C HUB drivers will be loaded automatically when I3C device with BCR
 	  equals to 0xC2 (HUB device) is detected on the bus.
 
+config I3C_DEBUG
+	tristate "MIPI Debug for I3C specification support"
+	depends on I3C
+	help
+	  This enables support for the I3C based debug protocols as defined by
+	  the MIPI Debug for I3C specifications. Say Y here to use the I3C Debug driver.
+
+	  When I3C devices with Manufacturer ID=0x105, Part ID=0x128 is detected on
+	  the bus,the I3C Debug drivers will be loaded automatically.
+
 source "drivers/i3c/master/Kconfig"
 
 endif # I3C

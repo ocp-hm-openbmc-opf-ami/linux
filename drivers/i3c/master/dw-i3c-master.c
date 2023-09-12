@@ -1995,6 +1995,7 @@ static int dw_i3c_target_generate_ibi(struct i3c_dev_desc *dev, const u8 *data, 
 	struct i3c_master_controller *m = i3c_dev_get_master(dev);
 	struct dw_i3c_master *master = to_dw_i3c_master(m);
 	u32 reg, thld_ctrl;
+	int ret;
 
 	reg = readl(master->regs + SLV_EVENT_CTRL);
 	if ((reg & SLV_EVENT_CTRL_SIR_EN) == 0)
@@ -2029,8 +2030,22 @@ static int dw_i3c_target_generate_ibi(struct i3c_dev_desc *dev, const u8 *data, 
 
 	if (!wait_for_completion_timeout(&master->ibi.target.comp, XFER_TIMEOUT)) {
 		pr_warn("timeout waiting for completion\n");
-		writel(RESET_CTRL_RX_FIFO | RESET_CTRL_TX_FIFO |
-		       RESET_CTRL_RESP_QUEUE | RESET_CTRL_CMD_QUEUE, master->regs + RESET_CTRL);
+		kfree(master->target_rx.buf);
+		ret = reset_control_assert(master->core_rst);
+		if (ret)
+			return ret;
+		ret = reset_control_deassert(master->core_rst);
+		if (ret)
+			return ret;
+		writel(RESET_CTRL_ALL, master->regs + RESET_CTRL);
+		ret = readl_poll_timeout_atomic(master->regs + RESET_CTRL, reg,
+						!reg, 10, 1000000);
+		if (ret)
+			return ret;
+		writel(INTR_ALL, master->regs + INTR_STATUS);
+		ret = dw_i3c_target_bus_init(m);
+		if (ret)
+			return ret;
 		return -EINVAL;
 	}
 
@@ -2121,7 +2136,22 @@ static int dw_i3c_target_put_read_data(struct i3c_dev_desc *dev, struct i3c_priv
 		if (!wait_for_completion_timeout(&master->ibi.target.comp,
 						 XFER_TIMEOUT)) {
 			dev_err(master->dev, "send sir timeout\n");
-			writel(RESET_CTRL_QUEUES, master->regs + RESET_CTRL);
+			kfree(master->target_rx.buf);
+			ret = reset_control_assert(master->core_rst);
+			if (ret)
+				goto err_recovery;
+			ret = reset_control_deassert(master->core_rst);
+			if (ret)
+				goto err_recovery;
+			writel(RESET_CTRL_ALL, master->regs + RESET_CTRL);
+			ret = readl_poll_timeout_atomic(master->regs + RESET_CTRL, reg,
+							!reg, 10, 1000000);
+			if (ret)
+				goto err_recovery;
+			writel(INTR_ALL, master->regs + INTR_STATUS);
+			ret =  dw_i3c_target_bus_init(m);
+			if (ret)
+				goto err_recovery;
 		}
 
 		reg = readl(master->regs + SLV_INTR_REQ);
@@ -2134,7 +2164,7 @@ static int dw_i3c_target_put_read_data(struct i3c_dev_desc *dev, struct i3c_priv
 
 	if (!wait_for_completion_timeout(&master->target_read_comp, master->target_read_timeout))
 		ret = dw_i3c_target_cleanup_ctrl_queues_on_timeout(master);
-
+err_recovery:
 	dw_i3c_master_free_xfer(xfer);
 
 	return ret;

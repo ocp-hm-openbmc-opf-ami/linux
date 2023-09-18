@@ -22,6 +22,7 @@
 #define PECI_PAYLOAD_SIZE		59
 
 #define I3C_PECI_MCTP_TIMEOUT_VALUE_MS	1100
+#define MCTP_PECI_VDM_HDR_SIZE		5
 
 struct mctp_peci_vdm_hdr {
 	u8 type;
@@ -179,6 +180,9 @@ i3c_peci_xfer(struct peci_adapter *adapter, struct peci_xfer_msg *msg)
 					  msg->tx_len, msg->rx_len, msg->tx_buf, dest_eid);
 	if (IS_ERR(rx_packet))
 		return PTR_ERR(rx_packet);
+
+	if (msg->rx_len > 0)
+		msg->rx_len = rx_packet->size - MCTP_PECI_VDM_HDR_SIZE - I3C_MCTP_HDR_SIZE;
 
 	memcpy(msg->rx_buf, (u8 *)(rx_packet->data.payload) + sizeof(struct mctp_peci_vdm_hdr),
 	       msg->rx_len);

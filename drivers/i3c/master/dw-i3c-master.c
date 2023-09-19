@@ -298,6 +298,9 @@
 
 #define DEV_ADDR_TABLE_LEGACY_I2C_DEV	BIT(31)
 #define DEV_ADDR_TABLE_DEV_NACK_RETRY(x) (((x) << 29) & GENMASK(30, 29))
+#define DEV_ADDR_TABLE_IBI_ADDR_MASK_MASK	GENMASK(25, 24)
+#define DEV_ADDR_TABLE_IBI_ADDR_MASK(x)	(((x) << 24) & DEV_ADDR_TABLE_IBI_ADDR_MASK_MASK)
+#define IBI_ADDR_MASK_LAST_3BITS	0b01
 #define DEV_ADDR_TABLE_MR_REJECT	BIT(14)
 #define DEV_ADDR_TABLE_SIR_REJECT	BIT(13)
 #define DEV_ADDR_TABLE_IBI_WITH_DATA	BIT(12)
@@ -305,6 +308,9 @@
 #define DEV_ADDR_TABLE_DYNAMIC_ADDR_PARITY_MASK	BIT(23)
 #define DEV_ADDR_TABLE_DYNAMIC_ADDR_PARITY(x)	(((x) << 23) & BIT(23))
 #define DEV_ADDR_TABLE_DYNAMIC_ADDR_MASK	GENMASK(22, 16)
+#define DEV_ADDR_TABLE_DYNAMIC_ADDR_FIRST_4BITS_MASK	GENMASK(22, 19)
+#define DAT_DA_FIRST_4BITS_GET(x)	\
+	(((x) & DEV_ADDR_TABLE_DYNAMIC_ADDR_FIRST_4BITS_MASK) >> 19)
 #define DEV_ADDR_TABLE_DYNAMIC_ADDR(x)	(((x) << 16) & DEV_ADDR_TABLE_DYNAMIC_ADDR_MASK)
 #define DEV_ADDR_TABLE_DYNAMIC_ADDR_GET(x)	(((x) & DEV_ADDR_TABLE_DYNAMIC_ADDR_MASK) >> 16)
 #define DEV_ADDR_TABLE_STATIC_ADDR(x)	((x) & GENMASK(6, 0))
@@ -751,6 +757,7 @@ static int dw_i3c_master_add_i3c_dev(struct dw_i3c_master *master, u8 addr, u8 p
 	dat_reg = DEV_ADDR_TABLE_DYNAMIC_ADDR_PARITY(even_parity(addr)) |
 		  DEV_ADDR_TABLE_DYNAMIC_ADDR(addr);
 	if (master->sw_dat_enabled) {
+		dat_reg |= DEV_ADDR_TABLE_IBI_ADDR_MASK(IBI_ADDR_MASK_LAST_3BITS);
 		master->sw_dat[pos].dat = dat_reg;
 		master->sw_dat[pos].hw_dat_linked = false;
 	} else {
@@ -779,6 +786,7 @@ static int dw_i3c_master_update_i3c_dev(struct dw_i3c_master *master, u8 addr, u
 		dat_reg |= DEV_ADDR_TABLE_DYNAMIC_ADDR_PARITY(even_parity(addr)) |
 			   DEV_ADDR_TABLE_DYNAMIC_ADDR(addr);
 		if (master->sw_dat_enabled) {
+			dat_reg |= DEV_ADDR_TABLE_IBI_ADDR_MASK(IBI_ADDR_MASK_LAST_3BITS);
 			master->sw_dat[pos].dat = dat_reg;
 			if (master->sw_dat[pos].hw_dat_linked)
 				writel(dat_reg, master->regs +
@@ -845,6 +853,19 @@ static void dw_i3c_master_unlink_index(struct dw_i3c_master *master, int index)
 	}
 }
 
+static bool dw_i3c_master_is_ibi_mask_found(struct dw_i3c_master *master, u32 first_4bits)
+{
+	for (int hw_dat_index = DEVICE_ADDR_TABLE_COMMON_SLOT + 1; hw_dat_index < master->dat_depth;
+	     ++hw_dat_index) {
+		if (first_4bits == DAT_DA_FIRST_4BITS_GET(readl(master->regs +
+							  DEV_ADDR_TABLE_LOC(master->datstartaddr,
+									     hw_dat_index))))
+			return true;
+	}
+
+	return false;
+}
+
 static int dw_i3c_master_find_hw_dat_index_for_ibi(struct dw_i3c_master *master)
 {
 	int hw_dat_index;
@@ -889,7 +910,21 @@ static int dw_i3c_master_enable_ibi_in_dat(struct dw_i3c_master *master, u8 inde
 
 		/* Update DAT and link index to HW DAT */
 		master->sw_dat[index].dat = dat_reg;
-		dw_i3c_master_link_hw_dat(master, index, hw_dat_index);
+
+		/*
+		 * Each devices DAT REG has IBI_ADDR_MASK enabled to ignore last 3 bits.
+		 * In practice it means that when we add the device with address 0x09
+		 * to the HW DAT- IBIs will be ACKed for the devices 0x08-0x0F.
+		 * Thus we add to HW DAT only the first device for which first 4 bits there is
+		 * no match in HW DAT.
+		 */
+		if (!dw_i3c_master_is_ibi_mask_found(master, DAT_DA_FIRST_4BITS_GET(dat_reg))) {
+			dev_dbg(master->dev, "adding device to hw dat with addr = %02lx, 4bits = %02lx",
+				DEV_ADDR_TABLE_DYNAMIC_ADDR_GET(dat_reg),
+				DAT_DA_FIRST_4BITS_GET(dat_reg));
+			dw_i3c_master_link_hw_dat(master, index, hw_dat_index);
+		}
+
 	} else {
 		writel(dat_reg, master->regs + dat_loc);
 	}

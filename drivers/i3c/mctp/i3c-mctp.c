@@ -850,7 +850,7 @@ static void i3c_mctp_i3c_event_cb(struct i3c_device *dev, enum i3c_event event)
 		break;
 	case i3c_event_rescan_done:
 		i3c_device_get_info(dev, &info);
-		if (IS_BMC_NON_LEGACY(info.pid) || i3c_mctp_enable_ibi(dev)) {
+		if (i3c_mctp_enable_ibi(dev)) {
 			if (!delayed_work_pending(&priv->polling_work)) {
 				INIT_DELAYED_WORK(&priv->polling_work, i3c_mctp_polling_work);
 				schedule_delayed_work(&priv->polling_work,
@@ -923,7 +923,7 @@ static int i3c_mctp_probe(struct i3c_device *i3cdev)
 	}
 	priv->max_write_len = info.max_write_len;
 
-	if (IS_BMC_NON_LEGACY(info.pid) || i3c_mctp_enable_ibi(i3cdev)) {
+	if (i3c_mctp_enable_ibi(i3cdev)) {
 		INIT_DELAYED_WORK(&priv->polling_work, i3c_mctp_polling_work);
 		schedule_delayed_work(&priv->polling_work, msecs_to_jiffies(POLLING_TIMEOUT_MS));
 	}

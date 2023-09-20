@@ -622,9 +622,6 @@ static void i3c_masterdev_release(struct device *dev)
 	struct i3c_master_controller *master = dev_to_i3cmaster(dev);
 	struct i3c_bus *bus = dev_to_i3cbus(dev);
 
-	if (master->wq)
-		destroy_workqueue(master->wq);
-
 	WARN_ON(!list_empty(&bus->devs.i2c) || !list_empty(&bus->devs.i3c));
 	i3c_bus_cleanup(master);
 
@@ -2667,7 +2664,7 @@ static void i3c_master_unregister_i3c_devs(struct i3c_master_controller *master)
 void i3c_master_queue_ibi(struct i3c_dev_desc *dev, struct i3c_ibi_slot *slot)
 {
 	atomic_inc(&dev->ibi->pending_ibis);
-	queue_work(dev->common.master->wq, &slot->work);
+	queue_work(dev->ibi->wq, &slot->work);
 }
 EXPORT_SYMBOL_GPL(i3c_master_queue_ibi);
 
@@ -2956,12 +2953,6 @@ int i3c_master_register(struct i3c_master_controller *master,
 	ret = i3c_bus_set_mode(i3cbus, mode, i2c_scl_rate);
 	if (ret)
 		goto err_put_dev;
-
-	master->wq = alloc_workqueue("%s", 0, 0, dev_name(parent));
-	if (!master->wq) {
-		ret = -ENOMEM;
-		goto err_put_dev;
-	}
 
 	ret = i3c_master_bus_init(master);
 	if (ret)
@@ -3346,6 +3337,12 @@ int i3c_dev_request_ibi_locked(struct i3c_dev_desc *dev,
 	if (!ibi)
 		return -ENOMEM;
 
+	ibi->wq = alloc_ordered_workqueue(dev_name(i3cdev_to_dev(dev->dev)), WQ_MEM_RECLAIM);
+	if (!ibi->wq) {
+		kfree(ibi);
+		return -ENOMEM;
+	}
+
 	atomic_set(&ibi->pending_ibis, 0);
 	init_completion(&ibi->all_ibis_handled);
 	ibi->handler = req->handler;
@@ -3373,6 +3370,12 @@ void i3c_dev_free_ibi_locked(struct i3c_dev_desc *dev)
 		WARN_ON(i3c_dev_disable_ibi_locked(dev));
 
 	master->ops->free_ibi(dev);
+
+	if (dev->ibi->wq) {
+		destroy_workqueue(dev->ibi->wq);
+		dev->ibi->wq = NULL;
+	}
+
 	kfree(dev->ibi);
 	dev->ibi = NULL;
 }

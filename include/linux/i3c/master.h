@@ -129,6 +129,7 @@ struct i3c_ibi_slot {
  *		     rejected by the master
  * @num_slots: number of IBI slots reserved for this device
  * @enabled: reflect the IBI status
+ * @wq: workqueue used to execute IBI handlers.
  * @handler: IBI handler specified at i3c_device_request_ibi() call time. This
  *	     handler will be called from the controller workqueue, and as such
  *	     is allowed to sleep (though it is recommended to process the IBI
@@ -151,6 +152,7 @@ struct i3c_device_ibi_info {
 	unsigned int max_payload_len;
 	unsigned int num_slots;
 	unsigned int enabled;
+	struct workqueue_struct *wq;
 	void (*handler)(struct i3c_device *dev,
 			const struct i3c_ibi_payload *payload);
 };
@@ -489,11 +491,6 @@ struct i3c_master_controller_ops {
  * @boardinfo.i2c: list of I2C boardinfo objects
  * @boardinfo: board-level information attached to devices connected on the bus
  * @bus: I3C bus exposed by this master
- * @wq: workqueue used to execute IBI handlers. Can also be used by master
- *	drivers if they need to postpone operations that need to take place
- *	in a thread context. Typical examples are Hot Join processing which
- *	requires taking the bus lock in maintenance, which in turn, can only
- *	be done from a sleep-able context
  * @daa_lock: protect DAA calls to single DAA at a time.
  * @bus_driver_context: context of the hardware/controller driver, it could be
  *			shared among multiple @i3c_master_controller
@@ -521,7 +518,6 @@ struct i3c_master_controller {
 		struct list_head i2c;
 	} boardinfo;
 	struct i3c_bus bus;
-	struct workqueue_struct *wq;
 	void *bus_driver_context;
 	struct mutex daa_lock;
 };

@@ -1824,9 +1824,11 @@ i3c_master_register_new_i3c_devs(struct i3c_master_controller *master)
 		}
 
 		ret = device_register(&desc->dev->dev);
-		if (ret)
+		if (ret) {
 			dev_err(&master->dev,
 				"Failed to add I3C device (err = %d)\n", ret);
+			put_device(&desc->dev->dev);
+		}
 	}
 }
 

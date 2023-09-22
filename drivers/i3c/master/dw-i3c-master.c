@@ -334,7 +334,7 @@
 #define I3C_MCTP_MDB			0xAE
 
 #define XFER_TIMEOUT (msecs_to_jiffies(1000))
-#define TARGET_MASTER_READ_TIMEOUT	(msecs_to_jiffies(100))
+#define TARGET_MASTER_READ_TIMEOUT	(msecs_to_jiffies(300))
 
 /* AST2600-specific global register set */
 #define AST2600_I3CG_REG0(idx)	(((idx) * 4 * 4) + 0x10)

@@ -2751,18 +2751,19 @@ static irqreturn_t dw_i3c_master_irq_handler(int irq, void *dev_id)
 		if (status & INTR_RESP_READY_STAT)
 			dw_i3c_target_handle_response_ready(master);
 
-		if (status & INTR_DYN_ADDR_ASSGN_STAT) {
+		if (status & (INTR_DYN_ADDR_ASSGN_STAT | INTR_CCC_UPDATED_STAT)) {
 			u32 reg;
 
 			reg = readl(master->regs + DEVICE_ADDR);
 			if (reg & DEV_ADDR_DYNAMIC_ADDR_VALID)
 				dw_i3c_target_update_dyn_addr(master, DEV_ADDR_DYNAMIC_GET(reg));
-			writel(INTR_DYN_ADDR_ASSGN_STAT, master->regs + INTR_STATUS);
-		}
 
-		if (status & INTR_CCC_UPDATED_STAT) {
-			writel(INTR_CCC_UPDATED_STAT, master->regs + INTR_STATUS);
-			dw_i3c_target_event_handler(master);
+			if (status & INTR_DYN_ADDR_ASSGN_STAT) {
+				writel(INTR_DYN_ADDR_ASSGN_STAT, master->regs + INTR_STATUS);
+			} else {
+				writel(INTR_CCC_UPDATED_STAT, master->regs + INTR_STATUS);
+				dw_i3c_target_event_handler(master);
+			}
 		}
 	}
 

@@ -1684,6 +1684,10 @@ static int dw_i3c_master_bus_init(struct i3c_master_controller *m)
 	writel(readl(master->regs + DEVICE_CTRL) | DEV_CTRL_HOT_JOIN_NACK,
 	       master->regs + DEVICE_CTRL);
 
+	if (!master->base.jdec_spd)
+		writel(readl(master->regs + DEVICE_CTRL) | DEV_CTRL_IBA_INCLUDE,
+		       master->regs + DEVICE_CTRL);
+
 	return dw_i3c_master_enable(master);
 }
 

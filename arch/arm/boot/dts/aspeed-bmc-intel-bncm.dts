@@ -57,8 +57,9 @@
 
 &i3c2 {
 	/* I3C_MNG_LVC18 */
-	i3c-scl-hz = <5000000>;
+	i3c-scl-hz = <4550000>;
 	i3c-pp-scl-high-ns = <50>;
+	sda-tx-hold-ns = <50>;
 
 	/* HUB on Legacy Board */
 	hub0@0,0 {

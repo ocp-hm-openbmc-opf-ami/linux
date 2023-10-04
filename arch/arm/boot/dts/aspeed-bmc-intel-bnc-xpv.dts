@@ -62,6 +62,7 @@
 &i3c3 {
 	/* I3C_SPD_BMC */
 	i3c-scl-hz = <6000000>;
+	i3c-pp-scl-high-ns = <70>;
 
 	/* Renesas RG3MxxB12A0 */
 	hub@70,3C000000100 {

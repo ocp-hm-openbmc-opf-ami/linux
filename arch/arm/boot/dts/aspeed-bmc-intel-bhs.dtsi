@@ -584,8 +584,11 @@
 &i3c3 {
 	/* I3C_SPD_BMC */
 	status = "okay";
-	i3c-scl-hz = <8000000>;
-	sda-tx-hold-ns = <35>;
+	i3c-scl-hz = <8330000>;
+	i3c-pp-scl-high-ns = <50>;
+	i2c-scl-hz = <1000000>;
+	i3c-od-scl-high-ns = <400>;
+	sda-tx-hold-ns = <30>;
 	jdec-spd;
 };
 

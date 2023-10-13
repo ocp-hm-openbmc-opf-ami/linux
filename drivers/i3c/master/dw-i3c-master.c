@@ -2581,7 +2581,7 @@ static void dw_i3c_master_sir_handler(struct dw_i3c_master *master,
 	data = i3c_dev_get_master_data(dev);
 	slot = i3c_generic_ibi_get_free_slot(data->ibi_pool);
 	if (!slot) {
-		dev_warn_ratelimited(master->dev, "no free ibi slot\n");
+		dev_warn_ratelimited(master->dev, "no free ibi slot for addr = %x\n", addr);
 		goto err;
 	}
 

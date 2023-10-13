@@ -2624,16 +2624,12 @@ err:
 
 static void dw_i3c_master_demux_ibis(struct dw_i3c_master *master)
 {
-	u32 nibi, status, intr_signal_en;
+	u32 nibi, status;
 	int i;
 
 	nibi = QUEUE_STATUS_IBI_STATUS_CNT(readl(master->regs + QUEUE_STATUS_LEVEL));
 
 	spin_lock(&master->ibi.master.lock);
-	intr_signal_en = readl(master->regs + INTR_SIGNAL_EN);
-	intr_signal_en &= ~INTR_IBI_THLD_STAT;
-	writel(intr_signal_en, master->regs + INTR_SIGNAL_EN);
-
 	for (i = 0; i < nibi; i++) {
 		status = readl(master->regs + IBI_QUEUE_STATUS);
 
@@ -2652,10 +2648,6 @@ static void dw_i3c_master_demux_ibis(struct dw_i3c_master *master)
 		if (IBI_TYPE_SIR(status))
 			dw_i3c_master_sir_handler(master, status);
 	}
-
-	intr_signal_en = readl(master->regs + INTR_SIGNAL_EN);
-	intr_signal_en |= INTR_IBI_THLD_STAT;
-	writel(intr_signal_en, master->regs + INTR_SIGNAL_EN);
 	spin_unlock(&master->ibi.master.lock);
 }
 

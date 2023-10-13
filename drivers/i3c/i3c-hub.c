@@ -81,6 +81,7 @@
 #define  TPn_SMBUS_MODE_EN(n)				BIT(n)
 
 #define I3C_HUB_LDO_AND_PULLUP_CONF			0x19
+#define  LDO_ENABLE_DISABLE_MASK			GENMASK(3, 0)
 #define  CP0_LDO_EN					BIT(0)
 #define  CP1_LDO_EN					BIT(1)
 /*
@@ -179,13 +180,17 @@
 #define I3C_HUB_ONCHIP_TD_ADDR_CONF			0x7E
 #define I3C_HUB_PAGE_PTR				0x7F
 
-/* LDO DT settings */
-#define I3C_HUB_DT_LDO_DISABLED				0x00
-#define I3C_HUB_DT_LDO_1_0V				0x01
-#define I3C_HUB_DT_LDO_1_1V				0x02
-#define I3C_HUB_DT_LDO_1_2V				0x03
-#define I3C_HUB_DT_LDO_1_8V				0x04
-#define I3C_HUB_DT_LDO_NOT_DEFINED			0xFF
+/* LDO Disable/Enable DT settings */
+#define I3C_HUB_DT_LDO_DISENA_ENABLED			0x01
+#define I3C_HUB_DT_LDO_DISENA_DISABLED			0x00
+#define I3C_HUB_DT_LDO_DISENA_NOT_DEFINED		0xFF
+
+/* LDO Voltage DT settings */
+#define I3C_HUB_DT_LDO_VOLT_1_0V			0x01
+#define I3C_HUB_DT_LDO_VOLT_1_1V			0x02
+#define I3C_HUB_DT_LDO_VOLT_1_2V			0x03
+#define I3C_HUB_DT_LDO_VOLT_1_8V			0x04
+#define I3C_HUB_DT_LDO_VOLT_NOT_DEFINED			0xFF
 
 /* Paged Transaction Registers */
 #define I3C_HUB_CONTROLLER_BUFFER_PAGE			0x10
@@ -251,10 +256,14 @@ struct tp_setting {
 };
 
 struct dt_settings {
-	u8 cp0_ldo;
-	u8 cp1_ldo;
-	u8 tp0145_ldo;
-	u8 tp2367_ldo;
+	u8 cp0_ldo_en;
+	u8 cp1_ldo_en;
+	u8 cp0_ldo_volt;
+	u8 cp1_ldo_volt;
+	u8 tp0145_ldo_en;
+	u8 tp2367_ldo_en;
+	u8 tp0145_ldo_volt;
+	u8 tp2367_ldo_volt;
 	u8 tp0145_pullup;
 	u8 tp2367_pullup;
 	u8 cp0_io_strength;
@@ -309,12 +318,16 @@ struct hub_setting {
 	const u8 value;
 };
 
-static const struct hub_setting ldo_settings[] = {
-	{"disabled",	I3C_HUB_DT_LDO_DISABLED},
-	{"1.0V",	I3C_HUB_DT_LDO_1_0V},
-	{"1.1V",	I3C_HUB_DT_LDO_1_1V},
-	{"1.2V",	I3C_HUB_DT_LDO_1_2V},
-	{"1.8V",	I3C_HUB_DT_LDO_1_8V},
+static const struct hub_setting ldo_en_settings[] = {
+	{"disabled",	I3C_HUB_DT_LDO_DISENA_DISABLED},
+	{"enabled",	I3C_HUB_DT_LDO_DISENA_ENABLED},
+};
+
+static const struct hub_setting ldo_volt_settings[] = {
+	{"1.0V",	I3C_HUB_DT_LDO_VOLT_1_0V},
+	{"1.1V",	I3C_HUB_DT_LDO_VOLT_1_1V},
+	{"1.2V",	I3C_HUB_DT_LDO_VOLT_1_2V},
+	{"1.8V",	I3C_HUB_DT_LDO_VOLT_1_8V},
 };
 
 static const struct hub_setting pullup_settings[] = {
@@ -348,11 +361,11 @@ static const struct hub_setting io_strength_settings[] = {
 static u8 i3c_hub_ldo_dt_to_reg(u8 dt_value)
 {
 	switch (dt_value) {
-	case I3C_HUB_DT_LDO_1_1V:
+	case I3C_HUB_DT_LDO_VOLT_1_1V:
 		return LDO_VOLTAGE_1_1V;
-	case I3C_HUB_DT_LDO_1_2V:
+	case I3C_HUB_DT_LDO_VOLT_1_2V:
 		return LDO_VOLTAGE_1_2V;
-	case I3C_HUB_DT_LDO_1_8V:
+	case I3C_HUB_DT_LDO_VOLT_1_8V:
 		return LDO_VOLTAGE_1_8V;
 	default:
 		return LDO_VOLTAGE_1_0V;
@@ -446,14 +459,22 @@ static void i3c_hub_of_get_conf_static(struct device *dev, const struct device_n
 {
 	struct i3c_hub *priv = dev_get_drvdata(dev);
 
-	i3c_hub_of_get_setting(dev, node, "cp0-ldo", ldo_settings, ARRAY_SIZE(ldo_settings),
-			       &priv->settings.cp0_ldo);
-	i3c_hub_of_get_setting(dev, node, "cp1-ldo", ldo_settings, ARRAY_SIZE(ldo_settings),
-			       &priv->settings.cp1_ldo);
-	i3c_hub_of_get_setting(dev, node, "tp0145-ldo", ldo_settings, ARRAY_SIZE(ldo_settings),
-			       &priv->settings.tp0145_ldo);
-	i3c_hub_of_get_setting(dev, node, "tp2367-ldo", ldo_settings, ARRAY_SIZE(ldo_settings),
-			       &priv->settings.tp2367_ldo);
+	i3c_hub_of_get_setting(dev, node, "cp0-ldo-en", ldo_en_settings,
+			       ARRAY_SIZE(ldo_en_settings), &priv->settings.cp0_ldo_en);
+	i3c_hub_of_get_setting(dev, node, "cp1-ldo-en", ldo_en_settings,
+			       ARRAY_SIZE(ldo_en_settings), &priv->settings.cp1_ldo_en);
+	i3c_hub_of_get_setting(dev, node, "cp0-ldo-volt", ldo_volt_settings,
+			       ARRAY_SIZE(ldo_volt_settings), &priv->settings.cp0_ldo_volt);
+	i3c_hub_of_get_setting(dev, node, "cp1-ldo-volt", ldo_volt_settings,
+			       ARRAY_SIZE(ldo_volt_settings), &priv->settings.cp1_ldo_volt);
+	i3c_hub_of_get_setting(dev, node, "tp0145-ldo-en", ldo_en_settings,
+			       ARRAY_SIZE(ldo_en_settings), &priv->settings.tp0145_ldo_en);
+	i3c_hub_of_get_setting(dev, node, "tp2367-ldo-en", ldo_en_settings,
+			       ARRAY_SIZE(ldo_en_settings), &priv->settings.tp2367_ldo_en);
+	i3c_hub_of_get_setting(dev, node, "tp0145-ldo-volt", ldo_volt_settings,
+			       ARRAY_SIZE(ldo_volt_settings), &priv->settings.tp0145_ldo_volt);
+	i3c_hub_of_get_setting(dev, node, "tp2367-ldo-volt", ldo_volt_settings,
+			       ARRAY_SIZE(ldo_volt_settings), &priv->settings.tp2367_ldo_volt);
 	i3c_hub_of_get_setting(dev, node, "tp0145-pullup", pullup_settings,
 			       ARRAY_SIZE(pullup_settings), &priv->settings.tp0145_pullup);
 	i3c_hub_of_get_setting(dev, node, "tp2367-pullup", pullup_settings,
@@ -477,10 +498,14 @@ static void i3c_hub_of_default_configuration(struct device *dev)
 	struct i3c_hub *priv = dev_get_drvdata(dev);
 	int id;
 
-	priv->settings.cp0_ldo = I3C_HUB_DT_LDO_NOT_DEFINED;
-	priv->settings.cp1_ldo = I3C_HUB_DT_LDO_NOT_DEFINED;
-	priv->settings.tp0145_ldo = I3C_HUB_DT_LDO_NOT_DEFINED;
-	priv->settings.tp2367_ldo = I3C_HUB_DT_LDO_NOT_DEFINED;
+	priv->settings.cp0_ldo_en = I3C_HUB_DT_LDO_DISENA_NOT_DEFINED;
+	priv->settings.cp1_ldo_en = I3C_HUB_DT_LDO_DISENA_NOT_DEFINED;
+	priv->settings.cp0_ldo_volt = I3C_HUB_DT_LDO_VOLT_NOT_DEFINED;
+	priv->settings.cp1_ldo_volt = I3C_HUB_DT_LDO_VOLT_NOT_DEFINED;
+	priv->settings.tp0145_ldo_en = I3C_HUB_DT_LDO_DISENA_NOT_DEFINED;
+	priv->settings.tp2367_ldo_en = I3C_HUB_DT_LDO_DISENA_NOT_DEFINED;
+	priv->settings.tp0145_ldo_volt = I3C_HUB_DT_LDO_VOLT_NOT_DEFINED;
+	priv->settings.tp2367_ldo_volt = I3C_HUB_DT_LDO_VOLT_NOT_DEFINED;
 	priv->settings.tp0145_pullup = I3C_HUB_DT_PULLUP_NOT_DEFINED;
 	priv->settings.tp2367_pullup = I3C_HUB_DT_PULLUP_NOT_DEFINED;
 	priv->settings.cp0_io_strength = I3C_HUB_DT_IO_STRENGTH_NOT_DEFINED;
@@ -515,66 +540,72 @@ static int i3c_hub_hw_configure_pullup(struct device *dev)
 static int i3c_hub_hw_configure_ldo(struct device *dev)
 {
 	struct i3c_hub *priv = dev_get_drvdata(dev);
-	u8 mask_all = 0, val_all = 0;
-	u8 ldo_dis = 0, ldo_en = 0;
+	u8 ldo_config_mask = 0, ldo_config_val = 0;
+	u8 ldo_disable_mask = 0, ldo_en_val = 0;
 	u32 reg_val;
-	u8 val;
 	int ret;
+	u8 val;
 
-	/* Get LDOs configuration to figure out what is going to be changed */
+	if (priv->settings.cp0_ldo_en == I3C_HUB_DT_LDO_DISENA_ENABLED)
+		ldo_en_val |= CP0_LDO_EN;
+	if (priv->settings.cp1_ldo_en == I3C_HUB_DT_LDO_DISENA_ENABLED)
+		ldo_en_val |= CP1_LDO_EN;
+	if (priv->settings.tp0145_ldo_en == I3C_HUB_DT_LDO_DISENA_ENABLED)
+		ldo_en_val |= TP0145_LDO_EN;
+	if (priv->settings.tp2367_ldo_en == I3C_HUB_DT_LDO_DISENA_ENABLED)
+		ldo_en_val |= TP2367_LDO_EN;
+
 	ret = regmap_read(priv->regmap, I3C_HUB_LDO_CONF, &reg_val);
 	if (ret)
 		return ret;
 
-	if (priv->settings.cp0_ldo != I3C_HUB_DT_LDO_NOT_DEFINED) {
-		val = CP0_LDO_VOLTAGE(i3c_hub_ldo_dt_to_reg(priv->settings.cp0_ldo));
-		if ((reg_val & CP0_LDO_VOLTAGE_MASK) != val)
-			ldo_dis |= CP0_LDO_EN;
-		if (priv->settings.cp0_ldo != I3C_HUB_DT_LDO_DISABLED)
-			ldo_en |= CP0_LDO_EN;
-		mask_all |= CP0_LDO_VOLTAGE_MASK;
-		val_all |= val;
+	if (priv->settings.cp0_ldo_volt != I3C_HUB_DT_LDO_VOLT_NOT_DEFINED) {
+		val = CP0_LDO_VOLTAGE(i3c_hub_ldo_dt_to_reg(priv->settings.cp0_ldo_volt));
+		if ((reg_val & CP0_LDO_VOLTAGE_MASK) != val) {
+			ldo_config_mask |= CP0_LDO_VOLTAGE_MASK;
+			ldo_disable_mask |= CP0_LDO_EN;
+			ldo_config_val |= val;
+		}
 	}
-	if (priv->settings.cp1_ldo != I3C_HUB_DT_LDO_NOT_DEFINED) {
-		val = CP1_LDO_VOLTAGE(i3c_hub_ldo_dt_to_reg(priv->settings.cp1_ldo));
-		if ((reg_val & CP1_LDO_VOLTAGE_MASK) != val)
-			ldo_dis |= CP1_LDO_EN;
-		if (priv->settings.cp1_ldo != I3C_HUB_DT_LDO_DISABLED)
-			ldo_en |= CP1_LDO_EN;
-		mask_all |= CP1_LDO_VOLTAGE_MASK;
-		val_all |= val;
+	if (priv->settings.cp1_ldo_volt != I3C_HUB_DT_LDO_VOLT_NOT_DEFINED) {
+		val = CP1_LDO_VOLTAGE(i3c_hub_ldo_dt_to_reg(priv->settings.cp1_ldo_volt));
+		if ((reg_val & CP1_LDO_VOLTAGE_MASK) != val) {
+			ldo_config_mask |= CP1_LDO_VOLTAGE_MASK;
+			ldo_disable_mask |= CP1_LDO_EN;
+			ldo_config_val |= val;
+		}
 	}
-	if (priv->settings.tp0145_ldo != I3C_HUB_DT_LDO_NOT_DEFINED) {
-		val = TP0145_LDO_VOLTAGE(i3c_hub_ldo_dt_to_reg(priv->settings.tp0145_ldo));
-		if ((reg_val & TP0145_LDO_VOLTAGE_MASK) != val)
-			ldo_dis |= TP0145_LDO_EN;
-		if (priv->settings.tp0145_ldo != I3C_HUB_DT_LDO_DISABLED)
-			ldo_en |= TP0145_LDO_EN;
-		mask_all |= TP0145_LDO_VOLTAGE_MASK;
-		val_all |= val;
+	if (priv->settings.tp0145_ldo_volt != I3C_HUB_DT_LDO_VOLT_NOT_DEFINED) {
+		val = TP0145_LDO_VOLTAGE(i3c_hub_ldo_dt_to_reg(priv->settings.tp0145_ldo_volt));
+		if ((reg_val & TP0145_LDO_VOLTAGE_MASK) != val) {
+			ldo_config_mask |= TP0145_LDO_VOLTAGE_MASK;
+			ldo_disable_mask |= TP0145_LDO_EN;
+			ldo_config_val |= val;
+		}
 	}
-	if (priv->settings.tp2367_ldo != I3C_HUB_DT_LDO_NOT_DEFINED) {
-		val = TP2367_LDO_VOLTAGE(i3c_hub_ldo_dt_to_reg(priv->settings.tp2367_ldo));
-		if ((reg_val & TP2367_LDO_VOLTAGE_MASK) != val)
-			ldo_dis |= TP2367_LDO_EN;
-		if (priv->settings.tp2367_ldo != I3C_HUB_DT_LDO_DISABLED)
-			ldo_en |= TP2367_LDO_EN;
-		mask_all |= TP2367_LDO_VOLTAGE_MASK;
-		val_all |= val;
+	if (priv->settings.tp2367_ldo_volt != I3C_HUB_DT_LDO_VOLT_NOT_DEFINED) {
+		val = TP2367_LDO_VOLTAGE(i3c_hub_ldo_dt_to_reg(priv->settings.tp2367_ldo_volt));
+		if ((reg_val & TP2367_LDO_VOLTAGE_MASK) != val) {
+			ldo_config_mask |= TP2367_LDO_VOLTAGE_MASK;
+			ldo_disable_mask |= TP2367_LDO_EN;
+			ldo_config_val |= val;
+		}
 	}
 
-	/* Disable all LDOs if LDO configuration is going to be changed. */
-	ret = regmap_update_bits(priv->regmap, I3C_HUB_LDO_AND_PULLUP_CONF, ldo_dis, 0);
-	if (ret)
-		return ret;
+	if (ldo_config_mask) {
+		ret = regmap_update_bits(priv->regmap, I3C_HUB_LDO_AND_PULLUP_CONF,
+					 ldo_disable_mask, 0);
+		if (ret)
+			return ret;
 
-	/* Set LDOs configuration */
-	ret = regmap_update_bits(priv->regmap, I3C_HUB_LDO_CONF, mask_all, val_all);
-	if (ret)
-		return ret;
+		ret = regmap_update_bits(priv->regmap, I3C_HUB_LDO_CONF, ldo_config_mask,
+					 ldo_config_val);
+		if (ret)
+			return ret;
+	}
 
-	/* Re-enable LDOs if needed */
-	return regmap_update_bits(priv->regmap, I3C_HUB_LDO_AND_PULLUP_CONF, ldo_en, ldo_en);
+	return regmap_update_bits(priv->regmap, I3C_HUB_LDO_AND_PULLUP_CONF,
+				  LDO_ENABLE_DISABLE_MASK, ldo_en_val);
 }
 
 static int i3c_hub_hw_configure_io_strength(struct device *dev)
@@ -824,10 +855,14 @@ static int i3c_hub_debugfs_init(struct i3c_hub *priv, const char *hub_id)
 
 	dt_conf_dir = entry;
 
-	debugfs_create_u8("cp0-ldo", 0400, dt_conf_dir, &priv->settings.cp0_ldo);
-	debugfs_create_u8("cp1-ldo", 0400, dt_conf_dir, &priv->settings.cp1_ldo);
-	debugfs_create_u8("tp0145-ldo", 0400, dt_conf_dir, &priv->settings.tp0145_ldo);
-	debugfs_create_u8("tp2367-ldo", 0400, dt_conf_dir, &priv->settings.tp2367_ldo);
+	debugfs_create_u8("cp0-ldo-en", 0400, dt_conf_dir, &priv->settings.cp0_ldo_en);
+	debugfs_create_u8("cp1-ldo-en", 0400, dt_conf_dir, &priv->settings.cp1_ldo_en);
+	debugfs_create_u8("cp0-ldo-volt", 0400, dt_conf_dir, &priv->settings.cp0_ldo_volt);
+	debugfs_create_u8("cp1-ldo-volt", 0400, dt_conf_dir, &priv->settings.cp1_ldo_volt);
+	debugfs_create_u8("tp0145-ldo-en", 0400, dt_conf_dir, &priv->settings.tp0145_ldo_en);
+	debugfs_create_u8("tp2367-ldo-en", 0400, dt_conf_dir, &priv->settings.tp2367_ldo_en);
+	debugfs_create_u8("tp0145-ldo-volt", 0400, dt_conf_dir, &priv->settings.tp0145_ldo_volt);
+	debugfs_create_u8("tp2367-ldo-volt", 0400, dt_conf_dir, &priv->settings.tp2367_ldo_volt);
 	debugfs_create_u8("tp0145-pullup", 0400, dt_conf_dir, &priv->settings.tp0145_pullup);
 	debugfs_create_u8("tp2367-pullup", 0400, dt_conf_dir, &priv->settings.tp2367_pullup);
 

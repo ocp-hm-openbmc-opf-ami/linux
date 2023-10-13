@@ -2619,6 +2619,9 @@ err:
 	     CM_TFR_STS_MASTER_SERV_IBI) && master->platform_ops &&
 	    master->platform_ops->gen_tbits_in)
 		master->platform_ops->gen_tbits_in(master);
+	if (slot && master->ibi.master.received_ibi_len[addr] > slot->dev->ibi->max_payload_len)
+		i3c_generic_ibi_recycle_slot(data->ibi_pool, slot);
+
 	master->ibi.master.received_ibi_len[addr] = 0;
 }
 

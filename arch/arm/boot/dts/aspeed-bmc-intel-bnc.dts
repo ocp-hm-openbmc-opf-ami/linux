@@ -26,6 +26,7 @@
 	pca9848@70 {
 		compatible = "nxp,pca9848";
 		reg = <0x70>;
+		i2c-mux-idle-disconnect;
 		i2c9_mux_ch7: i2c@7 {
 			reg = <7>;
 		};
@@ -40,6 +41,7 @@
 	pca9846@59 {
 		compatible = "nxp,pca9846";
 		reg = <0x59>;
+		i2c-mux-idle-disconnect;
 		i2c9_mux0_ch0: i2c@0 {
 			reg = <0>;
 		};

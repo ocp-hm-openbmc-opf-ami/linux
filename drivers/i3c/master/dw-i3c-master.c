@@ -1709,15 +1709,17 @@ static int dw_i3c_ccc_set(struct dw_i3c_master *master,
 		pos = dw_i3c_master_get_addr_pos(master, ccc->dests[0].addr);
 		if (pos < 0)
 			return pos;
-
-		hw_dat_index = dw_i3c_master_alloc_and_get_hw_dat_index(master, pos);
-		if (hw_dat_index < 0)
-			return hw_dat_index;
 	}
 
 	xfer = dw_i3c_master_alloc_xfer(master, 1);
 	if (!xfer)
 		return -ENOMEM;
+
+	hw_dat_index = dw_i3c_master_alloc_and_get_hw_dat_index(master, pos);
+	if (hw_dat_index < 0) {
+		ret = hw_dat_index;
+		goto out;
+	}
 
 	cmd = xfer->cmds;
 	cmd->tx_buf = ccc->dests[0].payload.data;
@@ -1743,6 +1745,7 @@ static int dw_i3c_ccc_set(struct dw_i3c_master *master,
 	if (xfer->cmds[0].error == RESPONSE_ERROR_IBA_NACK)
 		ccc->err = I3C_ERROR_M2;
 
+out:
 	dw_i3c_master_free_xfer(xfer);
 
 	return ret;
@@ -1759,13 +1762,15 @@ static int dw_i3c_ccc_get(struct dw_i3c_master *master, struct i3c_ccc_cmd *ccc)
 	if (pos < 0)
 		return pos;
 
-	hw_dat_index = dw_i3c_master_alloc_and_get_hw_dat_index(master, pos);
-	if (hw_dat_index < 0)
-		return hw_dat_index;
-
 	xfer = dw_i3c_master_alloc_xfer(master, 1);
 	if (!xfer)
 		return -ENOMEM;
+
+	hw_dat_index = dw_i3c_master_alloc_and_get_hw_dat_index(master, pos);
+	if (hw_dat_index < 0) {
+		ret = hw_dat_index;
+		goto out;
+	}
 
 	cmd = xfer->cmds;
 	cmd->rx_buf = ccc->dests[0].payload.data;
@@ -1791,6 +1796,8 @@ static int dw_i3c_ccc_get(struct dw_i3c_master *master, struct i3c_ccc_cmd *ccc)
 	ret = xfer->ret;
 	if (xfer->cmds[0].error == RESPONSE_ERROR_IBA_NACK)
 		ccc->err = I3C_ERROR_M2;
+
+out:
 	dw_i3c_master_free_xfer(xfer);
 
 	return ret;
@@ -1911,10 +1918,6 @@ static int dw_i3c_master_priv_xfers(struct i3c_dev_desc *dev,
 	int hw_dat_index;
 	int i, ret = 0;
 
-	hw_dat_index = dw_i3c_master_alloc_and_get_hw_dat_index(master, data->index);
-	if (hw_dat_index < 0)
-		return hw_dat_index;
-
 	if (!i3c_nxfers)
 		return 0;
 
@@ -1935,6 +1938,12 @@ static int dw_i3c_master_priv_xfers(struct i3c_dev_desc *dev,
 	xfer = dw_i3c_master_alloc_xfer(master, i3c_nxfers);
 	if (!xfer)
 		return -ENOMEM;
+
+	hw_dat_index = dw_i3c_master_alloc_and_get_hw_dat_index(master, data->index);
+	if (hw_dat_index < 0) {
+		ret = hw_dat_index;
+		goto out;
+	}
 
 	for (i = 0; i < i3c_nxfers; i++) {
 		struct dw_i3c_cmd *cmd = &xfer->cmds[i];
@@ -2277,10 +2286,6 @@ static int dw_i3c_master_i2c_xfers(struct i2c_dev_desc *dev,
 	int hw_dat_index;
 	int i, ret = 0;
 
-	hw_dat_index = dw_i3c_master_alloc_and_get_hw_dat_index(master, data->index);
-	if (hw_dat_index < 0)
-		return hw_dat_index;
-
 	if (!i2c_nxfers)
 		return 0;
 
@@ -2301,6 +2306,12 @@ static int dw_i3c_master_i2c_xfers(struct i2c_dev_desc *dev,
 	xfer = dw_i3c_master_alloc_xfer(master, i2c_nxfers);
 	if (!xfer)
 		return -ENOMEM;
+
+	hw_dat_index = dw_i3c_master_alloc_and_get_hw_dat_index(master, data->index);
+	if (hw_dat_index < 0) {
+		ret = hw_dat_index;
+		goto out;
+	}
 
 	for (i = 0; i < i2c_nxfers; i++) {
 		struct dw_i3c_cmd *cmd = &xfer->cmds[i];
@@ -2331,6 +2342,8 @@ static int dw_i3c_master_i2c_xfers(struct i2c_dev_desc *dev,
 		dw_i3c_master_dequeue_xfer(master, xfer);
 
 	ret = xfer->ret;
+
+out:
 	dw_i3c_master_free_xfer(xfer);
 
 	return ret;

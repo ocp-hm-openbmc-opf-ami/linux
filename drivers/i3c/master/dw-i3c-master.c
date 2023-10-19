@@ -1870,9 +1870,6 @@ static int dw_i3c_master_daa_single(struct i3c_master_controller *m)
 	for (index = 0; index < newdevs; index++)
 		i3c_master_add_i3c_dev_locked(m, addrs[index]);
 
-	if (master->sw_dat_enabled)
-		dw_i3c_master_unlink_hw_dat(master, DEVICE_ADDR_TABLE_COMMON_SLOT);
-
 	return newdevs;
 }
 

@@ -1526,7 +1526,7 @@ static int read_backend_from_i3c_hub_dts(struct device_node *i3c_node_target,
 		if (strcmp(i3c_node_tp->full_name, "backend@0,0"))
 			continue;
 
-		ret = of_property_read_u32(i3c_node_tp, "target_reg", &addr_dts);
+		ret = of_property_read_u32(i3c_node_tp, "target-reg", &addr_dts);
 		if (ret)
 			return ret;
 

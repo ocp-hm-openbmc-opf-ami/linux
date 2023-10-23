@@ -295,11 +295,8 @@ static void mctp_peci_cpu_discovery(struct peci_adapter *adapter)
 		if (node_id < PECI_OFFSET_MAX) {
 			for (domain_id = 0; domain_id < DOMAIN_OFFSET_MAX; domain_id++) {
 
-				if (priv->cpus[node_id][domain_id].eid)
-					continue;
-
 				ret = aspeed_mctp_get_eid(priv->peci_client,
-							  cpu.bdf, domain_id,
+							  cpu.bdf, domain_id, node_id,
 							  &cpu.eid);
 
 				/* No entries for specific BDF/domain_Id. */
@@ -379,12 +376,21 @@ mctp_peci_xfer(struct peci_adapter *adapter, struct peci_xfer_msg *msg)
 	return 0;
 }
 
+static void mctp_peci_on_segment_change(void *user_data)
+{
+	struct mctp_peci *priv = (struct mctp_peci *)(user_data);
+
+	dev_dbg(priv->dev, "Segmentation changed");
+	priv->is_discovery_done = false;
+}
+
 static int mctp_peci_init_peci_client(struct mctp_peci *priv)
 {
 	struct device *parent = priv->dev->parent;
 	int ret;
 
-	priv->peci_client = aspeed_mctp_create_client(dev_get_drvdata(parent));
+	priv->peci_client = aspeed_mctp_create_client
+		(dev_get_drvdata(parent), priv, mctp_peci_on_segment_change);
 	if (IS_ERR(priv->peci_client))
 		return -ENOMEM;
 

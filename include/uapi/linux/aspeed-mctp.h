@@ -89,6 +89,7 @@ struct aspeed_mctp_eid_ext_info {
 	__u8 eid;
 	__u16 bdf;
 	__u8 domain_id;
+	__u8 socket_id;
 };
 
 struct aspeed_mctp_get_eid_info {

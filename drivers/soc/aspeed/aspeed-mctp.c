@@ -211,6 +211,8 @@ struct mctp_client {
 	struct ptr_ring tx_queue;
 	struct ptr_ring rx_queue;
 	struct list_head link;
+	void *user_data;
+	void (*on_segment_change)(void *usr_buf);
 	wait_queue_head_t wait_queue;
 };
 
@@ -621,13 +623,17 @@ static void aspeed_mctp_tx_chan_init(struct mctp_channel *tx)
 	regmap_write(priv->map, ASPEED_MCTP_TX_BUF_ADDR, tx->cmd.dma_handle);
 }
 
-struct mctp_client *aspeed_mctp_create_client(struct aspeed_mctp *priv)
+struct mctp_client *aspeed_mctp_create_client(struct aspeed_mctp *priv,
+					      void *user_data,
+					      void (*on_segment_change)(void *))
 {
 	struct mctp_client *client;
 
 	client = aspeed_mctp_client_alloc(priv);
 	if (!client)
 		return NULL;
+	client->user_data = user_data;
+	client->on_segment_change = on_segment_change;
 
 	init_waitqueue_head(&client->wait_queue);
 
@@ -646,7 +652,7 @@ static int aspeed_mctp_open(struct inode *inode, struct file *file)
 	struct aspeed_mctp *priv = platform_get_drvdata(pdev);
 	struct mctp_client *client;
 
-	client = aspeed_mctp_create_client(priv);
+	client = aspeed_mctp_create_client(priv, NULL, NULL);
 	if (!client)
 		return -ENOMEM;
 
@@ -1084,7 +1090,7 @@ int aspeed_mctp_get_eid_bdf(struct mctp_client *client, u8 eid, u16 *bdf)
 EXPORT_SYMBOL_GPL(aspeed_mctp_get_eid_bdf);
 
 int aspeed_mctp_get_eid(struct mctp_client *client, u16 bdf,
-			u8 domain_id, u8 *eid)
+			u8 domain_id, u8 socket_id, u8 *eid)
 {
 	struct aspeed_mctp_endpoint *endpoint;
 	int ret = -ENOENT;
@@ -1093,7 +1099,8 @@ int aspeed_mctp_get_eid(struct mctp_client *client, u16 bdf,
 
 	list_for_each_entry(endpoint, &client->priv->endpoints, link) {
 		if (endpoint->data.eid_ext_info.domain_id == domain_id &&
-		    endpoint->data.eid_ext_info.bdf == bdf) {
+		    endpoint->data.eid_ext_info.bdf == bdf &&
+			endpoint->data.eid_ext_info.socket_id == socket_id) {
 			*eid = endpoint->data.eid_ext_info.eid;
 			ret = 0;
 			break;
@@ -1225,6 +1232,7 @@ aspeed_mctp_set_eid_info(struct aspeed_mctp *priv, void __user *userbuf,
 	struct aspeed_mctp_set_eid_info set_eid;
 	void *user_ptr;
 	struct aspeed_mctp_endpoint *endpoint;
+	struct mctp_client *client;
 	int ret = 0;
 	u8 eid = 0;
 	size_t i;
@@ -1292,6 +1300,12 @@ aspeed_mctp_set_eid_info(struct aspeed_mctp *priv, void __user *userbuf,
 	priv->endpoints_count = set_eid.count;
 	priv->eid = eid;
 	mutex_unlock(&priv->endpoints_lock);
+
+	list_for_each_entry(client, &priv->clients, link) {
+		if (client->on_segment_change && client->user_data)
+			client->on_segment_change(client->user_data);
+	}
+
 out:
 	aspeed_mctp_eid_info_list_remove(&list);
 	return ret;

@@ -336,6 +336,12 @@
 #define XFER_TIMEOUT (msecs_to_jiffies(1000))
 #define TARGET_MASTER_READ_TIMEOUT	(msecs_to_jiffies(300))
 
+/*
+ * Maximum number of bytes in IBI payload which shall not be considered as an issue
+ * TODO: add DT property for this
+ */
+#define I3C_IBI_PAYLOAD_MAX_LENGTH_IN_BYTES	6
+
 /* AST2600-specific global register set */
 #define AST2600_I3CG_REG0(idx)	(((idx) * 4 * 4) + 0x10)
 #define AST2600_I3CG_REG1(idx)	(((idx) * 4 * 4) + 0x14)
@@ -1711,7 +1717,7 @@ static int dw_i3c_master_bus_init(struct i3c_master_controller *m)
 	if (master->ver_type >= I3C_LC_RELEASE) {
 		thld_ctrl = readl(master->regs + QUEUE_THLD_CTRL);
 		thld_ctrl &= ~(QUEUE_THLD_CTRL_IBI_STA_MASK | QUEUE_THLD_CTRL_IBI_DAT_MASK);
-		thld_ctrl |= QUEUE_THLD_CTRL_IBI_STA(1) | QUEUE_THLD_CTRL_IBI_DAT(1);
+		thld_ctrl |= QUEUE_THLD_CTRL_IBI_STA(1) | QUEUE_THLD_CTRL_IBI_DAT(2);
 		writel(thld_ctrl, master->regs + QUEUE_THLD_CTRL);
 	}
 
@@ -2653,6 +2659,17 @@ static void dw_i3c_master_sir_handler(struct dw_i3c_master *master,
 	dev = dw_get_i3c_dev_by_addr(master, addr);
 	if (!dev) {
 		dev_warn_ratelimited(master->dev, "no matching dev for addr = 0x%02x\n", addr);
+		if (length > I3C_IBI_PAYLOAD_MAX_LENGTH_IN_BYTES)
+			goto err;
+		else
+			goto out;
+	}
+
+	if ((master->ibi.master.received_ibi_len[addr] + length) > dev->ibi->max_payload_len) {
+		dev_dbg(master->dev, "received ibi payload %d > device requested buffer %d",
+			master->ibi.master.received_ibi_len[addr] + length,
+			dev->ibi->max_payload_len);
+		master->ibi.master.received_ibi_len[addr] = 0;
 		goto err;
 	}
 
@@ -2660,19 +2677,14 @@ static void dw_i3c_master_sir_handler(struct dw_i3c_master *master,
 	slot = i3c_generic_ibi_get_free_slot(data->ibi_pool);
 	if (!slot) {
 		dev_warn_ratelimited(master->dev, "no free ibi slot for addr = %x\n", addr);
-		goto err;
+		goto out;
 	}
 
-	master->ibi.master.received_ibi_len[addr] += length;
-	if (master->ibi.master.received_ibi_len[addr] >
-	    slot->dev->ibi->max_payload_len) {
-		dev_dbg(master->dev, "received ibi payload %d > device requested buffer %d",
-			master->ibi.master.received_ibi_len[addr],
-			slot->dev->ibi->max_payload_len);
-		goto err;
-	}
 	if (ibi_status & IBI_QUEUE_STATUS_LAST_FRAG)
 		master->ibi.master.received_ibi_len[addr] = 0;
+	else
+		master->ibi.master.received_ibi_len[addr] += length;
+
 	buf = slot->data;
 	/* prepend ibi status */
 	memcpy(buf, &ibi_status, sizeof(ibi_status));
@@ -2692,15 +2704,13 @@ static void dw_i3c_master_sir_handler(struct dw_i3c_master *master,
 	return;
 
 err:
-	dw_i3c_master_flush_ibi_fifo(master, length);
 	if ((PRESENT_STATE_CM_TFR_STS(readl(master->regs + PRESENT_STATE)) ==
 	     CM_TFR_STS_MASTER_SERV_IBI) && master->platform_ops &&
 	    master->platform_ops->gen_tbits_in)
 		master->platform_ops->gen_tbits_in(master);
-	if (slot && master->ibi.master.received_ibi_len[addr] > slot->dev->ibi->max_payload_len)
-		i3c_generic_ibi_recycle_slot(data->ibi_pool, slot);
 
-	master->ibi.master.received_ibi_len[addr] = 0;
+out:
+	dw_i3c_master_flush_ibi_fifo(master, length);
 }
 
 static void dw_i3c_master_demux_ibis(struct dw_i3c_master *master)

@@ -43,22 +43,12 @@ partitions {
 	};
 
 	image-staging@5400000 {
-		reg = <0x5400000 0x2a00000>;
+		reg = <0x5400000 0x2a80000>;
 		label = "image-stg";
 	};
 
-	afm-active@7e00000 {
-		reg = <0x7e00000 0x20000>;
-		label = "afm-active";
-	};
-
-	afm-recovery@7e20000 {
-		reg = <0x7e20000 0x20000>;
-		label = "afm-rcvr";
-	};
-
-	reserved@7e40000 {
-		reg = <0x7e40000 0xc0000>;
+	reserved@7e80000 {
+		reg = <0x7e80000 0x80000>;
 		label = "rsvrd";
 	};
 

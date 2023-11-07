@@ -407,7 +407,7 @@ static int i3c_bus_get_free_addr(struct i3c_bus *bus, u8 start_addr)
 	enum i3c_addr_slot_status status;
 	u8 addr;
 
-	for (addr = start_addr; addr < I3C_MAX_ADDR; addr++) {
+	for (addr = start_addr; addr > 0; addr--) {
 		status = i3c_bus_get_addr_slot_status(bus, addr);
 		if (status == I3C_ADDR_SLOT_FREE)
 			return addr;

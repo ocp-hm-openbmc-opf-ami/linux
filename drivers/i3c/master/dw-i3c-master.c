@@ -1662,8 +1662,7 @@ static int dw_i3c_master_bus_init(struct i3c_master_controller *m)
 	writel(INTR_MASTER_MASK, master->regs + INTR_STATUS_EN);
 	writel(INTR_MASTER_MASK, master->regs + INTR_SIGNAL_EN);
 
-
-	ret = i3c_master_get_free_addr(m, 0);
+	ret = i3c_master_get_free_addr(m, I3C_ADDR_START);
 	if (ret < 0)
 		return ret;
 
@@ -1831,13 +1830,13 @@ static int dw_i3c_master_daa_single(struct i3c_master_controller *m)
 	struct dw_i3c_xfer *xfer;
 	struct dw_i3c_cmd *cmd;
 	u8 addrs[MAX_DEVS];
-	int last_addr = 0;
+	int last_addr = I3C_ADDR_START;
 	int newdevs;
 	int index;
 
 	/* Prepare DAT before launching DAA. */
 	for (index = 0; index < master->dat_depth; index++) {
-		last_addr = i3c_master_get_free_addr(m, last_addr + 1);
+		last_addr = i3c_master_get_free_addr(m, last_addr - 1);
 		if (last_addr < 0)
 			return -ENOSPC;
 

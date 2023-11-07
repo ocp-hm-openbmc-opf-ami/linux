@@ -21,6 +21,7 @@
 #define I3C_HOT_JOIN_ADDR		0x2
 #define I3C_BROADCAST_ADDR		0x7e
 #define I3C_MAX_ADDR			GENMASK(6, 0)
+#define I3C_ADDR_START			0x1F
 
 struct i3c_target_ops;
 struct i3c_master_controller;

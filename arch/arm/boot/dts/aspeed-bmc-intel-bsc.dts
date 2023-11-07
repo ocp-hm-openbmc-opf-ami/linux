@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0+
+/dts-v1/;
+
+#include "aspeed-bmc-intel-oks.dtsi"
+
+/ {
+	model = "Intel Basin City BMC";
+	compatible = "intel,bcs-bmc", "aspeed,ast2600";
+};

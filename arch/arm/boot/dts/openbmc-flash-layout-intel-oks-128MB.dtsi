@@ -1,0 +1,69 @@
+// SPDX-License-Identifier: GPL-2.0+
+// 128MB flash layout: PFR (active + tmp1/tmp2 + extra)
+//                     image with common RW partition
+
+partitions {
+	compatible = "fixed-partitions";
+	#address-cells = <1>;
+	#size-cells = <1>;
+
+	u-boot@0 {
+		reg = <0x0 0x100000>;
+		label = "u-boot";
+	};
+
+	pfm@100000 {
+		reg = <0x100000 0x20000>;
+		label = "pfm";
+	};
+
+	u-boot-env@120000 {
+		reg = <0x120000 0x20000>;
+		label = "u-boot-env";
+	};
+
+	sofs@140000 {
+		reg = <0x140000 0x200000>;
+		label = "sofs";
+	};
+
+	rwfs@340000 {
+		reg = <0x340000 0x840000>;
+		label = "rwfs";
+	};
+
+	fit-image-a@b80000 {
+		reg = <0xb80000 0x2380000>;
+		label = "image-a";
+	};
+
+	rc-image@2f00000 {
+		reg = <0x2f00000 0x2500000>;
+		label = "rc-image";
+	};
+
+	image-staging@5400000 {
+		reg = <0x5400000 0x2a00000>;
+		label = "image-stg";
+	};
+
+	afm-active@7e00000 {
+		reg = <0x7e00000 0x20000>;
+		label = "afm-active";
+	};
+
+	afm-recovery@7e20000 {
+		reg = <0x7e20000 0x20000>;
+		label = "afm-rcvr";
+	};
+
+	reserved@7e40000 {
+		reg = <0x7e40000 0xc0000>;
+		label = "rsvrd";
+	};
+
+	cpld-gold@7f00000 {
+		reg = <0x7f00000 0x100000>;
+		label = "cpld-gold";
+	};
+};

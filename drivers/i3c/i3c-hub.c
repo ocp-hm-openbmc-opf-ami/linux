@@ -171,7 +171,10 @@
 
 #define I3C_HUB_BUS_RESET_SCL_TIMEOUT			0x7A
 #define I3C_HUB_ONCHIP_TD_PROTO_ERR_FLG			0x7B
+
 #define I3C_HUB_DEV_CMD					0x7C
+#define I3C_HUB_DEV_CMD_LOCK_ALL_PROT_REGS		0x53
+
 #define I3C_HUB_ONCHIP_TD_STS				0x7D
 #define I3C_HUB_ONCHIP_TD_ADDR_CONF			0x7E
 #define I3C_HUB_PAGE_PTR				0x7F
@@ -1653,14 +1656,19 @@ static int i3c_hub_probe(struct i3c_device *i3cdev)
 		goto error;
 	}
 
+	/* Apply security lock for all protected registers */
+	ret = regmap_write(priv->regmap, I3C_HUB_DEV_CMD, I3C_HUB_DEV_CMD_LOCK_ALL_PROT_REGS);
+	if (ret) {
+		dev_err(dev, "Failed to apply security lock for all HUB's protected registers\n");
+		goto error;
+	}
+
 	/* Lock access to protected registers */
 	ret = regmap_write(priv->regmap, I3C_HUB_PROTECTION_CODE, REGISTERS_LOCK_CODE);
 	if (ret) {
 		dev_err(dev, "Failed to lock HUB's protected registers\n");
 		goto error;
 	}
-
-	/* TBD: Apply special/security lock here using DEV_CMD register */
 
 	schedule_delayed_work(&priv->delayed_work, msecs_to_jiffies(100));
 

@@ -286,7 +286,6 @@ static int __peci_xfer(struct peci_adapter *adapter, struct peci_xfer_msg *msg,
 			break;
 
 		case PECI_DEV_CC_OUT_OF_RESOURCE:
-		case PECI_DEV_CC_UNAVAIL_RESOURCE:
 			/* usleep_range() adds a delay and retries the command */
 			break;
 

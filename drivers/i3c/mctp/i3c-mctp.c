@@ -961,7 +961,6 @@ static void i3c_mctp_remove(struct i3c_device *i3cdev)
 	}
 	spin_unlock(&priv->file_lock);
 
-	i3c_mctp_disable_ibi(i3cdev);
 	cancel_delayed_work(&priv->polling_work);
 	platform_device_unregister(priv->i3c_peci);
 

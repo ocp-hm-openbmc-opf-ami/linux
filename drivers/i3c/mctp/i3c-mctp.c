@@ -727,8 +727,16 @@ static int i3c_mctp_enable_ibi(struct i3c_device *i3cdev)
 static void i3c_mctp_disable_ibi(struct i3c_device *i3cdev)
 {
 	struct i3c_mctp *priv = i3cdev_get_drvdata(i3cdev);
-	i3c_device_disable_ibi(i3cdev);
-	i3c_device_free_ibi(i3cdev);
+	int ret;
+
+	ret = i3c_device_disable_ibi(i3cdev);
+	if (!ret) {
+		i3c_device_free_ibi(i3cdev);
+	} else {
+		dev_warn(i3cdev_to_dev(i3cdev), "Failed to disable IBI, ret = %d", ret);
+		return;
+	}
+
 	priv->ibi_enabled = false;
 }
 

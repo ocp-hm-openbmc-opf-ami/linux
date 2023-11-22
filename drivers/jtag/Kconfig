@@ -21,11 +21,26 @@ menuconfig JTAG_ASPEED
 	depends on JTAG && HAS_IOMEM
 	depends on ARCH_ASPEED || COMPILE_TEST
 	help
-	  This provides a support for Aspeed JTAG device, equipped on
-	  Aspeed SoC 24xx and 25xx families. Drivers allows programming
-	  of hardware devices, connected to SoC through the JTAG interface.
+	  This provides support for Aspeed JTAG devices equipped on Aspeed
+	  SoC 24xx, 25xx and 26xx families. Driver allows programming of
+	  hardware devices, connected to SoC through the JTAG interface.
 
 	  If you want this support, you should say Y here.
 
 	  To compile this driver as a module, choose M here: the module will
 	  be called jtag-aspeed.
+
+config USE_INTERRUPTS
+	bool "Use interrupts as event wait mechanism"
+	depends on JTAG_ASPEED
+	default n
+	help
+	  Aspeed SoC 24xx, 25xx and 26xx driver monitors the JTAG shift
+	  operation completion by either polling or waiting for an interrupt.
+
+	  This flag is used by Aspeed driver to select from either interrupt or
+	  polling as wait mechanism for JTAG controller completion events.
+
+	  If you want interrupt support, you should say Y here.
+
+	  If you want polling support, you should say N here.

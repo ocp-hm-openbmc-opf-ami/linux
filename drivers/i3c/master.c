@@ -2647,8 +2647,8 @@ static void i3c_master_unregister_i3c_devs(struct i3c_master_controller *master)
 		if (!ret)
 			i3c_device_free_ibi(i3cdev->dev);
 		else
-			dev_warn(i3cdev_to_dev(i3cdev->dev), "Failed to disable IBI, ret = %d",
-				 ret);
+			dev_dbg(i3cdev_to_dev(i3cdev->dev), "Failed to disable IBI, ret = %d",
+				ret);
 
 		i3cdev->dev->desc = NULL;
 		if (device_is_registered(&i3cdev->dev->dev))

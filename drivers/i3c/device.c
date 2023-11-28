@@ -384,6 +384,19 @@ int i3c_device_control_pec(struct i3c_device *dev, bool pec)
 EXPORT_SYMBOL_GPL(i3c_device_control_pec);
 
 /**
+ * i3c_device_is_mng() - check if device is on manageability bus
+ *
+ * @dev: I3C device to get the status for
+ *
+ * Return: true in case of device supports manageability, false otherwise.
+ */
+bool i3c_device_is_mng(struct i3c_device *dev)
+{
+	return i3c_dev_is_mng(dev->desc);
+}
+EXPORT_SYMBOL_GPL(i3c_device_is_mng);
+
+/**
  * i3c_device_register_event_cb() - register callback for I3C framework event.
  * @dev: the I3C device driver handle.
  * @ev: I3C framework event callback

@@ -365,6 +365,8 @@ int i3c_target_read_register(struct i3c_device *dev, const struct i3c_target_rea
 
 int i3c_device_control_pec(struct i3c_device *dev, bool pec);
 
+bool i3c_device_is_mng(struct i3c_device *dev);
+
 /**
  * enum i3c_event - List of possible events could be send/published to
  *		    registered devices.

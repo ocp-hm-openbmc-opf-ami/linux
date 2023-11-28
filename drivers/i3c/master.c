@@ -3450,6 +3450,13 @@ int i3c_dev_control_pec(struct i3c_dev_desc *dev, bool pec)
 	return 0;
 }
 
+bool i3c_dev_is_mng(struct i3c_dev_desc *dev)
+{
+	struct i3c_master_controller *master = i3c_dev_get_master(dev);
+
+	return master->is_mng;
+}
+
 static int __init i3c_init(void)
 {
 	int res = bus_register_notifier(&i2c_bus_type, &i2cdev_notifier);

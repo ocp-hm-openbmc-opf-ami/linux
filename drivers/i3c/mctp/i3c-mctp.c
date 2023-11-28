@@ -908,7 +908,7 @@ static int i3c_mctp_probe(struct i3c_device *i3cdev)
 
 	i3c_device_get_info(i3cdev, &info);
 
-	if (!IS_BMC_NON_LEGACY(info.pid))
+	if (!IS_BMC_NON_LEGACY(info.pid) && i3c_device_is_mng(i3cdev))
 		priv->i3c_peci = platform_device_register_data(i3cdev_to_dev(i3cdev), "peci-i3c",
 							       priv->id, NULL, 0);
 	if (IS_ERR(priv->i3c_peci))

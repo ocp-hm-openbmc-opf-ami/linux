@@ -45,4 +45,5 @@ int i3c_dev_generate_ibi_locked(struct i3c_dev_desc *dev, const u8 *data, int le
 int i3c_dev_put_read_data_locked(struct i3c_dev_desc *dev, struct i3c_priv_xfer *xfers,
 				 int nxfers, const u8 *ibi_data, int ibi_len);
 int i3c_dev_control_pec(struct i3c_dev_desc *dev, bool pec);
+bool i3c_dev_is_mng(struct i3c_dev_desc *dev);
 #endif /* I3C_INTERNAL_H */

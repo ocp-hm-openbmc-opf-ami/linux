@@ -162,6 +162,7 @@ i3c_peci_xfer(struct peci_adapter *adapter, struct peci_xfer_msg *msg)
 {
 	struct i3c_peci *priv = peci_get_adapdata(adapter);
 	struct i3c_mctp_packet *rx_packet;
+	u8 actual_rx_len = 0;
 	u8 domain_id = 0;
 	u8 dest_eid;
 	int ret;
@@ -182,10 +183,10 @@ i3c_peci_xfer(struct peci_adapter *adapter, struct peci_xfer_msg *msg)
 		return PTR_ERR(rx_packet);
 
 	if (msg->rx_len > 0)
-		msg->rx_len = rx_packet->size - MCTP_PECI_VDM_HDR_SIZE - I3C_MCTP_HDR_SIZE;
+		actual_rx_len = rx_packet->size - MCTP_PECI_VDM_HDR_SIZE - I3C_MCTP_HDR_SIZE;
 
 	memcpy(msg->rx_buf, (u8 *)(rx_packet->data.payload) + sizeof(struct mctp_peci_vdm_hdr),
-	       msg->rx_len);
+	       actual_rx_len);
 
 	i3c_mctp_packet_free(rx_packet);
 

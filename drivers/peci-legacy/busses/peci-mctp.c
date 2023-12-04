@@ -305,7 +305,7 @@ static void mctp_peci_cpu_discovery(struct peci_adapter *adapter)
 
 				is_discovery_done = true;
 				priv->cpus[node_id][domain_id] = cpu;
-				dev_info(priv->dev, "Found EID for node_id=%d (EID=%d), domain=%d\n",
+				dev_dbg(priv->dev, "Found EID for node_id=%d (EID=%d), domain=%d\n",
 					node_id, cpu.eid, domain_id);
 			}
 		} else {

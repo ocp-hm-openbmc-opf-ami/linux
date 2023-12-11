@@ -249,8 +249,10 @@ static void i3c_mctp_dispatch_packet(struct i3c_mctp *priv, struct i3c_mctp_pack
 		i3c_mctp_client_get(client);
 	spin_unlock(&priv->clients_lock);
 
-	if (!client)
+	if (!client) {
+		i3c_mctp_packet_free(packet);
 		return;
+	}
 
 	ret = ptr_ring_produce(&client->rx_queue, packet);
 	if (ret)

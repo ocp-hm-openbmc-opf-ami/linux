@@ -372,7 +372,8 @@ static int peci_scan_cmd_mask(struct peci_adapter *adapter)
 		ret = -EAGAIN;
 		goto out;
 	}
-	if (msg->rx_buf[0] == PECI_DEV_CC_INVALID_REQ) {
+	if (msg->rx_buf[0] == PECI_DEV_CC_INVALID_REQ ||
+	    msg->rx_buf[0] == PECI_DEV_CC_CATASTROPHIC_MCA_ERROR) {
 		/*
 		 * if GetDIB() is not supported, use a revision property of
 		 * hardware adapter

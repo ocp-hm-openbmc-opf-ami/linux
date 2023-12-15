@@ -390,10 +390,10 @@ int ncsi_xmit_cmd(struct ncsi_cmd_arg *nca)
 
 	/* Start the timer for the request that might not have
 	 * corresponding response. Given NCSI is an internal
-	 * connection a 1 second delay should be sufficient.
+	 * connection a 2 second delay should be sufficient.
 	 */
 	nr->enabled = true;
-	mod_timer(&nr->timer, jiffies + 1 * HZ);
+	mod_timer(&nr->timer, jiffies + 2 * HZ);
 
 	/* Send NCSI packet */
 	skb_get(nr->cmd);

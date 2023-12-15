@@ -1153,6 +1153,8 @@ int ncsi_rcv_rsp(struct sk_buff *skb, struct net_device *dev,
 	nr = &ndp->requests[hdr->id];
 	if (!nr->used) {
 		spin_unlock_irqrestore(&ndp->lock, flags);
+		/*This can happen when a rsp arrives after request timeout*/
+		consume_skb(skb);
 		return -ENODEV;
 	}
 

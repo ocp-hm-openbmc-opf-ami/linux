@@ -177,11 +177,11 @@ peci_sensor_get_ctx(s32 attribute, struct peci_sensor_conf sensor_conf_list[],
 #define PECI_PCS_EXT_REGISTER_SIZE 8u /* PCS extended register size in bytes */
 
 /* PPL1 value to PPL2 value conversation macro */
-#define PECI_PCS_PPL1_TO_PPL2(ppl1_value) ((((u32)(ppl1_value)) * 12uL) / 10uL)
+#define PECI_PCS_PPL1_TO_PPL2(ppl1_value) ((((u32)(ppl1_value)) * 10uL) / 9uL)
 
-#define PECI_PCS_PPL1_TIME_WINDOW 250 /* PPL1 Time Window value in ms */
+#define PECI_PCS_PPL1_TIME_WINDOW 1000 /* PPL1 Time Window value in ms */
 
-#define PECI_PCS_PPL2_TIME_WINDOW 10 /* PPL2 Time Window value in ms */
+#define PECI_PCS_PPL2_TIME_WINDOW 12 /* PPL2 Time Window value in ms */
 
 #define PECI_PCS_PPL_MAX_VALUE 0x7FFF /* Maximum PPL1/PPL2 Limit value */
 

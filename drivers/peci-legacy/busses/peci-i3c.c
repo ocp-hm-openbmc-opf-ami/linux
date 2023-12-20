@@ -121,6 +121,7 @@ static struct i3c_mctp_packet *i3c_peci_send_receive(struct peci_adapter *adapte
 	struct i3c_peci *priv = peci_get_adapdata(adapter);
 	struct i3c_mctp_packet *tx_packet;
 	struct i3c_mctp_packet *rx_packet;
+	unsigned long end_time;
 	u8 tag = priv->tag;
 	int ret;
 
@@ -142,13 +143,25 @@ static struct i3c_mctp_packet *i3c_peci_send_receive(struct peci_adapter *adapte
 
 	i3c_mctp_packet_free(tx_packet);
 	priv->tag++;
+	end_time = jiffies + timeout;
+
+retry:
 	rx_packet = i3c_mctp_receive_packet(priv->client, timeout);
-	if (IS_ERR(rx_packet))
+	if (IS_ERR(rx_packet)) {
+		if (time_before(jiffies, end_time)) {
+			timeout = ((long)end_time - jiffies);
+			goto retry;
+		}
 		return rx_packet;
+	}
 
 	ret = verify_rx_packet(adapter, rx_packet, tag);
 	if (ret) {
 		i3c_mctp_packet_free(rx_packet);
+		if (time_before(jiffies, end_time)) {
+			timeout = ((long)end_time - jiffies);
+			goto retry;
+		}
 		return ERR_PTR(ret);
 	}
 

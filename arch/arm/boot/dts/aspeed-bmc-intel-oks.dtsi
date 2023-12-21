@@ -540,10 +540,11 @@
 &i3c1 {
 	/* I3C_PFR_BMC */
 	status = "okay";
-	initial-role = "target";
-	target-read-timeout = <100>;
-	dcr = <0xCC>;
-	pid = <0x020a 0x0000000b>;
+	i3c-scl-hz = <1000000>;
+	i3c-pp-scl-high-ns = <60>;
+	i2c-scl-hz = <400000>;
+	i3c-od-scl-high-ns = <1000>;
+	sda-tx-hold-ns = <40>;
 };
 
 &i3c2 {

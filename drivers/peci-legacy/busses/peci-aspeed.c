@@ -239,8 +239,8 @@ static int aspeed_peci_xfer(struct peci_adapter *adapter,
 	writel(ASPEED_PECI_CMD_FIRE, priv->base + ASPEED_PECI_CMD);
 	spin_unlock_irqrestore(&priv->lock, flags);
 
-	err = wait_for_completion_interruptible_timeout(&priv->xfer_complete,
-							timeout);
+	err = wait_for_completion_killable_timeout(&priv->xfer_complete,
+						   timeout);
 
 	spin_lock_irqsave(&priv->lock, flags);
 	dev_dbg(priv->dev, "INT_STS : 0x%08x\n", priv->status);

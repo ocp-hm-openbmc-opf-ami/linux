@@ -429,8 +429,7 @@ peci_platformpower_set_power_limit(void *ctx,
 
 		/* Calculate and enable PPL2 */
 		power_limit_high.bits.pwr_lim_2 =
-			min(peci_pcs_munits_to_xn
-			    (PECI_PCS_PPL1_TO_PPL2(val), priv->units.bits.pwr_unit),
+			min(peci_pcs_munits_to_xn(val, priv->units.bits.pwr_unit),
 			    (u32)PECI_PLATFORMPOWER_PCS_PPL_MAX_VALUE);
 		power_limit_high.bits.pwr_lim_2_en = 1u;
 		power_limit_high.bits.pwr_clmp_lim_2 = 1u;

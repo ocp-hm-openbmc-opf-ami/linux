@@ -973,7 +973,9 @@ static void dw_i3c_master_disable_ibi_in_dat(struct dw_i3c_master *master, u8 in
 	dat_reg &= ~DEV_ADDR_TABLE_IBI_PEC_EN;
 
 	if (master->sw_dat_enabled) {
+		spin_lock(&master->hw_dat_lock);
 		dw_i3c_master_unlink_index(master, index);
+		spin_unlock(&master->hw_dat_lock);
 		master->sw_dat[index].dat = dat_reg;
 	} else {
 		writel(dat_reg, master->regs + dat_loc);

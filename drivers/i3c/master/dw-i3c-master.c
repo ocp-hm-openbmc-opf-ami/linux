@@ -859,17 +859,18 @@ static void dw_i3c_master_unlink_index(struct dw_i3c_master *master, int index)
 	}
 }
 
-static bool dw_i3c_master_is_ibi_mask_found(struct dw_i3c_master *master, u32 first_4bits)
+static u32 dw_i3c_master_get_ibi_mask_reg(struct dw_i3c_master *master, u32 first_4bits)
 {
+	u32 reg;
+
 	for (int hw_dat_index = 0; hw_dat_index < master->dat_depth;
 	     ++hw_dat_index) {
-		if (first_4bits == DAT_DA_FIRST_4BITS_GET(readl(master->regs +
-							  DEV_ADDR_TABLE_LOC(master->datstartaddr,
-									     hw_dat_index))))
-			return true;
+		reg = readl(master->regs + DEV_ADDR_TABLE_LOC(master->datstartaddr, hw_dat_index));
+		if (first_4bits == DAT_DA_FIRST_4BITS_GET(reg))
+			return reg;
 	}
 
-	return false;
+	return 0;
 }
 
 static int dw_i3c_master_find_empty_hw_dat(struct dw_i3c_master *master, bool is_ibi)
@@ -922,19 +923,8 @@ static int dw_i3c_master_enable_ibi_in_dat(struct dw_i3c_master *master, u8 inde
 
 	if (master->sw_dat_enabled) {
 		int hw_dat_index;
+		u32 mask_reg;
 
-		spin_lock(&master->hw_dat_lock);
-		/* If index already linked - unlink it */
-		dw_i3c_master_unlink_index(master, index);
-
-		/* Find HW DAT slot for IBI index */
-		hw_dat_index = dw_i3c_master_find_empty_hw_dat(master, true);
-		if (hw_dat_index < 0) {
-			spin_unlock(&master->hw_dat_lock);
-			return hw_dat_index;
-		}
-
-		/* Update DAT and link index to HW DAT */
 		master->sw_dat[index].dat = dat_reg;
 
 		/*
@@ -944,11 +934,30 @@ static int dw_i3c_master_enable_ibi_in_dat(struct dw_i3c_master *master, u8 inde
 		 * Thus we add to HW DAT only the first device for which first 4 bits there is
 		 * no match in HW DAT.
 		 */
-		if (!dw_i3c_master_is_ibi_mask_found(master, DAT_DA_FIRST_4BITS_GET(dat_reg))) {
+		spin_lock(&master->hw_dat_lock);
+		mask_reg = dw_i3c_master_get_ibi_mask_reg(master, DAT_DA_FIRST_4BITS_GET(dat_reg));
+		if (!mask_reg) {
 			dev_dbg(master->dev, "adding device to hw dat with addr = %02lx, 4bits = %02lx",
 				DEV_ADDR_TABLE_DYNAMIC_ADDR_GET(dat_reg),
 				DAT_DA_FIRST_4BITS_GET(dat_reg));
+
+			/* Find HW DAT slot for IBI index */
+			hw_dat_index = dw_i3c_master_find_empty_hw_dat(master, true);
+			if (hw_dat_index < 0) {
+				spin_unlock(&master->hw_dat_lock);
+				return hw_dat_index;
+			}
+
 			dw_i3c_master_link_hw_dat(master, index, hw_dat_index);
+		} else if (master->sw_dat[index].hw_dat_linked != 0 &&
+			   DEV_ADDR_TABLE_DYNAMIC_ADDR_GET(dat_reg) ==
+			   DEV_ADDR_TABLE_DYNAMIC_ADDR_GET(mask_reg)) {
+			/*
+			 * The device is already in the HW DAT - update HW DAT record just
+			 * in case and increment index to make sure the device is never removed
+			 */
+			dw_i3c_master_link_hw_dat(master, index,
+						  master->sw_dat[index].hw_dat_index);
 		}
 		spin_unlock(&master->hw_dat_lock);
 	} else {

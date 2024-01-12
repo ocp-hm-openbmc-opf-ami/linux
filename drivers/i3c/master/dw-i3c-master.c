@@ -1029,7 +1029,7 @@ static int dw_i3c_master_alloc_and_get_hw_dat_index(struct dw_i3c_master *master
 static void dw_i3c_master_decrement_hw_dat_index(struct dw_i3c_master *master, int index,
 						 int hw_dat_index)
 {
-	if (!master->sw_dat_enabled)
+	if (!master->sw_dat_enabled || master->sw_dat[index].hw_dat_linked == 0)
 		return;
 
 	spin_lock(&master->hw_dat_lock);

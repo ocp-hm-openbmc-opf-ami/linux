@@ -849,16 +849,6 @@ static void dw_i3c_master_unlink_hw_dat(struct dw_i3c_master *master, int hw_dat
 	}
 }
 
-static void dw_i3c_master_unlink_index(struct dw_i3c_master *master, int index)
-{
-	if (master->sw_dat[index].hw_dat_linked != 0) {
-		writel(0, master->regs +
-		       DEV_ADDR_TABLE_LOC(master->datstartaddr,
-					  master->sw_dat[index].hw_dat_index));
-		master->sw_dat[index].hw_dat_linked = 0;
-	}
-}
-
 static u32 dw_i3c_master_get_ibi_mask_reg(struct dw_i3c_master *master, u32 first_4bits)
 {
 	u32 reg;
@@ -904,6 +894,19 @@ static int dw_i3c_master_link_empty_hw_dat(struct dw_i3c_master *master, int ind
 out:
 	spin_unlock(&master->hw_dat_lock);
 	return hw_dat_index;
+}
+
+static void dw_i3c_master_decrement_hw_dat_index(struct dw_i3c_master *master, int index,
+						 int hw_dat_index)
+{
+	if (!master->sw_dat_enabled || master->sw_dat[index].hw_dat_linked == 0)
+		return;
+
+	spin_lock(&master->hw_dat_lock);
+	master->sw_dat[index].hw_dat_linked--;
+	if (master->sw_dat[index].hw_dat_linked == 0)
+		dw_i3c_master_unlink_hw_dat(master, hw_dat_index);
+	spin_unlock(&master->hw_dat_lock);
 }
 
 static int dw_i3c_master_enable_ibi_in_dat(struct dw_i3c_master *master, u8 index, bool ibi_payload)
@@ -982,9 +985,15 @@ static void dw_i3c_master_disable_ibi_in_dat(struct dw_i3c_master *master, u8 in
 	dat_reg &= ~DEV_ADDR_TABLE_IBI_PEC_EN;
 
 	if (master->sw_dat_enabled) {
-		spin_lock(&master->hw_dat_lock);
-		dw_i3c_master_unlink_index(master, index);
-		spin_unlock(&master->hw_dat_lock);
+		if (master->sw_dat[index].hw_dat_linked != 0) {
+			u32 first_4bits = DAT_DA_FIRST_4BITS_GET(master->sw_dat[index].dat);
+			u32 mask_reg = dw_i3c_master_get_ibi_mask_reg(master, first_4bits);
+			int hw_dat_index = master->sw_dat[index].hw_dat_index;
+
+			if (DEV_ADDR_TABLE_DYNAMIC_ADDR_GET(master->sw_dat[index].dat) ==
+			    DEV_ADDR_TABLE_DYNAMIC_ADDR_GET(mask_reg))
+				dw_i3c_master_decrement_hw_dat_index(master, index, hw_dat_index);
+		}
 		master->sw_dat[index].dat = dat_reg;
 	} else {
 		writel(dat_reg, master->regs + dat_loc);
@@ -1033,19 +1042,6 @@ static int dw_i3c_master_alloc_and_get_hw_dat_index(struct dw_i3c_master *master
 	}
 
 	return hw_dat_index;
-}
-
-static void dw_i3c_master_decrement_hw_dat_index(struct dw_i3c_master *master, int index,
-						 int hw_dat_index)
-{
-	if (!master->sw_dat_enabled || master->sw_dat[index].hw_dat_linked == 0)
-		return;
-
-	spin_lock(&master->hw_dat_lock);
-	master->sw_dat[index].hw_dat_linked--;
-	if (master->sw_dat[index].hw_dat_linked == 0)
-		dw_i3c_master_unlink_hw_dat(master, hw_dat_index);
-	spin_unlock(&master->hw_dat_lock);
 }
 
 static void dw_i3c_master_wr_tx_fifo(struct dw_i3c_master *master,

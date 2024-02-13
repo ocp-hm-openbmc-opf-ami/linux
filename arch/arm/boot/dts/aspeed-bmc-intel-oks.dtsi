@@ -172,7 +172,7 @@
 &mmbi {
 	status = "okay";
 
-	host-map-addr = <0xF6810000>;
+	host-map-addr = <0xF2810000>;
 	memory-region = <&espi_mmbi_memory>;
 };
 

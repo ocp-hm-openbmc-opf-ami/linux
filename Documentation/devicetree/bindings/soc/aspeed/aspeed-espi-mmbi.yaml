@@ -50,6 +50,14 @@ properties:
     maxItems: 1
     description: contains a base address which is mapped on host side
 
+  channel:
+    maxItems: 8
+    description: contains channel supported
+
+  protocol:
+    maxItems: 5
+    description: contains protocol supported
+
 required:
   - compatible
   - reg
@@ -59,6 +67,8 @@ required:
   - aspeed,lpc
   - memory-region
   - host-map-addr
+  - channel
+  - protocol
 
 additionalProperties: false
 
@@ -89,4 +99,6 @@ examples:
         status = "disabled";
         host-map-addr = <0xFE0B0000>;
         memory-region = <&espi_mmbi_memory>;
+        channel = <0>;
+        protocol = <MMBI_PROTOCOL_SEAMLESS MMBI_PROTOCOL_RAS_OFFLOAD MMBI_PROTOCOL_IPMI>;
     };

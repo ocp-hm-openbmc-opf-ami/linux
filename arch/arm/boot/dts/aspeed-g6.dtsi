@@ -957,7 +957,8 @@
 				instance@0 {
 					channel = <0>;
 					protocols = /bits/ 8 <MMBI_PROTOCOL_SEAMLESS
-						MMBI_PROTOCOL_RAS_OFFLOAD>;
+						MMBI_PROTOCOL_RAS_OFFLOAD
+						MMBI_PROTOCOL_IPMI>;
 				};
 			};
 

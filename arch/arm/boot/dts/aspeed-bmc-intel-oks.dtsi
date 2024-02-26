@@ -305,11 +305,11 @@
 &gpio1 {
 	status = "okay";
 	gpio-line-names = /* GPIO18 A-E */
-	/*A0-A7*/	"","","RST_EMMC_BMC_R_N","","","","","",
+	/*A0-A7*/	"","","","","","","","",
 	/*B0-B7*/	"","","","","RGMII_BMC_RMM4_TX_R_CLK","RGMII_BMC_RMM4_TX_R_CTRL","RGMII_BMC_RMM4_R_TXD0","RGMII_BMC_RMM4_R_TXD1",
 	/*C0-C7*/	"RGMII_BMC_RMM4_R_TXD2","RGMII_BMC_RMM4_R_TXD3","RGMII_BMC_RMM4_RX_CLK","RGMII_BMC_RMM4_RX_CTRL","RGMII_BMC_RMM4_RXD0","RGMII_BMC_RMM4_RXD1","RGMII_BMC_RMM4_RXD2","RGMII_BMC_RMM4_RXD3",
-	/*D0-D7*/	"EMMC_BMC_R_CLK","EMMC_BMC_R_CMD","EMMC_BMC_R_DATA0","EMMC_BMC_R_DATA1","EMMC_BMC_R_DATA2","EMMC_BMC_R_DATA3","EMMC_BMC_CD_N","EMMC_BMC_WP_N",
-	/*E0-E3*/	"EMMC_BMC_R_DATA4","EMMC_BMC_R_DATA5","EMMC_BMC_R_DATA6","EMMC_BMC_R_DATA7";
+	/*D0-D7*/	"","","","","","","","",
+	/*E0-E3*/	"","","","";
 };
 
 &sgpiom0 {
@@ -443,16 +443,6 @@
 
 &uart_routing {
 	status = "okay";
-};
-
-&emmc_controller{
-	status = "okay";
-};
-
-&emmc {
-	non-removable;
-	bus-width = <4>;
-	max-frequency = <52000000>;
 };
 
 &i2c4 {

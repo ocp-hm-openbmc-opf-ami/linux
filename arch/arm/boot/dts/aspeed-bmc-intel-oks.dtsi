@@ -37,13 +37,13 @@
 
 		espi_mmbi_memory: espi_mmbi_memory {
 			no-map;
-			reg = <0x9EFF0000 0x10000>; /* 64K */
+			reg = <0xbeff0000 0x10000>; /* 64K */
 		};
 	};
 
 	vga-shared-memory {
 		compatible = "aspeed,ast2500-vga-sharedmem";
-		reg = <0x9f700000 0x100000>;
+		reg = <0xbf700000 0x100000>;
 	};
 
 	leds {

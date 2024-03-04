@@ -255,6 +255,7 @@ static int dump_debug_bus_id __read_mostly;
 	} while (0)
 
 static int aspeed_i2c_reset(struct aspeed_i2c_bus *bus);
+static void aspeed_i2c_do_stop(struct aspeed_i2c_bus *bus);
 
 static int aspeed_i2c_recover_bus(struct aspeed_i2c_bus *bus)
 {
@@ -273,7 +274,7 @@ static int aspeed_i2c_recover_bus(struct aspeed_i2c_bus *bus)
 			command);
 
 		reinit_completion(&bus->cmd_complete);
-		writel(ASPEED_I2CD_M_STOP_CMD, bus->base + ASPEED_I2C_CMD_REG);
+		aspeed_i2c_do_stop(bus);
 		spin_unlock_irqrestore(&bus->lock, flags);
 
 		time_left = wait_for_completion_timeout(
@@ -1507,6 +1508,8 @@ static int aspeed_i2c_reset(struct aspeed_i2c_bus *bus)
 	writel(0xffffffff, bus->base + ASPEED_I2C_INTR_STS_REG);
 
 	ret = aspeed_i2c_init(bus, pdev);
+
+	bus->master_state = ASPEED_I2C_MASTER_INACTIVE;
 
 	spin_unlock_irqrestore(&bus->lock, flags);
 

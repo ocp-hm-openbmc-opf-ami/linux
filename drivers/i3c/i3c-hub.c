@@ -118,6 +118,7 @@
 
 /* Target Ports Control Registers */
 #define I3C_HUB_TP_SMBUS_AGNT_TRANS_START		0x50
+#define  I3C_HUB_TP_SMBUS_AGNTx_TRANS_START_REQ(x)	BIT(x)
 #define I3C_HUB_TP_NET_CON_CONF				0x51
 #define  TPn_NET_CON(n)					BIT(n)
 
@@ -139,23 +140,22 @@
 #define I3C_HUB_TP_SDA_IN_DETECT_FLG			0x63
 
 /* SMBus Agent Configuration and Status Registers */
-#define I3C_HUB_TP0_SMBUS_AGNT_STS			0x64
-#define I3C_HUB_TP1_SMBUS_AGNT_STS			0x65
-#define I3C_HUB_TP2_SMBUS_AGNT_STS			0x66
-#define I3C_HUB_TP3_SMBUS_AGNT_STS			0x67
-#define I3C_HUB_TP4_SMBUS_AGNT_STS			0x68
-#define I3C_HUB_TP5_SMBUS_AGNT_STS			0x69
-#define I3C_HUB_TP6_SMBUS_AGNT_STS			0x6A
-#define I3C_HUB_TP7_SMBUS_AGNT_STS			0x6B
-#define I3C_HUB_ONCHIP_TD_AND_SMBUS_AGNT_CONF		0x6C
+#define I3C_HUB_TPx_SMBUS_AGNT_STS(x)			(0x64 + (x))
+#define  I3C_HUB_TP_SMBUS_AGNT_STS_TRANS_FINISHED_MASK	BIT(0)
+#define  I3C_HUB_TP_SMBUS_AGNT_STS_BUF0_RECEIVED_MASK	BIT(1)
+#define  I3C_HUB_TP_SMBUS_AGNT_STS_BUF1_RECEIVED_MASK	BIT(2)
+#define  I3C_HUB_TP_SMBUS_AGNT_STS_BUF_OVERFLOW_MASK	BIT(3)
+#define  I3C_HUB_TP_SMBUS_AGNT_STS_ALL_MASK	\
+						(I3C_HUB_TP_SMBUS_AGNT_STS_BUF0_RECEIVED_MASK | \
+						I3C_HUB_TP_SMBUS_AGNT_STS_BUF1_RECEIVED_MASK | \
+						I3C_HUB_TP_SMBUS_AGNT_STS_BUF_OVERFLOW_MASK | \
+						I3C_HUB_TP_SMBUS_AGNT_STS_TRANS_FINISHED_MASK)
+#define  I3C_HUB_TP_SMBUS_AGNT_STS_TRANS_CODE_MASK	0xF0
+#define  I3C_HUB_TP_TRANSACTION_CODE_GET(x)		\
+		(((x) & I3C_HUB_TP_SMBUS_AGNT_STS_TRANS_CODE_MASK) >> 4)
+#define  I3C_HUB_TP_SMBUS_AGNT_STS_TRANS_CODE_SUCCESS	0x00
 
-/* Transaction status checking mask */
-#define I3C_HUB_XFER_SUCCESS				0x01
-#define I3C_HUB_TP_BUFFER_STATUS_MASK			0x0F
-#define I3C_HUB_TP_TRANSACTION_CODE_MASK		0xF0
-#define I3C_HUB_TARGET_BUF_0_RECEIVE			BIT(1)
-#define I3C_HUB_TARGET_BUF_1_RECEIVE			BIT(2)
-#define I3C_HUB_TARGET_BUF_OVRFL			BIT(3)
+#define I3C_HUB_ONCHIP_TD_AND_SMBUS_AGNT_CONF		0x6C
 
 /* Special Function Registers */
 #define I3C_HUB_LDO_AND_CPSEL_STS			0x79
@@ -231,7 +231,12 @@
 /* SMBus polling */
 #define I3C_HUB_POLLING_ROLL_PERIOD_MS			10
 
-/* SMBus transaction types fields */
+/* SMBus Transaction Descriptor definitions */
+/* Descriptor byte 0 */
+#define I3C_HUB_SMBUS_RNW_TRANSACTION			BIT(0)
+
+/* Descriptor byte 1 */
+#define I3C_HUB_SMBUS_WRITE_AND_READ_TRANSACTION	BIT(0)
 #define I3C_HUB_SMBUS_400kHz				BIT(2)
 
 /* Hub buffer size */
@@ -949,38 +954,27 @@ static struct i3c_master_controller *parent_controller_from_i2c_desc(struct i2c_
 	return bus->priv->controller;
 }
 
-static int i3c_hub_read_transaction_status(struct i3c_hub *priv,
-					   u8 target_port_status,
-					   u8 *status)
+static int i3c_hub_read_transaction_status(struct i3c_hub *priv, u8 offset)
 {
-	unsigned long time_to_timeout = 0;
-	unsigned int status_read;
+	ktime_t time_to_timeout = 0;
+	unsigned int status;
 	ktime_t start, end;
 	int ret;
 
 	start = ktime_get_real();
-
-	while (time_to_timeout < (long)I3C_HUB_SMBUS_400kHz_TIMEOUT) {
-		ret = regmap_read(priv->regmap, target_port_status, &status_read);
+	while (time_to_timeout < (ktime_t)I3C_HUB_SMBUS_400kHz_TIMEOUT) {
+		ret = regmap_read(priv->regmap, offset, &status);
 		if (ret)
 			return ret;
 
-		*status = (u8)status_read;
-
-		if ((*status & I3C_HUB_TP_BUFFER_STATUS_MASK) == I3C_HUB_XFER_SUCCESS)
-			return 0;
-
-		if (!(*status & I3C_HUB_TP_BUFFER_STATUS_MASK) &&
-			(*status & I3C_HUB_TP_TRANSACTION_CODE_MASK)) {
-			dev_err(&priv->i3cdev->dev, "Invalid transfer status returned\n");
-			return 0;
-		}
+		if (status & I3C_HUB_TP_SMBUS_AGNT_STS_TRANS_FINISHED_MASK)
+			return I3C_HUB_TP_TRANSACTION_CODE_GET(status);
 
 		end = ktime_get_real();
 		time_to_timeout = end - start;
 	}
-	dev_err(&priv->i3cdev->dev, "Status read timeout reached\n");
-	return 0;
+	dev_dbg(i3cdev_to_dev(priv->i3cdev), "SMBus transaction completion timeout reached\n");
+	return -ETIMEDOUT;
 }
 
 /*
@@ -988,45 +982,31 @@ static int i3c_hub_read_transaction_status(struct i3c_hub *priv,
  * and a message to the hub registers. Controller buffer page is determined by multiplying the
  * target port index by four and adding the base page number to it.
  * @priv: a pointer to the i3c hub main structure
- * @ssport: a number of the port where the transaction will happen
- * @xfers: i2c_msg struct received from the master_xfers callback
- * @nxfers_i: the number of the current message
- * @rw: number informing if the message is of read or write type (0 for write, 1 for read)
- * @return_status: number passed by reference where the return status code is saved
+ * @target_port: a number of the port where the transaction will happen
+ * @xfer: i2c_msg struct received from the master_xfers callback - single xfer
  *
- * Return: on success function returns zero. Otherwise the regmap read or write error code
- * is returned
+ * Return: 0 returned on success. Negative value returned when accessing HUB's registers failed.
+ * Positive value returned when SMBus transaction failed.
  */
-static int i3c_hub_smbus_msg(struct i3c_hub *priv,
-			     struct i2c_msg *xfers,
-			     u8 target_port,
-			     u8 nxfers_i,
-			     u8 rw,
-			     u8 *return_status)
+static int i3c_hub_smbus_msg(struct i3c_hub *priv, u8 target_port, struct i2c_msg *xfer)
 {
-	u8 transaction_type = I3C_HUB_SMBUS_400kHz;
 	u8 controller_buffer_page = I3C_HUB_CONTROLLER_BUFFER_PAGE + 4 * target_port;
-	int write_length = xfers[nxfers_i].len;
-	int read_length = xfers[nxfers_i].len;
-	u8 target_port_status = I3C_HUB_TP0_SMBUS_AGNT_STS + target_port;
-	u8 addr = xfers[nxfers_i].addr;
-	u8 target_port_code = BIT(target_port);
-	u8 rw_address = 2 * addr;
-	u8 desc[I3C_HUB_SMBUS_DESCRIPTOR_SIZE] = {0};
-	u8 status;
+	u8 status_offset = I3C_HUB_TPx_SMBUS_AGNT_STS(target_port);
+	u8 desc[I3C_HUB_SMBUS_DESCRIPTOR_SIZE];
 	int ret;
 
-	if (rw)
-		rw_address |= BIT(0);
-	else
-		read_length = 0;
+	desc[0] = 2 * xfer->addr; /* converting 7-bit address to 8-bit address */
+	if (xfer->flags & I2C_M_RD)
+		desc[0] |= I3C_HUB_SMBUS_RNW_TRANSACTION;
+	desc[1] = I3C_HUB_SMBUS_400kHz;
+	desc[2] = xfer->len;
+	desc[3] = (xfer->flags & I2C_M_RD) ? xfer->len : 0;
 
-	desc[0] = rw_address;
-	desc[1] = transaction_type;
-	desc[2] = write_length;
-	desc[3] = read_length;
+	ret = regmap_write(priv->regmap, I3C_HUB_PAGE_PTR, 0x00);
+	if (ret)
+		return ret;
 
-	ret = regmap_write(priv->regmap, target_port_status, I3C_HUB_TP_BUFFER_STATUS_MASK);
+	ret = regmap_write(priv->regmap, status_offset, I3C_HUB_TP_SMBUS_AGNT_STS_ALL_MASK);
 	if (ret)
 		return ret;
 
@@ -1034,46 +1014,35 @@ static int i3c_hub_smbus_msg(struct i3c_hub *priv,
 	if (ret)
 		return ret;
 
-	ret = regmap_bulk_write(priv->regmap,
-				I3C_HUB_CONTROLLER_AGENT_BUFF,
-				desc,
+	ret = regmap_bulk_write(priv->regmap, I3C_HUB_CONTROLLER_AGENT_BUFF, desc,
 				I3C_HUB_SMBUS_DESCRIPTOR_SIZE);
 	if (ret)
 		return ret;
 
-	if (!rw) {
-		ret = regmap_bulk_write(priv->regmap,
-					I3C_HUB_CONTROLLER_AGENT_BUFF_DATA,
-					xfers[nxfers_i].buf,
-					xfers[nxfers_i].len);
+	if (!(xfer->flags & I2C_M_RD)) {
+		ret = regmap_bulk_write(priv->regmap, I3C_HUB_CONTROLLER_AGENT_BUFF_DATA, xfer->buf,
+					xfer->len);
 		if (ret)
 			return ret;
 	}
 
-	ret = regmap_write(priv->regmap, I3C_HUB_TP_SMBUS_AGNT_TRANS_START, target_port_code);
+	ret = regmap_write(priv->regmap, I3C_HUB_TP_SMBUS_AGNT_TRANS_START,
+			   I3C_HUB_TP_SMBUS_AGNTx_TRANS_START_REQ(target_port));
 	if (ret)
 		return ret;
 
-	ret = i3c_hub_read_transaction_status(priv, target_port_status, &status);
+	ret = i3c_hub_read_transaction_status(priv, status_offset);
 	if (ret)
 		return ret;
 
-	*return_status = status;
-
-	if (rw) {
-		ret = regmap_bulk_read(priv->regmap,
-				       I3C_HUB_CONTROLLER_AGENT_BUFF_DATA,
-				       xfers[nxfers_i].buf,
-				       xfers[nxfers_i].len);
+	if (xfer->flags & I2C_M_RD) {
+		ret = regmap_bulk_read(priv->regmap, I3C_HUB_CONTROLLER_AGENT_BUFF_DATA, xfer->buf,
+				       xfer->len);
 		if (ret)
 			return ret;
 	}
 
-	ret = regmap_write(priv->regmap, I3C_HUB_PAGE_PTR, 0x00);
-	if (ret)
-		return ret;
-
-	return 0;
+	return regmap_write(priv->regmap, I3C_HUB_PAGE_PTR, 0x00);
 }
 
 /**
@@ -1095,32 +1064,21 @@ static int i3c_controller_smbus_port_adapter_xfer(struct i2c_adapter *adap,
 		container_of(controller, struct logical_bus, controller);
 	struct i3c_hub *priv = bus->priv;
 	int ret_sum = 0;
-	int ret;
-	u8 return_status;
 	u8 nxfers_i;
-	u8 rw;
+	int ret;
 
 	for (nxfers_i = 0 ; nxfers_i < nxfers ; nxfers_i++) {
-		if (xfers[nxfers_i].len > I3C_HUB_SMBUS_PAYLOAD_SIZE) {
-			dev_err(&adap->dev,
-				"Message nr. %d not sent - length over %d bytes.\n",
-				nxfers_i,
-				I3C_HUB_SMBUS_PAYLOAD_SIZE);
-			continue;
-		}
-
-		rw = xfers[nxfers_i].flags % 2;
-
-		ret = i3c_hub_smbus_msg(priv,
-					xfers,
-					bus->smbus_port_adapter.tp_port,
-					nxfers_i,
-					rw,
-					&return_status);
-		if (ret)
+		ret = i3c_hub_smbus_msg(priv, bus->smbus_port_adapter.tp_port, &xfers[nxfers_i]);
+		/* Negative result means error not related to SMBus transaction itself. */
+		if (ret < 0)
 			return ret;
-		if (return_status == I3C_HUB_XFER_SUCCESS)
+		/* Other results are related to SMBus transactions themself. */
+		else if (ret == I3C_HUB_TP_SMBUS_AGNT_STS_TRANS_CODE_SUCCESS)
 			ret_sum++;
+		else
+			dev_dbg(i3cdev_to_dev(priv->i3cdev),
+				"SMBus transaction ([%i/%i]) failed, status: %i\n", nxfers_i,
+				nxfers, ret);
 	}
 	return ret_sum;
 }
@@ -1448,7 +1406,7 @@ static void i3c_hub_delayed_work_polling(struct work_struct *work)
 							delayed_work_polling.work);
 	struct logical_bus *bus = container_of(g_adap, struct logical_bus, smbus_port_adapter);
 	u8 controller_buffer_page = I3C_HUB_CONTROLLER_BUFFER_PAGE + 4 * g_adap->tp_port;
-	u8 target_port_status = I3C_HUB_TP0_SMBUS_AGNT_STS + g_adap->tp_port;
+	u8 target_port_status = I3C_HUB_TPx_SMBUS_AGNT_STS(g_adap->tp_port);
 	u8 local_buffer[I3C_HUB_SMBUS_TARGET_PAYLOAD_SIZE] = {0};
 	u8 target_buffer_page, address, test, len, tmp;
 	struct i3c_hub *priv = bus->priv;
@@ -1458,15 +1416,15 @@ static void i3c_hub_delayed_work_polling(struct work_struct *work)
 	regmap_read(priv->regmap, target_port_status, &local_last_status);
 
 	tmp = local_last_status;
-	if (tmp & I3C_HUB_TARGET_BUF_OVRFL) {
+	if (tmp & I3C_HUB_TP_SMBUS_AGNT_STS_BUF_OVERFLOW_MASK) {
 		regmap_write(priv->regmap, I3C_HUB_PAGE_PTR, 0x00);
-		regmap_write(priv->regmap, target_port_status, I3C_HUB_TP_BUFFER_STATUS_MASK);
+		regmap_write(priv->regmap, target_port_status, I3C_HUB_TP_SMBUS_AGNT_STS_ALL_MASK);
 		regmap_read(priv->regmap, target_port_status, &local_last_status);
 		g_adap->polling_last_status = local_last_status;
 	} else if (local_last_status != g_adap->polling_last_status) {
-		if (tmp & I3C_HUB_TARGET_BUF_0_RECEIVE)
+		if (tmp & I3C_HUB_TP_SMBUS_AGNT_STS_BUF0_RECEIVED_MASK)
 			target_buffer_page = controller_buffer_page + 2;
-		else if (tmp & I3C_HUB_TARGET_BUF_1_RECEIVE)
+		else if (tmp & I3C_HUB_TP_SMBUS_AGNT_STS_BUF1_RECEIVED_MASK)
 			target_buffer_page = controller_buffer_page + 3;
 		else
 			goto reschedule;
@@ -1499,7 +1457,7 @@ static void i3c_hub_delayed_work_polling(struct work_struct *work)
 
 reschedule:
 		regmap_write(priv->regmap, I3C_HUB_PAGE_PTR, 0x00);
-		regmap_write(priv->regmap, target_port_status, I3C_HUB_TP_BUFFER_STATUS_MASK);
+		regmap_write(priv->regmap, target_port_status, I3C_HUB_TP_SMBUS_AGNT_STS_ALL_MASK);
 		regmap_read(priv->regmap, target_port_status, &local_last_status);
 		g_adap->polling_last_status = local_last_status;
 	}

@@ -1059,6 +1059,32 @@ static int i3c_hub_smbus_msg(struct i3c_hub *priv, u8 target_port, struct i2c_ms
 					     0);
 }
 
+/*
+ * i3c_hub_smbus_msg_wr_rd() - This starts a smbus write+read transaction by writing a descriptor
+ * and a message to the hub registers. Controller buffer page is determined by multiplying the
+ * target port index by four and adding the base page number to it.
+ * @priv: a pointer to the i3c hub main structure
+ * @target_port: a number of the port where the transaction will happen
+ * @xfer_wr: i2c_msg struct received from the master_xfers callback - single xfer for write
+ * @xfer_rd: i2c_msg struct received from the master_xfers callback - single xfer for read
+ *
+ * Return: 0 returned on success. Negative value returned when accessing HUB's registers failed.
+ * Positive value returned when SMBus transaction failed.
+ */
+static int i3c_hub_smbus_msg_wr_rd(struct i3c_hub *priv, u8 target_port, struct i2c_msg *xfer_wr,
+				   struct i2c_msg *xfer_rd)
+{
+	u8 desc[I3C_HUB_SMBUS_DESCRIPTOR_SIZE];
+
+	desc[0] = (2 * xfer_wr->addr); /* converting 7-bit address to 8-bit address */
+	desc[1] = I3C_HUB_SMBUS_400kHz | I3C_HUB_SMBUS_WRITE_AND_READ_TRANSACTION;
+	desc[2] = xfer_wr->len;
+	desc[3] = xfer_rd->len;
+
+	return i3c_hub_smbus_msg_raw(priv, target_port, desc, xfer_wr->buf, xfer_wr->len,
+				     xfer_rd->buf, xfer_rd->len);
+}
+
 /**
  * i3c_controller_smbus_port_adapter_xfer() - i3c hub smbus transfer logic
  * @adap: i2c_adapter corresponding with single port in the i3c hub
@@ -1082,17 +1108,43 @@ static int i3c_controller_smbus_port_adapter_xfer(struct i2c_adapter *adap,
 	int ret;
 
 	for (nxfers_i = 0 ; nxfers_i < nxfers ; nxfers_i++) {
-		ret = i3c_hub_smbus_msg(priv, bus->smbus_port_adapter.tp_port, &xfers[nxfers_i]);
-		/* Negative result means error not related to SMBus transaction itself. */
-		if (ret < 0)
-			return ret;
-		/* Other results are related to SMBus transactions themself. */
-		else if (ret == I3C_HUB_TP_SMBUS_AGNT_STS_TRANS_CODE_SUCCESS)
-			ret_sum++;
-		else
-			dev_dbg(i3cdev_to_dev(priv->i3cdev),
-				"SMBus transaction ([%i/%i]) failed, status: %i\n", nxfers_i,
-				nxfers, ret);
+		/*
+		 * If there is a write followed by read, send those two transactions with repeated
+		 * start instead of stop and start.
+		 */
+		if ((nxfers_i + 1) < nxfers && !(xfers[nxfers_i].flags & I2C_M_RD) &&
+		    xfers[nxfers_i + 1].flags & I2C_M_RD) {
+			ret = i3c_hub_smbus_msg_wr_rd(priv, bus->smbus_port_adapter.tp_port,
+						      &xfers[nxfers_i], &xfers[nxfers_i + 1]);
+			/* Negative result means error not related to SMBus transaction itself. */
+			if (ret < 0)
+				return ret;
+			/* Other results are related to SMBus transactions themself. */
+			else if (ret == I3C_HUB_TP_SMBUS_AGNT_STS_TRANS_CODE_SUCCESS)
+				ret_sum += 2;
+			else
+				dev_dbg(i3cdev_to_dev(priv->i3cdev),
+					"SMBus transactions ([%i,%i/%i]) failed, status: %i\n",
+					nxfers_i, nxfers_i + 1, nxfers, ret);
+			/*
+			 * Need to bump up one more time because two transactions (write + read)
+			 * were handled.
+			 */
+			nxfers_i++;
+		} else {
+			ret = i3c_hub_smbus_msg(priv, bus->smbus_port_adapter.tp_port,
+						&xfers[nxfers_i]);
+			/* Negative result means error not related to SMBus transaction itself. */
+			if (ret < 0)
+				return ret;
+			/* Other results are related to SMBus transactions themself. */
+			else if (ret == I3C_HUB_TP_SMBUS_AGNT_STS_TRANS_CODE_SUCCESS)
+				ret_sum++;
+			else
+				dev_dbg(i3cdev_to_dev(priv->i3cdev),
+					"SMBus transaction ([%i/%i]) failed, status: %i\n",
+					nxfers_i, nxfers, ret);
+		}
 	}
 	return ret_sum;
 }

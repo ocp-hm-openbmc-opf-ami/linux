@@ -17,10 +17,14 @@
 	/* I3C_MNG_LVC18 */
 
 	hub@0,0 {
-		cp0-ldo = "disabled";
-		cp1-ldo = "disabled";
-		tp0145-ldo = "disabled";
-		tp2367-ldo = "disabled";
+		cp0-ldo-en = "disabled";
+		cp1-ldo-en = "disabled";
+		cp0-ldo-volt = "1.0V";
+		cp1-ldo-volt = "1.0V";
+		tp0145-ldo-en = "disabled";
+		tp2367-ldo-en = "disabled";
+		tp0145-ldo-volt = "1.0V";
+		tp2367-ldo-volt = "1.0V";
 		tp0145-pullup = "2k";
 		tp2367-pullup = "2k";
 
@@ -70,10 +74,14 @@
 		assigned-address = <0x70>;
 		dcr = <0xC2>;
 
-		cp0-ldo = "disabled";
-		cp1-ldo = "disabled";
-		tp0145-ldo = "disabled";
-		tp2367-ldo = "disabled";
+		cp0-ldo-en = "disabled";
+		cp1-ldo-en = "disabled";
+		cp0-ldo-volt = "1.0V";
+		cp1-ldo-volt = "1.0V";
+		tp0145-ldo-en = "disabled";
+		tp2367-ldo-en = "disabled";
+		tp0145-ldo-volt = "1.0V";
+		tp2367-ldo-volt = "1.0V";
 		tp0145-pullup = "2k";
 		tp2367-pullup = "2k";
 

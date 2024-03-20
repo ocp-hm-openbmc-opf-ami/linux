@@ -6,6 +6,8 @@
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/regmap.h>
+#include <linux/workqueue.h>
+#include <linux/timer.h>
 
 #include <linux/mfd/syscon.h>
 #include <linux/soc/aspeed/aspeed-espi.h>
@@ -49,6 +51,15 @@ struct aspeed_espi_gpio {
 	spinlock_t lock;
 };
 
+struct aspeed_espi_vw_delayed_work_struct {
+	struct delayed_work delayed_work;
+	void *arg;
+};
+
+static struct workqueue_struct *aspeed_espi_gpio_workqueue;
+static void aspeed_espi_vw_gpio_workqueue(struct work_struct *work);
+static struct aspeed_espi_vw_delayed_work_struct aspeed_vw_work;
+
 static void aspeed_espi_vw_gpio_enable(struct regmap *map, u32 dir_mask)
 {
 	regmap_update_bits(map, ASPEED_ESPI_INT_EN, ASPEED_ESPI_INT_EN_VW_MASK,
@@ -73,6 +84,26 @@ static void set_nth_bit(u32 *n, uint8_t offset, u32 val)
 		*n = *n & ~(1ul << offset);
 	else
 		*n = *n | (1ul << offset);
+}
+
+void aspeed_espi_vw_gpio_workqueue(struct work_struct *work)
+{
+	struct aspeed_espi_gpio *gpio;
+	struct aspeed_espi_vw_delayed_work_struct *work_ptr;
+	unsigned long flags;
+
+	struct delayed_work *dw = container_of(work, struct delayed_work, work);
+
+	work_ptr = container_of(dw, struct aspeed_espi_vw_delayed_work_struct,
+				delayed_work);
+	gpio = work_ptr->arg;
+	aspeed_espi_vw_gpio_enable(gpio->map, gpio->dir_mask);
+	dev_dbg(gpio->dev, "Resetting VGPIO value [%08X] from workqueue\n",
+		cached_reg_val);
+	spin_lock_irqsave(&gpio->lock, flags);
+	regmap_update_bits(gpio->map, ASPEED_ESPI_VW_GPIO_VAL, gpio->dir_mask,
+			   cached_reg_val);
+	spin_unlock_irqrestore(&gpio->lock, flags);
 }
 
 static int vgpio_get_value(struct gpio_chip *gc, unsigned int offset)
@@ -213,22 +244,16 @@ static int aspeed_espi_vw_gpio_init(struct device *dev, struct aspeed_espi_gpio 
 static void aspeed_espi_vw_irq(int irq, void *arg)
 {
 	struct aspeed_espi_gpio *gpio = arg;
-	unsigned long flags;
 	u32 sts;
-
 	if (regmap_read(gpio->map, ASPEED_ESPI_INT_STS, &sts)) {
 		dev_dbg(gpio->dev, "Error reading int status\n");
 		return;
 	}
 
 	if (sts & ASPEED_ESPI_INT_STS_HW_RESET) {
-		dev_dbg(gpio->dev, "Resetting VGPIO value [%08X]\n", cached_reg_val);
-		aspeed_espi_vw_gpio_enable(gpio->map, gpio->dir_mask);
-
-		spin_lock_irqsave(&gpio->lock, flags);
-		regmap_update_bits(gpio->map, ASPEED_ESPI_VW_GPIO_VAL, gpio->dir_mask,
-				   cached_reg_val);
-		spin_unlock_irqrestore(&gpio->lock, flags);
+		dev_dbg(gpio->dev, "Scheduling workqueue for deferred processing\n");
+		queue_delayed_work(aspeed_espi_gpio_workqueue, &aspeed_vw_work.delayed_work,
+				   msecs_to_jiffies(500));
 	}
 	/* Clearing of status register will be done from parent driver*/
 }
@@ -257,6 +282,14 @@ static int aspeed_espi_gpio_probe(struct platform_device *pdev)
 
 	aspeed_espi_register_gpio(pdev->dev.parent, aspeed_espi_vw_irq, gpio);
 
+	aspeed_espi_gpio_workqueue = create_workqueue("aspeed_espi_workqueue");
+	if (!aspeed_espi_gpio_workqueue) {
+		pr_err("Failed to create workqueue");
+		return -ENOMEM;
+	}
+
+	aspeed_vw_work.arg = gpio;
+	INIT_DELAYED_WORK(&aspeed_vw_work.delayed_work, aspeed_espi_vw_gpio_workqueue);
 	return ret;
 }
 
@@ -265,6 +298,7 @@ static int aspeed_espi_gpio_remove(struct platform_device *pdev)
 	struct aspeed_espi_gpio *gpio = dev_get_drvdata(&pdev->dev);
 
 	aspeed_espi_vw_gpio_disable(gpio->map);
+	cancel_delayed_work_sync(&aspeed_vw_work.delayed_work);
 	return 0;
 }
 

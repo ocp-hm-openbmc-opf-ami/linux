@@ -131,7 +131,7 @@
 		spi-rx-bus-width = <4>;
 		spi-tx-bus-width = <4>;
 		m25p,fast-read;
-#include "openbmc-flash-layout-intel-oks-128MB.dtsi"
+#include "openbmc-flash-layout-intel-oks-256MB.dtsi"
 	};
 };
 

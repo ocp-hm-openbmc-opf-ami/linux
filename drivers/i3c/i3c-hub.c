@@ -977,30 +977,14 @@ static int i3c_hub_read_transaction_status(struct i3c_hub *priv, u8 offset)
 	return -ETIMEDOUT;
 }
 
-/*
- * i3c_hub_smbus_msg() - This starts a smbus write transaction by writing a descriptor
- * and a message to the hub registers. Controller buffer page is determined by multiplying the
- * target port index by four and adding the base page number to it.
- * @priv: a pointer to the i3c hub main structure
- * @target_port: a number of the port where the transaction will happen
- * @xfer: i2c_msg struct received from the master_xfers callback - single xfer
- *
- * Return: 0 returned on success. Negative value returned when accessing HUB's registers failed.
- * Positive value returned when SMBus transaction failed.
- */
-static int i3c_hub_smbus_msg(struct i3c_hub *priv, u8 target_port, struct i2c_msg *xfer)
+static int i3c_hub_smbus_msg_raw(struct i3c_hub *priv, u8 target_port,
+				 u8 desc[I3C_HUB_SMBUS_DESCRIPTOR_SIZE],
+				 u8 *buff_w, size_t buff_w_len,
+				 u8 *buff_r, size_t buff_r_len)
 {
 	u8 controller_buffer_page = I3C_HUB_CONTROLLER_BUFFER_PAGE + 4 * target_port;
 	u8 status_offset = I3C_HUB_TPx_SMBUS_AGNT_STS(target_port);
-	u8 desc[I3C_HUB_SMBUS_DESCRIPTOR_SIZE];
 	int ret;
-
-	desc[0] = 2 * xfer->addr; /* converting 7-bit address to 8-bit address */
-	if (xfer->flags & I2C_M_RD)
-		desc[0] |= I3C_HUB_SMBUS_RNW_TRANSACTION;
-	desc[1] = I3C_HUB_SMBUS_400kHz;
-	desc[2] = xfer->len;
-	desc[3] = (xfer->flags & I2C_M_RD) ? xfer->len : 0;
 
 	ret = regmap_write(priv->regmap, I3C_HUB_PAGE_PTR, 0x00);
 	if (ret)
@@ -1019,9 +1003,9 @@ static int i3c_hub_smbus_msg(struct i3c_hub *priv, u8 target_port, struct i2c_ms
 	if (ret)
 		return ret;
 
-	if (!(xfer->flags & I2C_M_RD)) {
-		ret = regmap_bulk_write(priv->regmap, I3C_HUB_CONTROLLER_AGENT_BUFF_DATA, xfer->buf,
-					xfer->len);
+	if (buff_w) {
+		ret = regmap_bulk_write(priv->regmap, I3C_HUB_CONTROLLER_AGENT_BUFF_DATA, buff_w,
+					buff_w_len);
 		if (ret)
 			return ret;
 	}
@@ -1035,14 +1019,44 @@ static int i3c_hub_smbus_msg(struct i3c_hub *priv, u8 target_port, struct i2c_ms
 	if (ret)
 		return ret;
 
-	if (xfer->flags & I2C_M_RD) {
-		ret = regmap_bulk_read(priv->regmap, I3C_HUB_CONTROLLER_AGENT_BUFF_DATA, xfer->buf,
-				       xfer->len);
+	if (buff_r) {
+		ret = regmap_bulk_read(priv->regmap, I3C_HUB_CONTROLLER_AGENT_BUFF_DATA +
+				       buff_w_len, buff_r, buff_r_len);
 		if (ret)
 			return ret;
 	}
 
 	return regmap_write(priv->regmap, I3C_HUB_PAGE_PTR, 0x00);
+}
+
+/*
+ * i3c_hub_smbus_msg() - This starts a smbus write transaction by writing a descriptor
+ * and a message to the hub registers. Controller buffer page is determined by multiplying the
+ * target port index by four and adding the base page number to it.
+ * @priv: a pointer to the i3c hub main structure
+ * @target_port: a number of the port where the transaction will happen
+ * @xfer: i2c_msg struct received from the master_xfers callback - single xfer
+ *
+ * Return: 0 returned on success. Negative value returned when accessing HUB's registers failed.
+ * Positive value returned when SMBus transaction failed.
+ */
+static int i3c_hub_smbus_msg(struct i3c_hub *priv, u8 target_port, struct i2c_msg *xfer)
+{
+	u8 desc[I3C_HUB_SMBUS_DESCRIPTOR_SIZE];
+
+	desc[0] = 2 * xfer->addr; /* converting 7-bit address to 8-bit address */
+	if (xfer->flags & I2C_M_RD)
+		desc[0] |= I3C_HUB_SMBUS_RNW_TRANSACTION;
+	desc[1] = I3C_HUB_SMBUS_400kHz;
+	desc[2] = xfer->len;
+	desc[3] = (xfer->flags & I2C_M_RD) ? xfer->len : 0;
+
+	if (xfer->flags & I2C_M_RD)
+		return i3c_hub_smbus_msg_raw(priv, target_port, desc, NULL, 0, xfer->buf,
+					     xfer->len);
+	else
+		return i3c_hub_smbus_msg_raw(priv, target_port, desc, xfer->buf, xfer->len, NULL,
+					     0);
 }
 
 /**

@@ -2518,7 +2518,7 @@ static int dw_i3c_master_enable_ibi(struct i3c_dev_desc *dev)
 	 * Clean-up the bit in IBI_SIR_REQ_REJECT so that the SIR request from the specific
 	 * slave device is acknowledged by the master device.
 	 */
-	reg = readl(master->regs + IBI_SIR_REQ_REJECT) & ~BIT(dev->info.dyn_addr);
+	reg = readl(master->regs + IBI_SIR_REQ_REJECT) & ~BIT(pos);
 	writel(reg, master->regs + IBI_SIR_REQ_REJECT);
 
 	spin_unlock_irq(&master->ibi.master.lock);
@@ -2528,7 +2528,7 @@ static int dw_i3c_master_enable_ibi(struct i3c_dev_desc *dev)
 	if (ret) {
 		spin_lock_irq(&master->ibi.master.lock);
 		reg = readl(master->regs + IBI_SIR_REQ_REJECT);
-		reg |= BIT(dev->info.dyn_addr);
+		reg |= BIT(pos);
 		writel(reg, master->regs + IBI_SIR_REQ_REJECT);
 
 		dw_i3c_master_disable_ibi_in_dat(master, pos);
@@ -2566,7 +2566,7 @@ static int dw_i3c_master_disable_ibi(struct i3c_dev_desc *dev)
 
 	spin_lock_irq(&master->ibi.master.lock);
 	reg = readl(master->regs + IBI_SIR_REQ_REJECT);
-	reg |= BIT(dev->info.dyn_addr);
+	reg |= BIT(pos);
 	writel(reg, master->regs + IBI_SIR_REQ_REJECT);
 
 	dw_i3c_master_disable_ibi_in_dat(master, pos);
@@ -2672,15 +2672,16 @@ static void dw_i3c_master_sir_handler(struct dw_i3c_master *master,
 			goto out;
 	}
 
-	if ((master->ibi.master.received_ibi_len[addr] + length) > dev->ibi->max_payload_len) {
+	data = i3c_dev_get_master_data(dev);
+	if ((master->ibi.master.received_ibi_len[data->index] + length)
+	    > dev->ibi->max_payload_len) {
 		dev_dbg(master->dev, "received ibi payload %d > device requested buffer %d",
-			master->ibi.master.received_ibi_len[addr] + length,
+			master->ibi.master.received_ibi_len[data->index] + length,
 			dev->ibi->max_payload_len);
-		master->ibi.master.received_ibi_len[addr] = 0;
+		master->ibi.master.received_ibi_len[data->index] = 0;
 		goto err;
 	}
 
-	data = i3c_dev_get_master_data(dev);
 	slot = i3c_generic_ibi_get_free_slot(data->ibi_pool);
 	if (!slot) {
 		dev_warn_ratelimited(master->dev, "no free ibi slot for addr = %x\n", addr);
@@ -2688,9 +2689,9 @@ static void dw_i3c_master_sir_handler(struct dw_i3c_master *master,
 	}
 
 	if (ibi_status & IBI_QUEUE_STATUS_LAST_FRAG)
-		master->ibi.master.received_ibi_len[addr] = 0;
+		master->ibi.master.received_ibi_len[data->index] = 0;
 	else
-		master->ibi.master.received_ibi_len[addr] += length;
+		master->ibi.master.received_ibi_len[data->index] += length;
 
 	buf = slot->data;
 	/* prepend ibi status */

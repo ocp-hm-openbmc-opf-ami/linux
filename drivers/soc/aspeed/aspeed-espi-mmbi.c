@@ -667,7 +667,7 @@ static ssize_t mmbi_write(struct file *filp, const char *buffer, size_t len,
 	dev_dbg(priv->dev, "B2H buffer empty space: %d\n", avail_buf_len);
 
 	/* Empty space should be more than write request data size */
-	if (len + sizeof(header) > avail_buf_len) {
+	if (avail_buf_len <= sizeof(header) || (len > (avail_buf_len - sizeof(header)))) {
 		dev_err(priv->dev, "Not enough space(%d) in B2H buffer\n",
 			avail_buf_len);
 		return -ENOSPC;

@@ -940,6 +940,7 @@
 				index = <0>;
 				pid = <3>;
 				bar = <0x3c>;
+				msi = <28>;
 				status = "disabled";
 			};
 
@@ -949,6 +950,7 @@
 				index = <1>;
 				pid = <4>;
 				bar = <0x4c>;
+				msi = <29>;
 				status = "disabled";
 			};
 
@@ -958,6 +960,7 @@
 				index = <2>;
 				pid = <5>;
 				bar = <0x5c>;
+				msi = <30>;
 				status = "disabled";
 			};
 
@@ -967,6 +970,7 @@
 				index = <3>;
 				pid = <6>;
 				bar = <0x6c>;
+				msi = <31>;
 				status = "disabled";
 			};
 		};
@@ -993,6 +997,7 @@
 				index = <4>;
 				pid = <11>;
 				bar = <0x3c>;
+				msi = <28>;
 				status = "disabled";
 			};
 
@@ -1002,6 +1007,7 @@
 				index = <5>;
 				pid = <12>;
 				bar = <0x4c>;
+				msi = <29>;
 				status = "disabled";
 			};
 
@@ -1011,6 +1017,7 @@
 				index = <6>;
 				pid = <13>;
 				bar = <0x5c>;
+				msi = <30>;
 				status = "disabled";
 			};
 
@@ -1020,6 +1027,7 @@
 				index = <7>;
 				pid = <14>;
 				bar = <0x6c>;
+				msi = <31>;
 				status = "disabled";
 			};
 		};
@@ -2489,6 +2497,7 @@
 				index = <0>;
 				pid = <2>;
 				bar = <0x1c>;
+				msi = <1>;
 				status = "disabled";
 			};
 
@@ -2498,6 +2507,7 @@
 				index = <1>;
 				pid = <3>;
 				bar = <0x50>;
+				msi = <2>;
 				status = "disabled";
 			};
 
@@ -2507,6 +2517,7 @@
 				index = <2>;
 				pid = <4>;
 				bar = <0x3c>;
+				msi = <3>;
 				status = "disabled";
 			};
 
@@ -2516,6 +2527,7 @@
 				index = <3>;
 				pid = <5>;
 				bar = <0x4c>;
+				msi = <4>;
 				status = "disabled";
 			};
 
@@ -2525,6 +2537,7 @@
 				index = <4>;
 				pid = <6>;
 				bar = <0x5c>;
+				msi = <5>;
 				status = "disabled";
 			};
 
@@ -2534,6 +2547,7 @@
 				index = <5>;
 				pid = <7>;
 				bar = <0x6c>;
+				msi = <6>;
 				status = "disabled";
 			};
 		};

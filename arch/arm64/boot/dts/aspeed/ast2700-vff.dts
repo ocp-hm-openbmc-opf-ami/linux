@@ -194,7 +194,7 @@
 	perst-rc-out-gpio = <&gpio1 ASPEED_GPIO(T, 7) GPIO_ACTIVE_HIGH>;
 };
 
-&tpm0 {
+&spi1 {
 	status = "disabled";
 };
 

@@ -518,9 +518,11 @@
 				#interrupt-cells = <1>;
 				msi-parent = <&pcie0>;
 				msi_address = <0x1e770058>;
-				ahbc = <&ahbc>;
-				pciecfg = <&pcie_cfg>;
-				pciephy = <&pcie_phy0>;
+
+				aspeed,ahbc = <&ahbc>;
+				aspeed,pciecfg = <&pcie_cfg>;
+				aspeed,pciephy = <&pcie_phy0>;
+
 				interrupt-map-mask = <0 0 0 7>;
 				interrupt-map = <0 0 0 1 &pcie_intc0 0>,
 						<0 0 0 2 &pcie_intc0 1>,
@@ -557,9 +559,11 @@
 				#interrupt-cells = <1>;
 				msi-parent = <&pcie1>;
 				msi_address = <0x1e77005C>;
-				ahbc = <&ahbc>;
-				pciecfg = <&pcie_cfg>;
-				pciephy = <&pcie_phy1>;
+
+				aspeed,ahbc = <&ahbc>;
+				aspeed,pciecfg = <&pcie_cfg>;
+				aspeed,pciephy = <&pcie_phy1>;
+
 				interrupt-map-mask = <0 0 0 7>;
 				interrupt-map = <0 0 0 1 &pcie_intc1 0>,
 						<0 0 0 2 &pcie_intc1 1>,

@@ -502,7 +502,10 @@
 
 				status = "disabled";
 
-				resets = <&syscon ASPEED_RESET_PCIE_DEV_O>;
+				resets = <&syscon ASPEED_RESET_H2X>,
+					 <&syscon ASPEED_RESET_PCIE_DEV_O>;
+				reset-names = "h2x", "perst";
+				clocks = <&syscon ASPEED_CLK_GATE_BCLK>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&pinctrl_pcierc0_default>;
 
@@ -542,7 +545,10 @@
 
 				status = "disabled";
 
-				resets = <&syscon ASPEED_RESET_PCIE_RC_O>;
+				resets = <&syscon ASPEED_RESET_H2X>,
+					 <&syscon ASPEED_RESET_PCIE_RC_O>;
+				reset-names = "h2x", "perst";
+				clocks = <&syscon ASPEED_CLK_GATE_BCLK>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&pinctrl_pcierc1_default>;
 

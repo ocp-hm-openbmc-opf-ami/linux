@@ -36,6 +36,7 @@
 // S0 use 0x10 as its slave address
 &i2c0 {
 	clock-frequency = <1000000>;
+	debounce-level = <4>;
 	status = "okay";
 	multi-master;
 	mctp-controller;
@@ -47,6 +48,7 @@
 
 &i2c1 {
 	clock-frequency = <1000000>;
+	debounce-level = <4>;
 	status = "okay";
 	multi-master;
 	mctp-controller;
@@ -58,6 +60,7 @@
 
 &i2c2 {
 	clock-frequency = <1000000>;
+	debounce-level = <4>;
 	status = "okay";
 	multi-master;
 	mctp-controller;
@@ -69,6 +72,7 @@
 
 &i2c3 {
 	clock-frequency = <1000000>;
+	debounce-level = <4>;
 	status = "okay";
 	multi-master;
 	mctp-controller;
@@ -80,6 +84,7 @@
 
 &i2c4 {
 	clock-frequency = <1000000>;
+	debounce-level = <4>;
 	status = "okay";
 	multi-master;
 	mctp-controller;
@@ -91,6 +96,7 @@
 
 &i2c5 {
 	clock-frequency = <1000000>;
+	debounce-level = <4>;
 	status = "okay";
 	multi-master;
 	mctp-controller;
@@ -102,6 +108,7 @@
 
 &i2c6 {
 	clock-frequency = <1000000>;
+	debounce-level = <4>;
 	status = "okay";
 	multi-master;
 	mctp-controller;
@@ -113,6 +120,7 @@
 
 &i2c7 {
 	clock-frequency = <1000000>;
+	debounce-level = <4>;
 	status = "okay";
 	multi-master;
 	mctp-controller;
@@ -124,6 +132,7 @@
 
 &i2c8 {
 	clock-frequency = <1000000>;
+	debounce-level = <4>;
 	status = "okay";
 	multi-master;
 	mctp-controller;
@@ -135,6 +144,7 @@
 
 &i2c9 {
 	clock-frequency = <1000000>;
+	debounce-level = <4>;
 	status = "okay";
 	multi-master;
 	mctp-controller;
@@ -146,6 +156,7 @@
 
 &i2c10 {
 	clock-frequency = <1000000>;
+	debounce-level = <4>;
 	status = "okay";
 	multi-master;
 	mctp-controller;
@@ -157,6 +168,7 @@
 
 &i2c11 {
 	clock-frequency = <1000000>;
+	debounce-level = <4>;
 	status = "okay";
 	multi-master;
 	mctp-controller;
@@ -168,6 +180,7 @@
 
 &i2c12 {
 	clock-frequency = <1000000>;
+	debounce-level = <4>;
 	status = "okay";
 	multi-master;
 	mctp-controller;
@@ -179,6 +192,7 @@
 
 &i2c13 {
 	clock-frequency = <1000000>;
+	debounce-level = <4>;
 	status = "okay";
 	multi-master;
 	mctp-controller;
@@ -190,6 +204,7 @@
 
 &i2c14 {
 	clock-frequency = <1000000>;
+	debounce-level = <4>;
 	status = "okay";
 	multi-master;
 	mctp-controller;
@@ -201,6 +216,7 @@
 
 &i2c15 {
 	clock-frequency = <1000000>;
+	debounce-level = <4>;
 	status = "okay";
 	multi-master;
 	mctp-controller;

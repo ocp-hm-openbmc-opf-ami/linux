@@ -587,9 +587,6 @@ static int do_aspeed_spi_exec_op(struct spi_mem *mem, const struct spi_mem_op *o
 	     op->cmd.opcode == SPINOR_OP_SRST))
 		return ret;
 
-	if (aspi->data->safs_stop)
-		aspi->data->safs_stop(aspi);
-
 	if (op->data.dir == SPI_MEM_DATA_IN) {
 		if (!op->addr.nbytes)
 			ret = aspeed_spi_read_reg(chip, op);

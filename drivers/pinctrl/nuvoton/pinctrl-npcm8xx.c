@@ -202,6 +202,11 @@ static int npcmgpio_gpio_request(struct gpio_chip *chip, unsigned int offset)
 	if (ret)
 		return ret;
 
+	/* active-high, input, clear interrupt, enable interrupt */
+	ret = npcmgpio_direction_input(chip, offset);
+	if (ret)
+		return ret;
+
 	return bank->request(chip, offset);
 }
 
@@ -299,11 +304,6 @@ static void npcmgpio_irq_unmask(struct irq_data *d)
 
 static unsigned int npcmgpio_irq_startup(struct irq_data *d)
 {
-	struct gpio_chip *gc = irq_data_get_irq_chip_data(d);
-	unsigned int gpio = irqd_to_hwirq(d);
-
-	/* active-high, input, clear interrupt, enable interrupt */
-	npcmgpio_direction_input(gc, gpio);
 	npcmgpio_irq_ack(d);
 	npcmgpio_irq_unmask(d);
 
@@ -546,7 +546,7 @@ static const int wdog2_pins[] = { 219 };
 
 static const int bmcuart0a_pins[] = { 41, 42 };
 static const int bmcuart0b_pins[] = { 48, 49 };
-static const int bmcuart1_pins[] = { 43, 44, 62, 63 };
+static const int bmcuart1_pins[] = { 43, 63 };
 
 static const int scipme_pins[] = { 169 };
 static const int smi_pins[] = { 170 };
@@ -1583,7 +1583,7 @@ static const struct pinctrl_pin_desc npcm8xx_pins[] = {
 	PINCTRL_PIN(4,	"GPIO4/IOX2_DI/SMB1D_SDA"),
 	PINCTRL_PIN(5,	"GPIO5/IOX2_LD/SMB1D_SCL"),
 	PINCTRL_PIN(6,	"GPIO6/IOX2_CK/SMB2D_SDA"),
-	PINCTRL_PIN(7,	"GPIO7/IOX2_D0/SMB2D_SCL"),
+	PINCTRL_PIN(7,	"GPIO7/IOX2_DO/SMB2D_SCL"),
 	PINCTRL_PIN(8,	"GPIO8/LKGPO1/TP_GPIO0"),
 	PINCTRL_PIN(9,	"GPIO9/LKGPO2/TP_GPIO1"),
 	PINCTRL_PIN(10, "GPIO10/IOXH_LD/SMB6D_SCL/SMB16_SCL"),
@@ -1594,7 +1594,7 @@ static const struct pinctrl_pin_desc npcm8xx_pins[] = {
 	PINCTRL_PIN(15, "GPIO15/GSPI_CS/SMB5C_SDA"),
 	PINCTRL_PIN(16, "GPIO16/SMB7B_SDA/LKGPO0/TP_GPIO2"),
 	PINCTRL_PIN(17, "GPIO17/PSPI_DI/CP1_GPIO5"),
-	PINCTRL_PIN(18, "GPIO18/PSPI_D0/SMB4B_SDA"),
+	PINCTRL_PIN(18, "GPIO18/PSPI_DO/SMB4B_SDA"),
 	PINCTRL_PIN(19, "GPIO19/PSPI_CK/SMB4B_SCL"),
 	PINCTRL_PIN(20, "GPIO20/H_GPIO0/SMB4C_SDA/SMB15_SDA"),
 	PINCTRL_PIN(21, "GPIO21/H_GPIO1/SMB4C_SCL/SMB15_SCL"),
@@ -1752,7 +1752,7 @@ static const struct pinctrl_pin_desc npcm8xx_pins[] = {
 	PINCTRL_PIN(173, "GPIO173/SMB7_SCL"),
 	PINCTRL_PIN(174, "GPIO174/SMB7_SDA"),
 	PINCTRL_PIN(175, "GPIO175/SPI1_CK/FANIN19/FM1_CK"),
-	PINCTRL_PIN(176, "GPIO176/SPI1_DO/FANIN18/FM1_DO/STRAP9"),
+	PINCTRL_PIN(176, "GPIO176/SPI1_D0/FANIN18/FM1_D0/STRAP9"),
 	PINCTRL_PIN(177, "GPIO177/SPI1_DI/FANIN17/FM1_D1/STRAP10"),
 	PINCTRL_PIN(178, "GPIO178/R1_TXD0"),
 	PINCTRL_PIN(179, "GPIO179/R1_TXD1"),
@@ -2092,6 +2092,7 @@ static const struct pinmux_ops npcm8xx_pinmux_ops = {
 	.gpio_request_enable = npcm8xx_gpio_request_enable,
 	.gpio_disable_free = npcm8xx_gpio_request_free,
 	.gpio_set_direction = npcm_gpio_set_direction,
+	.strict = true,
 };
 
 static int debounce_timing_setting(struct npcm8xx_gpio *bank, u32 gpio,

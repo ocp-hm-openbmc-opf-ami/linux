@@ -303,4 +303,13 @@ config AST2700_MBOX
 	  providing an interface for invoking the inter-process communication
 	  signals from the application processor to other masters.
 
+config NPCM_MBOX
+	tristate "NPCM Mailbox"
+	depends on ARCH_NPCM || COMPILE_TEST
+	help
+	  An implementation of the NPCM mailbox controller.
+	  It is used to send message between the Core processor and other 
+	  processors on the BMC such as TIP and CP. 
+	  Select Y here if you want to use NPCM mailbox controller.
+
 endif

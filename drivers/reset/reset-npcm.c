@@ -57,6 +57,7 @@
 #define NPCM_IPSRST3_USBD7	BIT(5)
 #define NPCM_IPSRST3_USBD8	BIT(6)
 #define NPCM_IPSRST3_USBD9	BIT(7)
+#define NPCM_IPSRST3_USBHUB	BIT(8)
 #define NPCM_IPSRST3_USBPHY1	BIT(24)
 #define NPCM_IPSRST3_USBPHY2	BIT(25)
 
@@ -286,7 +287,9 @@ static void npcm_usb_reset_npcm8xx(struct npcm_rc_data *rc)
 	if (!(mdlr & NPCM8XX_MDLR_USBD9))
 		ipsrst3_bits |= NPCM_IPSRST3_USBD9;
 
-	/* assert reset USB PHY and USB devices */
+	ipsrst3_bits |= NPCM_IPSRST3_USBHUB;
+
+	/* assert reset USB PHY, USB HUB and USB devices */
 	iprst1 = readl(rc->base + NPCM_IPSRST1);
 	iprst2 = readl(rc->base + NPCM_IPSRST2);
 	iprst3 = readl(rc->base + NPCM_IPSRST3);
@@ -316,6 +319,8 @@ static void npcm_usb_reset_npcm8xx(struct npcm_rc_data *rc)
 	writel(iprst3, rc->base + NPCM_IPSRST3);
 	iprst4 &= ~NPCM_IPSRST4_USBPHY3;
 	writel(iprst4, rc->base + NPCM_IPSRST4);
+
+	udelay(50);
 
 	/* set USB PHY RS bit */
 	regmap_update_bits(rc->gcr_regmap, NPCM_USB1PHYCTL_OFFSET,

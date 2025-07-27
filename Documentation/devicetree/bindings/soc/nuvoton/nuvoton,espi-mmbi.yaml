@@ -1,0 +1,91 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/soc/nuvoton/nuvoton-espi-mmbi.yaml#
+$schema: "http://devicetree.org/meta-schemas/core.yaml#"
+
+title: Nuvoton ESPI MMBI driver
+
+maintainers:
+  - Tomer Maimon <Tomer.Maimon@nuvoton.com>
+  - Ban Feng <kcfeng0@nuvoton.com>
+  - Stanley Chu <yschu@nuvoton.com>
+
+description: |
+  This binding describes the  MMBI controller in the BMC SOCs.
+  The MMBI Controller allows the memory mapping over eSPI and thus
+  allows efficient memory sharing between Host and BMC.
+
+properties:
+  compatible:
+    enum:
+      - nuvoton,npcm845-espi-mmbi
+
+  reg:
+    maxItems: 1
+    description: contains the MMBI control register and size
+
+  interrupts:
+    maxItems: 1
+
+  nuvoton,espi:
+    description: a reference to the eSPI controller of the BMC SOC
+    allOf:
+      - $ref: /schemas/types.yaml#/definitions/phandle
+
+  memory-region:
+    maxItems: 1
+    description: |
+      contains a phandle to the BMC SOC memory mapping base address
+      and its size
+
+  use-interrupt:
+    type: boolean
+    description: |
+      if defined, BMC will get an interrupt when host update the offset
+      address in the share memory.
+
+  poll-interval-ms:
+    maxItems: 1
+    minimum: 1
+    maximum: 1000
+    default: 50
+    description: |
+      if use-interrupt is not defined, this is the polling interval that
+      define how often BMC will check the h2b buffer status periodically.
+
+required:
+  - compatible
+  - reg
+  - interrupts
+  - nuvoton,espi
+  - memory-region
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/mmbi/protocols.h>
+
+    reserved-memory {
+        #address-cells = <2>;
+        #size-cells = <2>;
+        ranges;
+
+        espi_mmbi_memory: mmbi@0xc0008000 {
+            reg = <0x0 0xc0008000 0x0 0x1000>;
+            no-map;
+        };
+    };
+
+    mmbi: mmbi@c0001000 {
+        compatible = "nuvoton,npcm845-espi-mmbi";
+        reg = <0x0 0xc0001000 0x0 0x800>;
+        interrupts = <GIC_SPI 11 IRQ_TYPE_LEVEL_HIGH>;
+        memory-region = <&espi_mmbi_memory>;
+        nuvoton,espi = <&espi>;
+        status = "okay";
+        instance@0 {
+            protocols = /bits/ 8 <MMBI_PROTOCOL_RAS_OFFLOAD>;
+        };
+    };

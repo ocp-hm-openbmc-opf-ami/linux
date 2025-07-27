@@ -562,6 +562,25 @@ config TPS6594_PFSM
 	  This driver can also be built as a module.  If so, the module
 	  will be called tps6594-pfsm.
 
+config NPCM_PCI_MBOX
+	tristate "NPCM PCI Mailbox Controller"
+	depends on (ARCH_NPCM || COMPILE_TEST) && REGMAP && MFD_SYSCON
+	help
+	  Expose the NPCM BMC PCI MBOX registers found on Nuvoton SOCs
+	  to userspace.
+
+config NPCM7XX_JTAG_MASTER
+	tristate "NPCM7xx JTAG Master driver"
+	depends on (ARCH_NPCM7XX || COMPILE_TEST)
+	help
+	  Control PSPI/GPIO to transmit jtag signals to support jtag master function.
+
+config NPCM8XX_JTAG_MASTER
+	tristate "NPCM8xx JTAG Master driver"
+	depends on (ARCH_NPCM || COMPILE_TEST)
+	help
+	  NPCM8xx JTAG Master Interfaces.
+
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
 source "drivers/misc/cb710/Kconfig"

@@ -55,6 +55,18 @@ properties:
 
       May not be supported by all controllers.
 
+  bus-context:
+    $ref: /schemas/types.yaml#/definitions/uint8
+    description: |
+      The bus context byte value stated in:
+      https://www.mipi.org/MIPI_I3C_bus_context_byte_values_public.html
+
+  mctp-controller:
+    type: boolean
+    description: |
+      Indicates that the system is accessible via this bus as an endpoint for
+      MCTP over I3C transport.
+
 required:
   - "#address-cells"
   - "#size-cells"
@@ -119,12 +131,12 @@ patternProperties:
                 minimum: 0
                 maximum: 0x7f
               - description: |
-                  First half of the Provisional ID (following the PID
+                  First half of the Provisioned ID (following the PID
                   definition provided by the I3C specification).
 
                   Contains the manufacturer ID left-shifted by 1.
               - description: |
-                  Second half of the Provisional ID (following the PID
+                  Second half of the Provisioned ID (following the PID
                   definition provided by the I3C specification).
 
                   Contains the ORing of the part ID left-shifted by 16,
@@ -139,6 +151,22 @@ patternProperties:
           present (first cell of the reg property != 0), this address is assigned
           through SETDASA. If static address is not present, this address is assigned
           through SETNEWDA after assigning a temporary address via ENTDAA.
+
+      bcr:
+        $ref: /schemas/types.yaml#/definitions/uint8
+        minimum: 0x0
+        maximum: 0xff
+        description: |
+          Bus Characteristics Register (BCR). This property is only valid if
+          the I3C device is a JESD403 compliant device.
+
+      dcr:
+        $ref: /schemas/types.yaml#/definitions/uint8
+        minimum: 0x0
+        maximum: 0xff
+        description: |
+          Device Characteristics Register (DCR). This property is only valid if
+          the I3C device is a JESD403 compliant device.
 
     required:
       - reg

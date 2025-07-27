@@ -25,6 +25,13 @@
 		#size-cells = <1>;
 		ranges;
 
+		video_engine_memory: video {
+			size = <0x04000000>;
+			alignment = <0x01000000>;
+			compatible = "shared-dma-pool";
+			reusable;
+		};
+
 		gfx_memory: framebuffer {
 			size = <0x01000000>;
 			alignment = <0x01000000>;
@@ -41,7 +48,7 @@
 		m25p,fast-read;
 		label = "bmc";
 		spi-max-frequency = <50000000>;
-#include "openbmc-flash-layout.dtsi"
+#include "aspeed-evb-flash-layout.dtsi"
 	};
 };
 
@@ -107,6 +114,14 @@
 	pinctrl-0 = <&pinctrl_sd1_default>;
 };
 
+&sdhci1 {
+	status = "okay";
+
+	non-removable;
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_sd2_default>;
+};
+
 /*
  * Enable port A as device (via the virtual hub) and port B as
  * host by default on the eval board. This can be easily changed
@@ -128,6 +143,11 @@
 &gfx {
      status = "okay";
      memory-region = <&gfx_memory>;
+};
+
+&video {
+	status = "okay";
+	memory-region = <&video_engine_memory>;
 };
 
 &rtc {

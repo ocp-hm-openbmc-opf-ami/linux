@@ -868,7 +868,7 @@ static int svc_i3c_master_do_daa_locked(struct svc_i3c_master *master,
 			u8 data[6];
 
 			/*
-			 * We only care about the 48-bit provisional ID yet to
+			 * We only care about the 48-bit provisioned ID yet to
 			 * be sure a device does not nack an address twice.
 			 * Otherwise, we would just need to flush the RX FIFO.
 			 */
@@ -1501,7 +1501,7 @@ static int svc_i3c_master_priv_xfers(struct i3c_dev_desc *dev,
 }
 
 static int svc_i3c_master_i2c_xfers(struct i2c_dev_desc *dev,
-				    const struct i2c_msg *xfers,
+				    struct i2c_msg *xfers,
 				    int nxfers)
 {
 	struct i3c_master_controller *m = i2c_dev_get_master(dev);

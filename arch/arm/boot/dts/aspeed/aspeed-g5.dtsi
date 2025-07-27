@@ -301,6 +301,14 @@
 				#io-channel-cells = <1>;
 				status = "disabled";
 			};
+
+			espi: espi@1e6ee000 {
+				compatible = "aspeed,ast2500-espi";
+				reg = <0x1e6ee000 0x1000>;
+				interrupts = <23>;
+				clocks = <&syscon ASPEED_CLK_GATE_ESPICLK>;
+				status = "disabled";
+			};
 		};
 
 		/* There's another APB mapping at 0x1e6f0000 for 0x00010000 */
@@ -312,6 +320,7 @@
 				 <&syscon ASPEED_CLK_GATE_ECLK>;
 			clock-names = "vclk", "eclk";
 			interrupts = <7>;
+			resets = <&syscon ASPEED_RESET_VIDEO>;
 			status = "disabled";
 		};
 
@@ -379,7 +388,7 @@
 				clocks = <&syscon ASPEED_CLK_APB>;
 				#interrupt-cells = <2>;
 				interrupt-controller;
-				bus-frequency = <12000000>;
+				bus-frequency = <1000000>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&pinctrl_sgpm_default>;
 				status = "disabled";
@@ -533,12 +542,18 @@
 					reg = <0xa0 0x24 0xc8 0x8>;
 				};
 
-
 				ibt: ibt@140 {
 					compatible = "aspeed,ast2500-ibt-bmc";
 					reg = <0x140 0x18>;
 					interrupts = <8>;
 					clocks = <&syscon ASPEED_CLK_GATE_LCLK>;
+					status = "disabled";
+				};
+
+				mbox: mbox@200 {
+					compatible = "aspeed,ast2500-mbox";
+					reg = <0x200 0x30>;
+					interrupts = <46>;
 					status = "disabled";
 				};
 			};

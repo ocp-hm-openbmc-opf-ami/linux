@@ -588,6 +588,8 @@ static int aspeed_vuart_remove(struct platform_device *pdev)
 static const struct of_device_id aspeed_vuart_table[] = {
 	{ .compatible = "aspeed,ast2400-vuart" },
 	{ .compatible = "aspeed,ast2500-vuart" },
+	{ .compatible = "aspeed,ast2600-vuart" },
+	{ .compatible = "aspeed,ast2700-vuart" },
 	{ },
 };
 

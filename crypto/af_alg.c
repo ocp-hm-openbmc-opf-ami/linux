@@ -205,12 +205,16 @@ unlock:
 	return err;
 }
 
-static int alg_setkey(struct sock *sk, sockptr_t ukey, unsigned int keylen)
+static int alg_setkey(struct sock *sk, sockptr_t ukey, unsigned int keylen,
+		      int (*setkey)(void *private, const u8 *key,
+				    unsigned int keylen))
 {
 	struct alg_sock *ask = alg_sk(sk);
-	const struct af_alg_type *type = ask->type;
 	u8 *key;
 	int err;
+
+	if (!setkey)
+		return -ENOPROTOOPT;
 
 	key = sock_kmalloc(sk, keylen, GFP_KERNEL);
 	if (!key)
@@ -220,7 +224,7 @@ static int alg_setkey(struct sock *sk, sockptr_t ukey, unsigned int keylen)
 	if (copy_from_sockptr(key, ukey, keylen))
 		goto out;
 
-	err = type->setkey(ask->private, key, keylen);
+	err = setkey(ask->private, key, keylen);
 
 out:
 	sock_kzfree_s(sk, key, keylen);
@@ -377,13 +381,17 @@ static int alg_setsockopt(struct socket *sock, int level, int optname,
 	case ALG_SET_KEY_BY_KEY_SERIAL:
 		if (sock->state == SS_CONNECTED)
 			goto unlock;
-		if (!type->setkey)
-			goto unlock;
 
 		if (optname == ALG_SET_KEY_BY_KEY_SERIAL)
 			err = alg_setkey_by_key_serial(ask, optval, optlen);
 		else
-			err = alg_setkey(sk, optval, optlen);
+			err = alg_setkey(sk, optval, optlen, type->setkey);
+		break;
+	case ALG_SET_PUBKEY:
+		if (sock->state == SS_CONNECTED)
+			goto unlock;
+
+		err = alg_setkey(sk, optval, optlen, type->setpubkey);
 		break;
 	case ALG_SET_AEAD_AUTHSIZE:
 		if (sock->state == SS_CONNECTED)
@@ -943,9 +951,9 @@ int af_alg_sendmsg(struct socket *sock, struct msghdr *msg, size_t size,
 	struct af_alg_tsgl *sgl;
 	struct af_alg_control con = {};
 	long copied = 0;
-	bool enc = false;
 	bool init = false;
 	int err = 0;
+	int op = 0;
 
 	if (msg->msg_controllen) {
 		err = af_alg_cmsg_send(msg, &con);
@@ -954,11 +962,11 @@ int af_alg_sendmsg(struct socket *sock, struct msghdr *msg, size_t size,
 
 		init = true;
 		switch (con.op) {
+		case ALG_OP_VERIFY:
+		case ALG_OP_SIGN:
 		case ALG_OP_ENCRYPT:
-			enc = true;
-			break;
 		case ALG_OP_DECRYPT:
-			enc = false;
+			op = con.op;
 			break;
 		default:
 			return -EINVAL;
@@ -982,7 +990,7 @@ int af_alg_sendmsg(struct socket *sock, struct msghdr *msg, size_t size,
 	ctx->init = true;
 
 	if (init) {
-		ctx->enc = enc;
+		ctx->op = op;
 		if (con.iv)
 			memcpy(ctx->iv, con.iv->iv, ivsize);
 

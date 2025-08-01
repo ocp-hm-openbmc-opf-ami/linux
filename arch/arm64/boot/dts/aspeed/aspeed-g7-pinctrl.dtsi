@@ -263,7 +263,12 @@
 		groups = "SGPM0";
 	};
 
-	pinctrl_sgpm1_default: sgpm1_default {
+	pinctrl_dsgpm0_default: dsgpm0-default {
+		function = "SGPM0";
+		groups = "DSGPM0";
+	};
+
+	pinctrl_sgpm1_default: sgpm1-default {
 		function = "SGPM1";
 		groups = "SGPM1";
 	};

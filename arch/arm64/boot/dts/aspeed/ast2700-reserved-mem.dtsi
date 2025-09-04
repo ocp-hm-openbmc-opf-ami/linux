@@ -44,11 +44,10 @@ espi1_mmbi_memory: espi1-mmbi-memory@424000000 {
 };
 
 // This area used for eDAF DDR mode even in MIX mode or HW mode(enabled in SPL)
-edaf1: edaf1-memory@428000000 {
+edaf0: safs-memory@428000000 {
 	reg = <0x4 0x28000000 0x0 0x4000000>;
 	no-map;
 };
-#endif
 
 ssp_memory: ssp-memory@42c000000 {
 	reg = <0x4 0x2c000000 0x0 0x2000000>;

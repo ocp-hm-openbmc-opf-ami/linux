@@ -1469,6 +1469,8 @@ skip_linkparms:
 	 *	Process options.
 	 */
 
+	u8 *llAddr = NULL;
+
 	if (!neigh)
 		neigh = __neigh_lookup(&nd_tbl, &ipv6_hdr(skb)->saddr,
 				       skb->dev, 1);
@@ -1490,6 +1492,17 @@ skip_linkparms:
 			     NEIGH_UPDATE_F_ISROUTER,
 			     NDISC_ROUTER_ADVERTISEMENT, &ndopts);
 		reason = SKB_CONSUMED;
+		llAddr=lladdr;
+	}
+
+	if (in6_dev->cnf.accept_ra_pinfo && ndopts.nd_opts_pi) {
+			struct nd_opt_hdr *p;
+			for (p = ndopts.nd_opts_pi;
+					p;
+					p = ndisc_next_option(p, ndopts.nd_opts_pi_end)) {
+					add_route_prefix_entry( skb->dev,(u8 *)p, (p->nd_opt_len) << 3, &ipv6_hdr(skb)->saddr, llAddr);
+			}
+			llAddr=NULL;
 	}
 
 	if (!ipv6_accept_ra(in6_dev)) {

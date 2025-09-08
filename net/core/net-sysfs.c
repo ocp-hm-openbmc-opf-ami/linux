@@ -27,6 +27,8 @@
 
 #include "dev.h"
 #include "net-sysfs.h"
+#include <net/ncsi.h>
+#include "../ncsi/internal.h"
 
 #ifdef CONFIG_SYSFS
 static const char fmt_hex[] = "%#x\n";
@@ -304,15 +306,22 @@ static const char *const operstates[] = {
 static ssize_t operstate_show(struct device *dev,
 			      struct device_attribute *attr, char *buf)
 {
-	const struct net_device *netdev = to_net_dev(dev);
-	unsigned char operstate;
+        struct net_device *netdev = to_net_dev(dev);
+        unsigned char operstate;
+       struct ncsi_dev *nd;
+       nd = ncsi_find_dev(netdev);
+       if (nd && !nd->link_up) {
 
-	operstate = READ_ONCE(netdev->operstate);
-	if (!netif_running(netdev))
 		operstate = IF_OPER_DOWN;
+       }
+       else {
+               operstate = READ_ONCE(netdev->operstate);
+               if (!netif_running(netdev))
+                       operstate = IF_OPER_DOWN;
 
-	if (operstate >= ARRAY_SIZE(operstates))
-		return -EINVAL; /* should not happen */
+               if (operstate >= ARRAY_SIZE(operstates))
+                       return -EINVAL; /* should not happen */
+       }
 
 	return sysfs_emit(buf, "%s\n", operstates[operstate]);
 }

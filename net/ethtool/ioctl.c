@@ -32,6 +32,8 @@
 #include <net/flow_offload.h>
 #include <linux/ethtool_netlink.h>
 #include <generated/utsrelease.h>
+#include <net/ncsi.h>
+#include "../ncsi/internal.h"
 #include "common.h"
 
 /* State held across locks and calls for commands which have devlink fallback */
@@ -58,7 +60,14 @@ static struct devlink *netdev_to_devlink_get(struct net_device *dev)
 
 u32 ethtool_op_get_link(struct net_device *dev)
 {
-	return netif_carrier_ok(dev) ? 1 : 0;
+       struct ncsi_dev *nd;
+       nd = ncsi_find_dev(dev);
+       if (nd) {
+               return nd->link_up;
+       }
+       else {
+               return netif_carrier_ok(dev) ? 1 : 0;
+       }
 }
 EXPORT_SYMBOL(ethtool_op_get_link);
 

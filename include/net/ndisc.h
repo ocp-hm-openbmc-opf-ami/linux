@@ -223,6 +223,22 @@ struct ndisc_ops {
 				       bool dev_addr_generated);
 };
 
+struct route_prefix_info
+{
+       struct in6_addr gwaddr;
+       struct in6_addr prefix;
+       u8 prefix_len;
+       u8 addr[ETH_ALEN];
+       u8 ifname[IFNAMSIZ];
+       struct list_head list;
+};
+
+void add_route_prefix_entry(struct net_device *dev, u8 *opt, int len, struct in6_addr *gwaddr, u8 *addr);
+
+void del_route_prefix_entry(struct in6_addr *gwaddr);
+
+void clear_route_prefix_entry(void);
+
 #if IS_ENABLED(CONFIG_IPV6)
 static inline int ndisc_ops_is_useropt(const struct net_device *dev,
 				       u8 nd_opt_type)

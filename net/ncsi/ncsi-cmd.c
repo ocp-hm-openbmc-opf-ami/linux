@@ -326,10 +326,7 @@ int ncsi_xmit_cmd(struct ncsi_cmd_arg *nca)
 	int i, ret;
 
 	/* Use OEM generic handler for Netlink request */
-	if (nca->req_flags == NCSI_REQ_FLAG_NETLINK_DRIVEN)
-		type = NCSI_PKT_CMD_OEM;
-	else
-		type = nca->type;
+	type = nca->type;
 
 	/* Search for the handler */
 	for (i = 0; i < ARRAY_SIZE(ncsi_cmd_handlers); i++) {

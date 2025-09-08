@@ -700,6 +700,13 @@ int bond_set_carrier(struct bonding *bond)
 	bond_for_each_slave(bond, slave, iter) {
 		if (slave->link == BOND_LINK_UP) {
 			if (!netif_carrier_ok(bond->dev)) {
+		               if (rtnl_trylock()) {
+                                       call_netdevice_notifiers(NETDEV_UP, bond->dev);
+                                       rtnl_unlock();
+                               }
+                               else
+                                       call_netdevice_notifiers(NETDEV_UP, bond->dev);
+
 				netif_carrier_on(bond->dev);
 				return 1;
 			}
@@ -709,6 +716,13 @@ int bond_set_carrier(struct bonding *bond)
 
 down:
 	if (netif_carrier_ok(bond->dev)) {
+               if (rtnl_trylock()) {
+                       call_netdevice_notifiers(NETDEV_DOWN, bond->dev);
+                       rtnl_unlock();
+               }
+               else
+                       call_netdevice_notifiers(NETDEV_DOWN, bond->dev);
+
 		netif_carrier_off(bond->dev);
 		return 1;
 	}
@@ -791,13 +805,14 @@ static int bond_check_dev_link(struct bonding *bond,
 	if (!reporting && !netif_running(slave_dev))
 		return 0;
 
-	if (bond->params.use_carrier)
-		return netif_carrier_ok(slave_dev) ? BMSR_LSTATUS : 0;
 
 	/* Try to get link status using Ethtool first. */
 	if (slave_dev->ethtool_ops->get_link)
 		return slave_dev->ethtool_ops->get_link(slave_dev) ?
 			BMSR_LSTATUS : 0;
+       if (bond->params.use_carrier)
+               return netif_carrier_ok(slave_dev) ? BMSR_LSTATUS : 0;
+
 
 	/* Ethtool can't be used, fallback to MII ioctls. */
 	ioctl = slave_ops->ndo_eth_ioctl;
@@ -969,7 +984,7 @@ static int bond_set_dev_addr(struct net_device *bond_dev,
 {
 	int err;
 
-	slave_dbg(bond_dev, slave_dev, "bond_dev=%p slave_dev=%p slave_dev->addr_len=%d\n",
+	slave_info(bond_dev, slave_dev, "bond_dev=%p slave_dev=%p slave_dev->addr_len=%d\n",
 		  bond_dev, slave_dev, slave_dev->addr_len);
 	err = dev_pre_changeaddr_notify(bond_dev, slave_dev->dev_addr, NULL);
 	if (err)
@@ -1090,22 +1105,8 @@ static struct slave *bond_choose_primary_or_current(struct bonding *bond)
 {
 	struct slave *prim = rtnl_dereference(bond->primary_slave);
 	struct slave *curr = rtnl_dereference(bond->curr_active_slave);
-	struct slave *slave, *hprio = NULL;
-	struct list_head *iter;
 
 	if (!prim || prim->link != BOND_LINK_UP) {
-		bond_for_each_slave(bond, slave, iter) {
-			if (slave->link == BOND_LINK_UP) {
-				hprio = hprio ?: slave;
-				if (slave->prio > hprio->prio)
-					hprio = slave;
-			}
-		}
-
-		if (hprio && hprio != curr) {
-			prim = hprio;
-			goto link_reselect;
-		}
 
 		if (!curr || curr->link != BOND_LINK_UP)
 			return NULL;
@@ -1117,7 +1118,6 @@ static struct slave *bond_choose_primary_or_current(struct bonding *bond)
 		return prim;
 	}
 
-link_reselect:
 	if (!curr || curr->link != BOND_LINK_UP)
 		return prim;
 
@@ -6026,6 +6026,9 @@ static void bond_uninit(struct net_device *bond_dev)
 	bond_set_slave_arr(bond, NULL, NULL);
 
 	list_del(&bond->bond_list);
+
+	//clear all route prefix entry from proc /proc/net/ipv6_route_prefix_info
+	clear_route_prefix_entry();
 
 	bond_debug_unregister(bond);
 }

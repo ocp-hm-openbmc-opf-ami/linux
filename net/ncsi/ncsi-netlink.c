@@ -59,13 +59,15 @@ static int ncsi_write_channel_info(struct sk_buff *skb,
 				   struct ncsi_channel *nc)
 {
 	struct ncsi_channel_vlan_filter *ncf;
-	struct ncsi_channel_mode *m;
+	struct ncsi_channel_mode *m,*fc;
 	struct nlattr *vid_nest;
 	int i;
 
 	nla_put_u32(skb, NCSI_CHANNEL_ATTR_ID, nc->id);
 	m = &nc->modes[NCSI_MODE_LINK];
 	nla_put_u32(skb, NCSI_CHANNEL_ATTR_LINK_STATE, m->data[2]);
+	fc = &nc->modes[NCSI_MODE_FC];
+	nla_put_u32(skb, NCSI_CHANNEL_ATTR_FC, fc->data[0]);
 	if (nc->state == NCSI_CHANNEL_ACTIVE)
 		nla_put_flag(skb, NCSI_CHANNEL_ATTR_ACTIVE);
 	if (nc == nc->package->preferred_channel)
@@ -332,6 +334,7 @@ static int ncsi_set_interface_nl(struct sk_buff *msg, struct genl_info *info)
 	if (channel) {
 		package->channel_whitelist = 0x1 << channel->id;
 		package->preferred_channel = channel;
+		package->configured_channel_ID = channel->id;
 	} else {
 		/* Allow any channel */
 		package->channel_whitelist = UINT_MAX;
@@ -379,16 +382,16 @@ static int ncsi_clear_interface_nl(struct sk_buff *msg, struct genl_info *info)
 
 	NCSI_FOR_EACH_PACKAGE(ndp, np) {
 		spin_lock_irqsave(&np->lock, flags);
-		np->multi_channel = false;
+		np->multi_channel = true;
 		np->channel_whitelist = UINT_MAX;
 		np->preferred_channel = NULL;
 		spin_unlock_irqrestore(&np->lock, flags);
+		np->configured_channel_ID = 0x1f;
 	}
 	netdev_info(ndp->ndev.dev, "NCSI: Cleared preferred package/channel\n");
 
 	/* Update channel configuration */
-	if (!(ndp->flags & NCSI_DEV_RESET))
-		ncsi_reset_dev(&ndp->ndev);
+	ncsi_reset_dev(&ndp->ndev);
 
 	return 0;
 }
@@ -462,7 +465,18 @@ static int ncsi_send_cmd_nl(struct sk_buff *msg, struct genl_info *info)
 	nca.req_flags = NCSI_REQ_FLAG_NETLINK_DRIVEN;
 	nca.info = info;
 	nca.payload = ntohs(hdr->length);
-	nca.data = data + sizeof(*hdr);
+	switch (hdr->type) {
+		case NCSI_PKT_CMD_SNFC:
+			data += 16;
+			nca.bytes[0] = *data;
+			break;
+		case NCSI_PKT_CMD_OEM:
+			nca.data = data + sizeof(*hdr);
+			break;
+		default:
+			netdev_err(ndp->ndev.dev, "NCSI: %s: %d Error %02x sending command\n", __FILE__, __LINE__, hdr->type);
+			break;
+	}
 
 	ret = ncsi_xmit_cmd(&nca);
 out_netlink:

@@ -47,7 +47,7 @@ enum {
 	NCSI_CAP_AEN_MASK                = 0x07,
 	NCSI_CAP_VLAN_ONLY               = 0x01, /* Filter VLAN packet only  */
 	NCSI_CAP_VLAN_NO                 = 0x02, /* Filter VLAN and non-VLAN */
-	NCSI_CAP_VLAN_ANY                = 0x04, /* Filter Any-and-non-VLAN  */
+	NCSI_CAP_VLAN_ANY                = 0x03, /* Filter Any-and-non-VLAN  */
 	NCSI_CAP_VLAN_MASK               = 0x07
 };
 
@@ -241,6 +241,12 @@ struct ncsi_channel {
 	struct list_head            link;
 };
 
+struct aen_status {
+       bool had_link;
+       bool has_link;
+       struct ncsi_channel *nc;
+};
+
 struct ncsi_package {
 	unsigned char        id;          /* NCSI 3-bits package ID */
 	unsigned char        uuid[16];    /* UUID                   */
@@ -253,6 +259,7 @@ struct ncsi_package {
 	bool                 multi_channel; /* Enable multiple channels  */
 	u32                  channel_whitelist; /* Channels to configure */
 	struct ncsi_channel  *preferred_channel; /* Primary channel      */
+	unsigned char        configured_channel_ID;
 };
 
 struct ncsi_request {
@@ -346,6 +353,8 @@ struct ncsi_dev_priv {
 	bool                mlx_multi_host;  /* Enable multi host Mellanox */
 	u32                 package_whitelist; /* Packages to configure    */
 	unsigned char       channel_count;     /* Num of channels to probe   */
+	struct work_struct  aen_work;        /* For aen management     */
+	struct aen_status       aen_stat;                /* For aen status     */
 };
 
 struct ncsi_cmd_arg {
@@ -413,5 +422,5 @@ int ncsi_xmit_cmd(struct ncsi_cmd_arg *nca);
 int ncsi_rcv_rsp(struct sk_buff *skb, struct net_device *dev,
 		 struct packet_type *pt, struct net_device *orig_dev);
 int ncsi_aen_handler(struct ncsi_dev_priv *ndp, struct sk_buff *skb);
-
+void ncsi_report_link(struct ncsi_dev_priv *ndp, bool force_down);
 #endif /* __NCSI_INTERNAL_H__ */

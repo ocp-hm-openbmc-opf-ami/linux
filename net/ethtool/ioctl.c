@@ -33,6 +33,8 @@
 #include <net/flow_offload.h>
 #include <net/netdev_lock.h>
 #include <linux/ethtool_netlink.h>
+#include <net/ncsi.h>
+#include "../ncsi/internal.h"
 #include "common.h"
 
 /* State held across locks and calls for commands which have devlink fallback */
@@ -62,7 +64,14 @@ u32 ethtool_op_get_link(struct net_device *dev)
 	/* Synchronize carrier state with link watch, see also rtnl_getlink() */
 	__linkwatch_sync_dev(dev);
 
-	return netif_carrier_ok(dev) ? 1 : 0;
+       struct ncsi_dev *nd;
+       nd = ncsi_find_dev(dev);
+       if (nd) {
+               return nd->link_up;
+       }
+       else {
+               return netif_carrier_ok(dev) ? 1 : 0;
+       }
 }
 EXPORT_SYMBOL(ethtool_op_get_link);
 

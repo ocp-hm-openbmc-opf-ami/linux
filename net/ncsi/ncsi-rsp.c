@@ -329,9 +329,10 @@ static int ncsi_rsp_handler_gls(struct ncsi_request *nr)
 {
 	struct ncsi_rsp_gls_pkt *rsp;
 	struct ncsi_dev_priv *ndp = nr->ndp;
-	struct ncsi_channel *nc;
+	struct ncsi_channel *nc, *channel, *active_channel;
 	struct ncsi_channel_mode *ncm;
 	unsigned long flags;
+	struct ncsi_package *np;
 
 	/* Find the package and channel */
 	rsp = (struct ncsi_rsp_gls_pkt *)skb_network_header(nr->rsp);
@@ -345,13 +346,30 @@ static int ncsi_rsp_handler_gls(struct ncsi_request *nr)
 	ncm->data[3] = ntohl(rsp->other);
 	ncm->data[4] = ntohl(rsp->oem_status);
 
-	if (nr->flags & NCSI_REQ_FLAG_EVENT_DRIVEN)
-		return 0;
-
 	/* Reset the channel monitor if it has been enabled */
 	spin_lock_irqsave(&nc->lock, flags);
 	nc->monitor.state = NCSI_CHANNEL_MONITOR_START;
 	spin_unlock_irqrestore(&nc->lock, flags);
+
+	NCSI_FOR_EACH_PACKAGE(ndp, np) {
+		active_channel = ncsi_find_channel(np, np->configured_channel_ID);
+		NCSI_FOR_EACH_CHANNEL(np, channel) {
+			if (ncsi_channel_has_link(channel)) {
+				if (np->preferred_channel) {
+					if (channel->id == np->preferred_channel->id) {
+						np->configured_channel_ID = channel->id;
+						ncsi_update_tx_channel(ndp, np, NULL, channel);
+						break;
+					}
+				}
+				else {
+					np->configured_channel_ID = channel->id;
+					ncsi_update_tx_channel(ndp, np, NULL, channel);
+					break;
+				}
+			}
+		}
+	}
 
 	return 0;
 }
@@ -613,8 +631,6 @@ static int ncsi_rsp_handler_snfc(struct ncsi_request *nr)
 
 	/* Check if flow control has been enabled */
 	ncm = &nc->modes[NCSI_MODE_FC];
-	if (ncm->enable)
-		return 0;
 
 	/* Update to flow control mode */
 	cmd = (struct ncsi_cmd_snfc_pkt *)skb_network_header(nr->cmd);

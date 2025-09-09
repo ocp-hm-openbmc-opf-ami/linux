@@ -43,6 +43,8 @@ struct peci_adapter {
 	struct list_head	userspace_clients;
 	int			(*xfer)(struct peci_adapter *adapter,
 					struct peci_xfer_msg *msg);
+	void			(*set_wa_count)(int cpu, size_t count);
+	u32			(*get_wa_count)(int cpu);
 	u32			cmd_mask;
 	bool			use_dma;
 	u8			peci_revision;

@@ -284,7 +284,6 @@ static int aspeed_peci_xfer(struct peci_adapter *adapter,
 
 		msg->rx_buf[i] = (u8)(rx_data >> (byte_offset << 3));
 	}
-
 	print_hex_dump_debug("RX : ", DUMP_PREFIX_NONE, 16, 1,
 			     msg->rx_buf, msg->rx_len, true);
 
@@ -294,6 +293,8 @@ static int aspeed_peci_xfer(struct peci_adapter *adapter,
 	dev_dbg(priv->dev, "------------------------\n");
 
 err_irqrestore:
+	/* Reason : spin lock and unlock handled properly */
+	/* coverity[double_unlock : FALSE] */
 	spin_unlock_irqrestore(&priv->lock, flags);
 
 	return ret;
@@ -345,6 +346,11 @@ static void aspeed_peci_set_wa_counter(int cpu, size_t count)
 
 static int aspeed_peci_wa_check_counter(struct peci_adapter *adapter, struct peci_xfer_msg *msg)
 {
+	if(msg == NULL)
+	{
+	   return -EINVAL;
+	}
+
 	struct aspeed_peci *priv = peci_get_adapdata(adapter);
 	int cpu = msg->addr - PECI_BASE_ADDR;
 
@@ -361,8 +367,9 @@ static int aspeed_peci_wa_check_counter(struct peci_adapter *adapter, struct pec
 		/* Reset the counter including the current command */
 		dummy_cmd_count[cpu] = 1;
 	}
-
 	/* Send the real command */
+	/* Reason : Null checked before calling the function */
+	/* coverity[FORWARD_NULL : FALSE] */
 	return aspeed_peci_xfer(adapter, msg);
 }
 

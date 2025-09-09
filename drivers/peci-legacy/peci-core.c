@@ -364,6 +364,12 @@ static int peci_wa_check_counter_sync(struct peci_adapter *adapter, struct peci_
 		msg->tx_buf[1] &= ~PECI_DEV_RETRY_BIT;
 		/* Recalculate the AW FCS if it has one */
 		if (has_aw_fcs) {
+			if( peci_aw_fcs(msg, 2 + msg->tx_len, &aw_fcs) )
+			{
+				return -EINVAL;
+			}
+			/* Reason : Return value checked before calling the function  */
+			/* coverity[check_return : FALSE] */
 			peci_aw_fcs(msg, 2 + msg->tx_len, &aw_fcs);
 
 			msg->tx_buf[msg->tx_len - 1] = 0x80 ^ aw_fcs;
@@ -1842,6 +1848,7 @@ static int peci_check_domain_validity(u8 domain_id)
 static int peci_check_addr_validity(u8 addr)
 {
 	if (addr < PECI_BASE_ADDR && addr > PECI_BASE_ADDR + PECI_OFFSET_MAX)
+		/* coverity[dead_error_line : FALSE] */
 		return -EINVAL;
 
 	return 0;

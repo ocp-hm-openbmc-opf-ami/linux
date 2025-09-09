@@ -316,7 +316,7 @@ static int __init peci_dev_init(void)
 		goto err;
 	}
 
-	peci_dev_class = class_create(THIS_MODULE, KBUILD_MODNAME);
+	peci_dev_class = class_create(KBUILD_MODNAME);
 	if (IS_ERR(peci_dev_class)) {
 		ret = PTR_ERR(peci_dev_class);
 		goto err_unreg_chrdev;

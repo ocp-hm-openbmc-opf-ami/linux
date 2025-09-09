@@ -115,6 +115,10 @@
 #define ASPEED_PECI_CMD_TIMEOUT_MS_DEFAULT	1000
 #define ASPEED_PECI_CMD_TIMEOUT_MS_MAX		60000
 
+#define DUMMY_CMD_WA_THRESHOLD 0xFFFF
+
+static size_t dummy_cmd_count[PECI_OFFSET_MAX];
+
 struct aspeed_peci {
 	struct peci_adapter	*adapter;
 	struct device		*dev;
@@ -295,6 +299,73 @@ err_irqrestore:
 	return ret;
 }
 
+static struct peci_xfer_msg *aspeed_peci_get_dummy_command(struct peci_adapter *adapter, u8 addr)
+{
+	struct peci_xfer_msg *msg;
+
+	msg = peci_get_xfer_msg(PECI_RDPKGCFG_WRITE_LEN, PECI_RDPKGCFG_READ_LEN_BASE + 4);
+	if (!msg)
+		return NULL;
+
+	msg->addr = addr;
+	msg->tx_buf[0] = PECI_RDPKGCFG_CMD;
+	msg->tx_buf[1] = 0; /* Domain ID [7:1] | Retry bit [0] */
+	msg->tx_buf[2] = 0; /* RdPkgConfig index */
+	msg->tx_buf[3] = 0; /* LSB - Config parameter */
+	msg->tx_buf[4] = 0; /* MSB - Config parameter */
+
+	return msg;
+}
+
+static void aspeed_peci_wa_execute_dummy_cmd(struct peci_adapter *adapter, u8 addr)
+{
+	struct aspeed_peci *priv = peci_get_adapdata(adapter);
+	struct peci_xfer_msg *msg;
+
+	msg = aspeed_peci_get_dummy_command(adapter, addr);
+	if (!msg)
+		return;
+
+	/* send dummy command */
+	aspeed_peci_xfer(adapter, msg);
+	dev_dbg(priv->dev, "PECI 0x83 workaround: Dummy command sent. cc: 0x%x\n", msg->rx_buf[0]);
+
+	peci_put_xfer_msg(msg);
+}
+
+static u32 aspeed_peci_get_wa_counter(int cpu)
+{
+	return dummy_cmd_count[cpu];
+}
+
+static void aspeed_peci_set_wa_counter(int cpu, size_t count)
+{
+	dummy_cmd_count[cpu] = count;
+}
+
+static int aspeed_peci_wa_check_counter(struct peci_adapter *adapter, struct peci_xfer_msg *msg)
+{
+	struct aspeed_peci *priv = peci_get_adapdata(adapter);
+	int cpu = msg->addr - PECI_BASE_ADDR;
+
+	/* Command is counted if it's not Ping, GetTemp, or GetDIB and not a retry */
+	if (msg->tx_buf && msg->tx_buf[0] != PECI_GET_TEMP_CMD &&
+	    msg->tx_buf[0] != PECI_GET_DIB_CMD &&
+	    (msg->tx_buf[1] & PECI_DEV_RETRY_BIT) != PECI_DEV_RETRY_BIT)
+		dummy_cmd_count[cpu]++;
+
+	if (dummy_cmd_count[cpu] > DUMMY_CMD_WA_THRESHOLD) {
+		dev_dbg(priv->dev, "PECI 0x83 workaround: Counter threshold reached on CPU %d.\n",
+			cpu);
+		aspeed_peci_wa_execute_dummy_cmd(adapter, msg->addr);
+		/* Reset the counter including the current command */
+		dummy_cmd_count[cpu] = 1;
+	}
+
+	/* Send the real command */
+	return aspeed_peci_xfer(adapter, msg);
+}
+
 static irqreturn_t aspeed_peci_irq_handler(int irq, void *arg)
 {
 	struct aspeed_peci *priv = arg;
@@ -454,7 +525,11 @@ static int aspeed_peci_probe(struct platform_device *pdev)
 	priv->adapter->owner = THIS_MODULE;
 	priv->adapter->dev.of_node = of_node_get(dev_of_node(priv->dev));
 	strlcpy(priv->adapter->name, pdev->name, sizeof(priv->adapter->name));
-	priv->adapter->xfer = aspeed_peci_xfer;
+	//priv->adapter->xfer = aspeed_peci_xfer;
+	priv->adapter->xfer = aspeed_peci_wa_check_counter;
+	priv->adapter->set_wa_count = aspeed_peci_set_wa_counter;
+	priv->adapter->get_wa_count = aspeed_peci_get_wa_counter;
+
 	priv->adapter->use_dma = false;
 
 	priv->rst = devm_reset_control_get(&pdev->dev, NULL);

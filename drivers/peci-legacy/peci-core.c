@@ -337,16 +337,67 @@ static int __peci_xfer(struct peci_adapter *adapter, struct peci_xfer_msg *msg,
 	return ret;
 }
 
+static int peci_wa_check_counter_sync(struct peci_adapter *adapter, struct peci_xfer_msg *msg,
+				      bool do_retry, bool has_aw_fcs)
+{
+	bool previous_83[PECI_OFFSET_MAX] = { 0 };
+	int cpu = msg->addr - PECI_BASE_ADDR;
+	size_t wa_count;
+	u8 aw_fcs;
+	int ret;
+
+	ret = __peci_xfer(adapter, msg, do_retry, has_aw_fcs);
+
+	/*
+	 * If the command was retried and got 0x83 but not previously and the wa_count functions are
+	 * available, resend the command to check if we need to sync the counter. If we got
+	 * 0x83 previously, we may be in a persistent 0x83 state, so don't attempt to re-sync
+	 * the counter until it's resolved. If the wa_count functions are not available, we
+	 * can't sync the counter.
+	 */
+	if (do_retry && msg->rx_buf && msg->rx_buf[0] == PECI_DEV_CC_NEED_RETRY &&
+	    !previous_83[cpu] && adapter->get_wa_count && adapter->set_wa_count) {
+		wa_count = adapter->get_wa_count(cpu);
+		/* Clear the counter to avoid a counter rollover from the repeated command */
+		adapter->set_wa_count(cpu, 0);
+
+		msg->tx_buf[1] &= ~PECI_DEV_RETRY_BIT;
+		/* Recalculate the AW FCS if it has one */
+		if (has_aw_fcs) {
+			peci_aw_fcs(msg, 2 + msg->tx_len, &aw_fcs);
+
+			msg->tx_buf[msg->tx_len - 1] = 0x80 ^ aw_fcs;
+		}
+
+		__peci_xfer(adapter, msg, do_retry, has_aw_fcs);
+
+		if (msg->rx_buf[0] == PECI_DEV_CC_NEED_RETRY)
+			/* 0x83 repeated, so restore the count including the resent command */
+			adapter->set_wa_count(cpu, wa_count + 1);
+		else
+			dev_dbg(&adapter->dev, "0x83 issue hit on CPU %d. Counter re-synced\n",
+				cpu);
+
+		/* Restore the 0x83 cc in case it changed */
+		msg->rx_buf[0] = PECI_DEV_CC_NEED_RETRY;
+	}
+
+	/* Remember if the last return was 0x83 */
+	previous_83[cpu] = (msg->rx_buf && msg->rx_buf[0] == PECI_DEV_CC_NEED_RETRY);
+
+	return ret;
+}
+
 static int peci_xfer(struct peci_adapter *adapter, struct peci_xfer_msg *msg)
 {
-	return __peci_xfer(adapter, msg, false, false);
+	return peci_wa_check_counter_sync(adapter, msg, false, false);
 }
 
 static int peci_xfer_with_retries(struct peci_adapter *adapter,
 				  struct peci_xfer_msg *msg,
 				  bool has_aw_fcs)
 {
-	return __peci_xfer(adapter, msg, true, has_aw_fcs);
+	return peci_wa_check_counter_sync(adapter, msg, true, has_aw_fcs);
 }
 
 static int peci_scan_cmd_mask(struct peci_adapter *adapter)

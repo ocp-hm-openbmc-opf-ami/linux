@@ -6732,6 +6732,7 @@ void add_route_prefix_entry(struct net_device *dev, u8 *opt, int len, struct in6
 			   (memcmp(&curr_entry->prefix.s6_addr,&entry->prefix.s6_addr,sizeof(struct in6_addr)) == 0) &&
 			   (memcmp(&curr_entry->ifname,&entry->ifname,IFNAMSIZ) == 0) &&
 			   (curr_entry->prefix_len == entry->prefix_len)){
+				kfree(entry);
 				goto put;
 			}
 		}

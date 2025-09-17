@@ -819,11 +819,11 @@ int rndis_msg_parser(struct rndis_params *params, u8 *buf)
 	case RNDIS_MSG_HALT:
 		pr_debug("%s: RNDIS_MSG_HALT\n",
 			__func__);
-		params->state = RNDIS_UNINITIALIZED;
+		/*params->state = RNDIS_UNINITIALIZED;
 		if (params->dev) {
 			netif_carrier_off(params->dev);
 			netif_stop_queue(params->dev);
-		}
+		}*/
 		return 0;
 
 	case RNDIS_MSG_QUERY:

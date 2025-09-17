@@ -3488,39 +3488,72 @@ fail:
 }
 
 /*
- * Select span of a bvec iterator we're going to use.  Limit it by both maximum
+ * Select span of a bvec/kvec iterator we're going to use.  Limit it by both maximum
  * size and maximum number of segments.
  */
-static size_t cifs_limit_bvec_subset(const struct iov_iter *iter, size_t max_size,
+static size_t cifs_limit_iter_subset(const struct iov_iter *iter, size_t max_size,
 				     size_t max_segs, unsigned int *_nsegs)
 {
-	const struct bio_vec *bvecs = iter->bvec;
-	unsigned int nbv = iter->nr_segs, ix = 0, nsegs = 0;
+	unsigned int ix = 0, nsegs = 0;
 	size_t len, span = 0, n = iter->count;
 	size_t skip = iter->iov_offset;
 
-	if (WARN_ON(!iov_iter_is_bvec(iter)) || n == 0)
+	if (n == 0)
 		return 0;
 
-	while (n && ix < nbv && skip) {
-		len = bvecs[ix].bv_len;
-		if (skip < len)
-			break;
-		skip -= len;
-		n -= len;
-		ix++;
-	}
+	if (iov_iter_is_bvec(iter)) {
+		const struct bio_vec *bvecs = iter->bvec;
+		unsigned int nbv = iter->nr_segs;
 
-	while (n && ix < nbv) {
-		len = min3(n, bvecs[ix].bv_len - skip, max_size);
-		span += len;
-		max_size -= len;
-		nsegs++;
-		ix++;
-		if (max_size == 0 || nsegs >= max_segs)
-			break;
-		skip = 0;
-		n -= len;
+		while (n && ix < nbv && skip) {
+			len = bvecs[ix].bv_len;
+			if (skip < len)
+				break;
+			skip -= len;
+			n -= len;
+			ix++;
+		}
+
+		while (n && ix < nbv) {
+			len = min3(n, bvecs[ix].bv_len - skip, max_size);
+			span += len;
+			max_size -= len;
+			nsegs++;
+			ix++;
+			if (max_size == 0 || nsegs >= max_segs)
+				break;
+			skip = 0;
+			n -= len;
+		}
+
+	} else if (iov_iter_is_kvec(iter)) {
+		const struct kvec *kvecs = iter->kvec;
+		unsigned int nkv = iter->nr_segs;
+
+		while (n && ix < nkv && skip) {
+			len = kvecs[ix].iov_len;
+			if (skip < len)
+				break;
+			skip -= len;
+			n -= len;
+			ix++;
+		}
+
+		while (n && ix < nkv) {
+			len = min3(n, kvecs[ix].iov_len - skip, max_size);
+			span += len;
+			max_size -= len;
+			nsegs++;
+			ix++;
+			if (max_size == 0 || nsegs >= max_segs)
+				break;
+			skip = 0;
+			n -= len;
+		}
+	} else {
+		/* Unsupported iterator type */
+		WARN_ON(1);
+		return 0;
 	}
 
 	*_nsegs = nsegs;
@@ -3583,7 +3616,7 @@ cifs_write_from_iter(loff_t fpos, size_t len, struct iov_iter *from,
 			break;
 		}
 
-		cur_len = cifs_limit_bvec_subset(from, max_len, max_segs, &nsegs);
+		cur_len = cifs_limit_iter_subset(from, max_len, max_segs, &nsegs);
 		cifs_dbg(FYI, "write_from_iter len=%zx/%zx nsegs=%u/%lu/%u\n",
 			 cur_len, max_len, nsegs, from->nr_segs, max_segs);
 		if (cur_len == 0) {
@@ -4113,7 +4146,7 @@ cifs_send_async_read(loff_t fpos, size_t len, struct cifsFileInfo *open_file,
 
 		max_len = min_t(size_t, len, rsize);
 
-		cur_len = cifs_limit_bvec_subset(&ctx->iter, max_len,
+		cur_len = cifs_limit_iter_subset(&ctx->iter, max_len,
 						 max_segs, &nsegs);
 		cifs_dbg(FYI, "read-to-iter len=%zx/%zx nsegs=%u/%lu/%u\n",
 			 cur_len, max_len, nsegs, ctx->iter.nr_segs, max_segs);

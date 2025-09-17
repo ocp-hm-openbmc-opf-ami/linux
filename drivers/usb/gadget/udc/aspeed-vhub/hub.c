@@ -598,15 +598,20 @@ static void ast_vhub_port_reset(struct ast_vhub *vhub, u8 port)
 	struct ast_vhub_port *p = &vhub->ports[port];
 	u16 set, clr, speed;
 
+	/*
+	 * Gadget layer isn't ready in quick connect/disconnect,
+	 * then driver will be NULL, doing port reset first needs
+	 * to confirm driver is ready.
+	 */
+	if (!p->dev.driver)
+		return;
+
 	/* First mark disabled */
 	ast_vhub_change_port_stat(vhub, port,
 				  USB_PORT_STAT_ENABLE |
 				  USB_PORT_STAT_SUSPEND,
 				  USB_PORT_STAT_RESET,
 				  false);
-
-	if (!p->dev.driver)
-		return;
 
 	/*
 	 * This will either "start" the port or reset the
@@ -1076,4 +1081,101 @@ int ast_vhub_init_hub(struct ast_vhub *vhub)
 	INIT_WORK(&vhub->wake_work, ast_vhub_wake_work);
 
 	return ast_vhub_init_desc(vhub);
+}
+
+int ami_vhub_upstream_connect(struct ast_vhub *vhub)
+{
+	u32 ctrl;
+	unsigned long flags;
+
+	UDCDBG(vhub, "Aspeed USB vHub connected\n");
+
+	spin_lock_irqsave(&vhub->lock, flags);
+	// No more init clk and DMA alloc, due to it was done in init_hw().
+
+	// No more enable PHY.
+
+	// No more setting for ISO & split control.
+
+	// No more setting for descriptor ring size.
+
+	// No more reset about devices.
+
+	// No more cleanup about EP ACK/NACK interrupts.
+
+	// No more default setting for EP0 and HW hub EP1.
+
+	// No more configure about EP0 DMA buffer.
+
+	// No more setting about clear address.
+
+	// No more setting about pullup hub.
+
+	// Simply and just enable upstream.
+	ctrl = readl(vhub->regs + AST_VHUB_CTRL);
+	ctrl |= VHUB_CTRL_UPSTREAM_CONNECT;
+	writel(ctrl, vhub->regs + AST_VHUB_CTRL);
+
+	// No more setting about interrupts.
+
+	spin_unlock_irqrestore(&vhub->lock, flags);
+	return 0;
+}
+
+int ami_vhub_upstream_disconnect(struct ast_vhub *vhub)
+{
+	u32 ctrl;
+	unsigned long flags;
+	int count = 0;
+
+	UDCDBG(vhub, "Aspeed USB vHub disconnected\n");
+
+	spin_lock_irqsave(&vhub->lock, flags);
+
+	/* Turn off auto remote wakeup setting before upstream disconnection */
+	ctrl = readl(vhub->regs + AST_VHUB_CTRL);
+	ctrl &= ~VHUB_CTRL_AUTO_REMOTE_WAKEUP;
+	writel(ctrl, vhub->regs + AST_VHUB_CTRL);
+
+	/* Check if USB remote wakeup is still signaling and wait it finishes */
+	ctrl = readl(vhub->regs + AST_VHUB_CTRL);
+	while (ctrl & VHUB_CTRL_MANUAL_REMOTE_WAKEUP) {
+		/* Wait max. USB remote wakeup signaling pulse width */
+		mdelay(12);
+		ctrl = readl(vhub->regs + AST_VHUB_CTRL);
+		/* Just retry one time */
+		if (++count > 1)
+			break;
+	}
+
+	// Simply and just disable upstream.
+	ctrl = readl(vhub->regs + AST_VHUB_CTRL);
+	ctrl &= ~VHUB_CTRL_UPSTREAM_CONNECT;
+	writel(ctrl, vhub->regs + AST_VHUB_CTRL);
+
+	// No more setting about interrupts.
+
+	// No more setting about Pull device and PHY.
+	spin_unlock_irqrestore(&vhub->lock, flags);
+
+	// No more DMA free, due to DMA alloc only once.
+
+	return 0;
+}
+
+int ami_vhub_upstream_status(struct ast_vhub *vhub)
+{
+	u32 ctrl;
+	unsigned long flags;
+
+	spin_lock_irqsave(&vhub->lock, flags);
+
+	ctrl = readl(vhub->regs + AST_VHUB_CTRL);
+	ctrl &= VHUB_CTRL_UPSTREAM_CONNECT;
+
+	spin_unlock_irqrestore(&vhub->lock, flags);
+
+	UDCDBG(vhub, "Aspeed USB vHub status: %s\n", ctrl ? "connect" : "disconnect");
+
+	return ctrl;
 }

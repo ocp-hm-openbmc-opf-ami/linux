@@ -524,6 +524,10 @@ struct usb_request *ast_vhub_alloc_request(struct usb_ep *u_ep,
 void ast_vhub_free_request(struct usb_ep *u_ep, struct usb_request *u_req);
 void ast_vhub_init_hw(struct ast_vhub *vhub);
 
+/* core-sysfs.c */
+int ami_core_sysfs_register(struct ast_vhub *vhub);
+void ami_core_sysfs_unregister(struct ast_vhub *vhub);
+
 /* ep0.c */
 void ast_vhub_ep0_handle_ack(struct ast_vhub_ep *ep, bool in_ack);
 void ast_vhub_ep0_handle_setup(struct ast_vhub_ep *ep);
@@ -538,6 +542,9 @@ int __ast_vhub_simple_reply(struct ast_vhub_ep *ep, int len, ...);
 			       __VA_ARGS__)
 
 /* hub.c */
+int ami_vhub_upstream_disconnect(struct ast_vhub *vhub);
+int ami_vhub_upstream_connect(struct ast_vhub *vhub);
+int ami_vhub_upstream_status(struct ast_vhub *vhub);
 int ast_vhub_init_hub(struct ast_vhub *vhub);
 enum std_req_rc ast_vhub_std_hub_request(struct ast_vhub_ep *ep,
 					 struct usb_ctrlrequest *crq);

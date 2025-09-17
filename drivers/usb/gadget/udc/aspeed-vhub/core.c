@@ -327,6 +327,9 @@ static void ast_vhub_remove(struct platform_device *pdev)
 	if (!vhub || !vhub->regs)
 		return;
 
+	/* Unexpose vHub upstream control to SYSFS*/
+	ami_core_sysfs_unregister(vhub);
+
 	/* Remove devices */
 	for (i = 0; i < vhub->max_ports; i++)
 		ast_vhub_del_dev(&vhub->ports[i].dev);
@@ -514,6 +517,9 @@ static int ast_vhub_probe(struct platform_device *pdev)
 
 	dev_info(&pdev->dev, "Initialized virtual hub in USB%d mode\n",
 		 vhub->force_usb1 ? 1 : 2);
+
+	/* Expose vHub upstream control to SYSFS*/
+	ami_core_sysfs_register(vhub);
 
 	return 0;
  err:

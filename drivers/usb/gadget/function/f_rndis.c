@@ -682,6 +682,20 @@ rndis_bind(struct usb_configuration *c, struct usb_function *f)
 	rndis_iad_descriptor.bFunctionProtocol = rndis_opts->protocol;
 
 	/*
+	 * In drivers/usb/gadget/configfs.c:configfs_composite_bind()
+	 * During the RNDIS to ECM network linking process, the original
+	 * RNDIS netdev is cleared. To ensure proper functionality, the
+	 * RNDIS netdev must now be reassigned.
+	 */
+	if (rndis_opts->borrowed_net && rndis_opts->bound) {
+		/* Retrieve the host MAC address and assign it to the RNDIS structure */
+		gether_get_host_addr_u8(rndis_opts->net, rndis->ethaddr);
+
+		/* Update the RNDIS port's I/O port with the new netdev private data */
+		rndis->port.ioport = netdev_priv(rndis_opts->net);
+	}
+
+	/*
 	 * in drivers/usb/gadget/configfs.c:configfs_composite_bind()
 	 * configurations are bound in sequence with list_for_each_entry,
 	 * in each configuration its functions are bound in sequence

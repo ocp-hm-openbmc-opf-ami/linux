@@ -1137,15 +1137,25 @@ int ami_vhub_upstream_disconnect(struct ast_vhub *vhub)
 	ctrl &= ~VHUB_CTRL_AUTO_REMOTE_WAKEUP;
 	writel(ctrl, vhub->regs + AST_VHUB_CTRL);
 
-	/* Check if USB remote wakeup is still signaling and wait it finishes */
-	ctrl = readl(vhub->regs + AST_VHUB_CTRL);
-	while (ctrl & VHUB_CTRL_MANUAL_REMOTE_WAKEUP) {
-		/* Wait max. USB remote wakeup signaling pulse width */
-		mdelay(12);
+	/* Confirm that AUTO_REMOTE_WAKEUP bit is cleared. Wait max 10ms */
+	for (count = 0; count < 10; count++) {
 		ctrl = readl(vhub->regs + AST_VHUB_CTRL);
-		/* Just retry one time */
-		if (++count > 1)
+		if (!(ctrl & VHUB_CTRL_AUTO_REMOTE_WAKEUP))
 			break;
+		mdelay(1);
+	}
+
+	if (ctrl & VHUB_CTRL_AUTO_REMOTE_WAKEUP)
+		dev_warn(&vhub->pdev->dev,
+			"AUTO_REMOTE_WAKEUP bit still set after %d ms! ctrl=0x%X\n",
+			count, ctrl);
+
+	/* Check if USB remote wakeup is still signaling and wait it finishes. Wait max 24ms */
+	for (count = 0; count < 2; count++) {
+		ctrl = readl(vhub->regs + AST_VHUB_CTRL);
+		if (!(ctrl & VHUB_CTRL_MANUAL_REMOTE_WAKEUP))
+			break;
+		mdelay(12);
 	}
 
 	// Simply and just disable upstream.

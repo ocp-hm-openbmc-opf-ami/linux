@@ -1529,6 +1529,9 @@ static void ftgmac100_adjust_link(struct net_device *netdev)
 	/* Release phy lock to allow ftgmac100_reset to acquire it, keeping lock
 	 * order consistent to prevent dead lock.
 	 */
+
+        /* Reason for False Positive - Logic ensures the pointer is not null */
+        /* coverity[check_after_deref : FALSE] */
 	if (netdev->phydev)
 		mutex_unlock(&netdev->phydev->lock);
 

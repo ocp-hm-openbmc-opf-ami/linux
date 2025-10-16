@@ -379,7 +379,6 @@ static int ast_udc_ep_enable(struct usb_ep *_ep,
 	ep->desc = desc;
 	ep->stopped = 0;
 	ep->ep.maxpacket = maxpacket;
-	ep->chunk_max = AST_EP_DMA_DESC_MAX_LEN;
 
 	if (maxpacket < AST_UDC_EPn_MAX_PACKET)
 		ep_conf = EP_SET_MAX_PKT(maxpacket);
@@ -392,7 +391,18 @@ static int ast_udc_ep_enable(struct usb_ep *_ep,
 	if (!ep->dir_in)
 		ep_conf |= EP_DIR_OUT;
 
-	EP_DBG(ep, "type %d, dir_in %d\n", type, dir_in);
+	/*
+	 * Large send function can send up to 8 packets from
+	 * one descriptor with a limit of 4096 bytes.
+	 */
+	ep->chunk_max = ep->ep.maxpacket;
+	if (ep->dir_in) {
+		ep->chunk_max <<= 3;
+		while (ep->chunk_max > AST_EP_DMA_DESC_MAX_LEN)
+			ep->chunk_max -= ep->ep.maxpacket;
+	}
+
+	EP_DBG(ep, "type %d, dir_in %d, chunk_max %d\n", type, dir_in, ep->chunk_max);
 	switch (type) {
 	case USB_ENDPOINT_XFER_ISOC:
 		ep_conf |= EP_SET_TYPE_MASK(EP_TYPE_ISO);
@@ -1158,21 +1168,6 @@ static irqreturn_t ast_udc_isr(int irq, void *data)
 	/* Ack interrupts */
 	ast_udc_write(udc, isr, AST_UDC_ISR);
 
-	if (isr & UDC_IRQ_BUS_RESET) {
-		ISR_DBG(udc, "UDC_IRQ_BUS_RESET\n");
-		udc->gadget.speed = USB_SPEED_UNKNOWN;
-
-		ep = &udc->ep[1];
-		EP_DBG(ep, "dctrl:0x%x\n",
-		       ast_ep_read(ep, AST_UDC_EP_DMA_CTRL));
-
-		if (udc->driver && udc->driver->reset) {
-			spin_unlock(&udc->lock);
-			udc->driver->reset(&udc->gadget);
-			spin_lock(&udc->lock);
-		}
-	}
-
 	if (isr & UDC_IRQ_BUS_SUSPEND) {
 		ISR_DBG(udc, "UDC_IRQ_BUS_SUSPEND\n");
 		udc->suspended_from = udc->gadget.state;
@@ -1192,6 +1187,21 @@ static irqreturn_t ast_udc_isr(int irq, void *data)
 		if (udc->driver && udc->driver->resume) {
 			spin_unlock(&udc->lock);
 			udc->driver->resume(&udc->gadget);
+			spin_lock(&udc->lock);
+		}
+	}
+
+	if (isr & UDC_IRQ_BUS_RESET) {
+		ISR_DBG(udc, "UDC_IRQ_BUS_RESET\n");
+		udc->gadget.speed = USB_SPEED_UNKNOWN;
+
+		ep = &udc->ep[1];
+		EP_DBG(ep, "dctrl:0x%x\n",
+		       ast_ep_read(ep, AST_UDC_EP_DMA_CTRL));
+
+		if (udc->driver && udc->driver->reset) {
+			spin_unlock(&udc->lock);
+			udc->driver->reset(&udc->gadget);
 			spin_lock(&udc->lock);
 		}
 	}

@@ -440,6 +440,7 @@
 	status = "okay";
 };
 
+#if 0
 &vuart0 {
 	virtual;
 	port = <0x3f8>;
@@ -447,6 +448,7 @@
 	sirq-polarity = <0>;
 	status = "okay";
 };
+#endif
 
 &fmc {
 	status = "okay";

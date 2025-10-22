@@ -328,7 +328,7 @@ static void ast_vhub_remove(struct platform_device *pdev)
 		return;
 
 	/* Unexpose vHub upstream control to SYSFS*/
-	ami_core_sysfs_unregister(vhub);
+	ami_core_sysfs_unregister(&pdev->dev, vhub);
 
 	/* Remove devices */
 	for (i = 0; i < vhub->max_ports; i++)
@@ -576,7 +576,7 @@ static int ast_vhub_probe(struct platform_device *pdev)
 		 vhub->force_usb1 ? 1 : 2);
 
 	/* Expose vHub upstream control to SYSFS*/
-	ami_core_sysfs_register(vhub);
+	ami_core_sysfs_register(&pdev->dev, vhub);
 
 	return 0;
  err:

@@ -535,8 +535,8 @@ void ast_vhub_free_request(struct usb_ep *u_ep, struct usb_request *u_req);
 void ast_vhub_init_hw(struct ast_vhub *vhub);
 
 /* core-sysfs.c */
-int ami_core_sysfs_register(struct ast_vhub *vhub);
-void ami_core_sysfs_unregister(struct ast_vhub *vhub);
+int ami_core_sysfs_register(struct device *dev, struct ast_vhub *vhub);
+void ami_core_sysfs_unregister(struct device *dev, struct ast_vhub *vhub);
 
 /* ep0.c */
 void ast_vhub_ep0_handle_ack(struct ast_vhub_ep *ep, bool in_ack);

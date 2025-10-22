@@ -1089,7 +1089,7 @@ int ami_vhub_upstream_connect(struct ast_vhub *vhub)
 	u32 ctrl;
 	unsigned long flags;
 
-	UDCDBG(vhub, "Aspeed USB vHub connected\n");
+	UDCDBG(vhub, "Enabling vHub connection\n");
 
 	spin_lock_irqsave(&vhub->lock, flags);
 	// No more init clk and DMA alloc, due to it was done in init_hw().
@@ -1129,7 +1129,7 @@ int ami_vhub_upstream_disconnect(struct ast_vhub *vhub)
 	unsigned long flags;
 	int count = 0;
 
-	UDCDBG(vhub, "Aspeed USB vHub disconnected\n");
+	UDCDBG(vhub, "Disabling vHub connection\n");
 
 	spin_lock_irqsave(&vhub->lock, flags);
 
@@ -1186,7 +1186,7 @@ int ami_vhub_upstream_status(struct ast_vhub *vhub)
 
 	spin_unlock_irqrestore(&vhub->lock, flags);
 
-	UDCDBG(vhub, "Aspeed USB vHub status: %s\n", ctrl ? "connect" : "disconnect");
+	UDCDBG(vhub, "vHub status: %s\n", ctrl ? "connected" : "disconnected");
 
 	return ctrl;
 }

@@ -1369,7 +1369,7 @@ static void aspeed_video_free_buf(struct aspeed_video *video,
 
 /*
  * Get the minimum HW-supported compression buffer size for the frame size.
- * Assume worst-case JPEG compression size is 1/2 raw size. This should be
+ * Assume worst-case JPEG compression size is 1/4 raw size. This should be
  * plenty even for maximum quality; any worse and the engine will simply return
  * incomplete JPEGs.
  */
@@ -1381,7 +1381,7 @@ static void aspeed_video_calc_compressed_size(struct aspeed_video *video,
 	unsigned int size;
 	const unsigned int num_compression_packets = 4;
 	const unsigned int compression_packet_size = 1024;
-	const unsigned int max_compressed_size = frame_size * 2; /* 4bpp / 2 */
+	const unsigned int max_compressed_size = frame_size; /* 4bpp / 4 */
 
 	video->max_compressed_size = UINT_MAX;
 
@@ -1402,6 +1402,7 @@ static void aspeed_video_calc_compressed_size(struct aspeed_video *video,
 	aspeed_video_write(video, VE_STREAM_BUF_SIZE,
 			   compression_buffer_size_reg);
 
+	video->max_compressed_size = round_up(max_compressed_size, 0x10000);
 	v4l2_dbg(1, debug, &video->v4l2_dev, "Max compressed size: %#x\n",
 		 video->max_compressed_size);
 }
@@ -1980,10 +1981,10 @@ static int aspeed_video_enum_input(struct file *file, void *fh,
 {
 	struct aspeed_video *video = video_drvdata(file);
 
-	if (inp->index)
+	if (inp->index >= VIDEO_INPUT_MAX)
 		return -EINVAL;
 
-	strscpy(inp->name, "Host VGA capture", sizeof(inp->name));
+	sprintf(inp->name, "%s capture", input_str[inp->index]);
 	inp->type = V4L2_INPUT_TYPE_CAMERA;
 	inp->capabilities = V4L2_IN_CAP_DV_TIMINGS;
 	inp->status = video->v4l2_input_status;
@@ -2006,6 +2007,12 @@ static int aspeed_video_set_input(struct file *file, void *fh, unsigned int i)
 
 	if (i >= VIDEO_INPUT_MAX)
 		return -EINVAL;
+
+	if (i == video->input)
+		return 0;
+
+	if (vb2_is_busy(&video->queue))
+		return -EBUSY;
 
 	if (IS_ERR(video->scu)) {
 		v4l2_err(&video->v4l2_dev, "%s: scu isn't ready for input-control\n", __func__);
@@ -2820,17 +2827,12 @@ err_ctrl_init:
 // To avoid reset acquire conflict in syscon_regmap_lookup_xxx
 static struct regmap *aspeed_regmap_lookup(struct device_node *np, const char *property)
 {
-	struct device_node *syscon_np;
-	struct regmap *regmap;
+	struct device_node *syscon_np __free(device_node) = of_parse_phandle(np, property, 0);
 
-	syscon_np = of_parse_phandle(np, property, 0);
 	if (!syscon_np)
 		return ERR_PTR(-ENODEV);
 
-	regmap = device_node_to_regmap(syscon_np);
-	of_node_put(syscon_np);
-
-	return regmap;
+	return device_node_to_regmap(syscon_np);
 }
 
 static int aspeed_video_init(struct aspeed_video *video)

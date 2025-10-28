@@ -156,7 +156,11 @@
 
 #include "dev.h"
 #include "net-sysfs.h"
-
+#include <net/ncsi.h>
+#include "../net/ncsi/internal.h"
+#ifdef CONFIG_NCSI_AMI_MANUAL_DETECT
+extern int ncsi_enabled;
+#endif
 static DEFINE_SPINLOCK(ptype_lock);
 struct list_head ptype_base[PTYPE_HASH_SIZE] __read_mostly;
 struct list_head ptype_all __read_mostly;	/* Taps */
@@ -1510,10 +1514,20 @@ static int __dev_open(struct net_device *dev, struct netlink_ext_ack *extack)
 	if (ret)
 		clear_bit(__LINK_STATE_START, &dev->state);
 	else {
+#ifdef CONFIG_NCSI_AMI_MANUAL_DETECT
+		if (ncsi_find_dev(dev) && !ncsi_enabled)
+			return ret;
+
 		dev->flags |= IFF_UP;
 		dev_set_rx_mode(dev);
 		dev_activate(dev);
 		add_device_randomness(dev->dev_addr, dev->addr_len);
+#else
+		dev->flags |= IFF_UP;
+		dev_set_rx_mode(dev);
+		dev_activate(dev);
+		add_device_randomness(dev->dev_addr, dev->addr_len);
+#endif
 	}
 
 	return ret;

@@ -23,3 +23,8 @@ config NCSI_OEM_CMD_KEEP_PHY
 	help
 	  This allows to keep PHY link up and prevents any channel resets during
 	  the host load.
+config NCSI_AMI_MANUAL_DETECT
+	bool "NCSI Manual Detect"
+	depends on NET_NCSI
+	help
+	  Manual Detect NCSI devices instead of start NCSI devices during boot.

@@ -2096,7 +2096,7 @@ static ssize_t ncsi_trigger_write(struct file *file, const char __user *buffer, 
 	struct ncsi_dev_priv *ndp;
 	NCSI_FOR_EACH_DEV(ndp) {
 		struct ncsi_dev *nd = &ndp->ndev;
-		pr_info("Manually enabling NCSI: %s\n", ndp->ndev.dev);
+		netdev_info(ndp->ndev.dev, "Manually enabling NCSI\n");
 
 		ncsi_stop_dev(&ndp->ndev);
 		ndp->flags = 0;

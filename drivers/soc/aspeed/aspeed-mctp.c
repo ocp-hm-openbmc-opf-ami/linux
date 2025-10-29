@@ -49,6 +49,7 @@
 
 #define ASPEED_MCTP_EID		0x014
 #define  MEMORY_SPACE_MAPPING	GENMASK(31, 28)
+#define  MCTP_EID		GENMASK(7, 0)
 #define ASPEED_MCTP_OBFF_CTRL	0x018
 
 #define ASPEED_MCTP_ENGINE_CTRL		0x01c
@@ -182,13 +183,13 @@
 #define MCTP_HDR_SOM			BIT(7)
 #define MCTP_HDR_EOM			BIT(6)
 #define MCTP_HDR_SOM_EOM		(MCTP_HDR_SOM | MCTP_HDR_EOM)
-#define MCTP_HDR_TYPE_OFFSET		16
+#define MCTP_PAYLOAD_TYPE_OFFSET	0
 #define MCTP_HDR_TYPE_CONTROL		0
 #define MCTP_HDR_TYPE_VDM_PCI		0x7e
 #define MCTP_HDR_TYPE_SPDM		0x5
 #define MCTP_HDR_TYPE_BASE_LAST		MCTP_HDR_TYPE_SPDM
-#define MCTP_HDR_VENDOR_OFFSET		17
-#define MCTP_HDR_VDM_TYPE_OFFSET	19
+#define MCTP_PAYLOAD_VENDOR_OFFSET	1
+#define MCTP_PAYLOAD_VDM_TYPE_OFFSET	3
 
 /* MCTP header DW little endian mask definitions */
 /* 0th DW */
@@ -706,26 +707,18 @@ aspeed_mctp_find_handler(struct aspeed_mctp *priv,
 			 struct mctp_pcie_packet *packet)
 {
 	struct mctp_type_handler *handler;
-	u8 *hdr = (u8 *)packet->data.hdr;
+	u8 *payload = (u8 *)packet->data.payload;
 	struct mctp_client *client = NULL;
-	u8 mctp_type, som_eom;
+	u8 mctp_type;
 	u16 vendor = 0;
 	u16 vdm_type = 0;
 
 	lockdep_assert_held(&priv->clients_lock);
 
-	/*
-	 * Middle and EOM fragments cannot be matched to MCTP type.
-	 * For consistency do not match type for any fragmented messages.
-	 */
-	som_eom = hdr[MCTP_HDR_TAG_OFFSET] & MCTP_HDR_SOM_EOM;
-	if (som_eom != MCTP_HDR_SOM_EOM)
-		return NULL;
-
-	mctp_type = hdr[MCTP_HDR_TYPE_OFFSET];
+	mctp_type = payload[MCTP_PAYLOAD_TYPE_OFFSET];
 	if (mctp_type == MCTP_HDR_TYPE_VDM_PCI) {
-		vendor = *((u16 *)&hdr[MCTP_HDR_VENDOR_OFFSET]);
-		vdm_type = *((u16 *)&hdr[MCTP_HDR_VDM_TYPE_OFFSET]);
+		vendor = *((u16 *)&payload[MCTP_PAYLOAD_VENDOR_OFFSET]);
+		vdm_type = *((u16 *)&payload[MCTP_PAYLOAD_VDM_TYPE_OFFSET]);
 	}
 
 	list_for_each_entry(handler, &priv->mctp_type_handlers, link) {
@@ -770,9 +763,6 @@ static void aspeed_mctp_dispatch_packet(struct aspeed_mctp *priv,
 			aspeed_mctp_packet_free(packet);
 		} else {
 			wake_up_all(&client->wait_queue);
-#ifdef CONFIG_MCTP_TRANSPORT_PCIE_VDM
-			mctp_pcie_vdm_notify(client, MCTP_PCIE_VDM_NOTIFY_RECV);
-#endif
 		}
 #ifdef CONFIG_MCTP_TRANSPORT_PCIE_VDM
 		mctp_pcie_vdm_receive_packet(priv->ndev);
@@ -881,6 +871,9 @@ static void aspeed_mctp_rx_tasklet(unsigned long data)
 	u32 hw_read_ptr;
 	u32 *hdr, *payload;
 	bool rx_full;
+
+	/* initialized as false */
+	rx_full = false;
 
 	if (priv->match_data->vdm_hdr_direct_xfer && priv->match_data->fifo_auto_surround) {
 		struct mctp_pcie_packet_data *rx_buf;
@@ -1241,6 +1234,7 @@ int aspeed_mctp_send_packet(struct mctp_client *client,
 	struct aspeed_mctp *priv = client->priv;
 	u32 *hdr_dw = (u32 *)packet->data.hdr;
 	u8 *hdr = (u8 *)packet->data.hdr;
+	u8 *payload = (u8 *)packet->data.payload;
 	u16 packet_data_sz_dw;
 	u16 pci_data_len_dw;
 	int ret;
@@ -1271,7 +1265,7 @@ int aspeed_mctp_send_packet(struct mctp_client *client,
 	 * XXX Don't update EID for MCTP Control messages - old EID may
 	 * interfere with MCTP discovery flow.
 	 */
-	if (priv->eid && hdr[MCTP_HDR_TYPE_OFFSET] != MCTP_HDR_TYPE_CONTROL)
+	if (priv->eid && payload[MCTP_PAYLOAD_TYPE_OFFSET] != MCTP_HDR_TYPE_CONTROL)
 		hdr[MCTP_HDR_SRC_EID_OFFSET] = priv->eid;
 
 	ret = ptr_ring_produce_bh(&client->tx_queue, packet);
@@ -1486,12 +1480,8 @@ int aspeed_mctp_remove_type_handler(struct mctp_client *client,
 	return ret;
 }
 
-#ifdef CONFIG_MCTP_TRANSPORT_PCIE_VDM
 EXPORT_SYMBOL_GPL(aspeed_mctp_register_default_handler);
 int aspeed_mctp_register_default_handler(struct mctp_client *client)
-#else
-static int aspeed_mctp_register_default_handler(struct mctp_client *client)
-#endif
 {
 	struct aspeed_mctp *priv = client->priv;
 	int ret = 0;
@@ -1555,7 +1545,8 @@ aspeed_mctp_filter_eid(struct aspeed_mctp *priv, void __user *userbuf)
 	}
 
 	if (eid.enable) {
-		regmap_write(priv->map, ASPEED_MCTP_EID, eid.eid);
+		regmap_update_bits(priv->map, ASPEED_MCTP_EID,
+				   MCTP_EID, eid.eid);
 		regmap_update_bits(priv->map, ASPEED_MCTP_CTRL,
 				   MATCHING_EID, MATCHING_EID);
 	} else {
@@ -2078,13 +2069,14 @@ static void aspeed_mctp_pcie_setup(struct aspeed_mctp *priv)
 		if (priv->match_data->need_address_mapping)
 			regmap_update_bits(priv->map, ASPEED_MCTP_EID,
 					   MEMORY_SPACE_MAPPING, BIT(31));
+
+		/* Only set TX MPS since HW will parse RX packet to decide how many bytes to receive
+		 * based on the length field in PCIe VDM header.
+		 */
 		if (priv->match_data->dma_need_64bits_width) {
 			tx_max_payload_size =
 				FIELD_GET(TX_MAX_PAYLOAD_SIZE_MASK,
 					  ilog2(ASPEED_MCTP_MTU >> 6));
-			rx_max_payload_size =
-				FIELD_GET(RX_MAX_PAYLOAD_SIZE_MASK,
-					  (ilog2(ASPEED_MCTP_MTU >> 6)) << RX_MAX_PAYLOAD_SIZE_SHIFT);
 		} else {
 			/*
 			 * In ast2600, tx som and eom will not match expected result.
@@ -2096,9 +2088,6 @@ static void aspeed_mctp_pcie_setup(struct aspeed_mctp *priv)
 			tx_max_payload_size =
 				FIELD_GET(TX_MAX_PAYLOAD_SIZE_MASK,
 						fls(ASPEED_MCTP_MTU >> 6));
-			rx_max_payload_size =
-				FIELD_GET(RX_MAX_PAYLOAD_SIZE_MASK,
-					   (fls(ASPEED_MCTP_MTU >> 6)) << RX_MAX_PAYLOAD_SIZE_SHIFT);
 		}
 
 		regmap_update_bits(priv->map, ASPEED_MCTP_ENGINE_CTRL,
@@ -2527,7 +2516,7 @@ static int aspeed_mctp_probe(struct platform_device *pdev)
 		return id;
 	priv->mctp_miscdev.parent = priv->dev;
 	priv->mctp_miscdev.minor = MISC_DYNAMIC_MINOR;
-	priv->mctp_miscdev.name = kasprintf(GFP_KERNEL, "aspeed-mctp%d", id);
+	priv->mctp_miscdev.name = devm_kasprintf(priv->dev, GFP_KERNEL, "aspeed-mctp%d", id);
 	priv->mctp_miscdev.fops = &aspeed_mctp_fops;
 	ret = misc_register(&priv->mctp_miscdev);
 	if (ret) {
@@ -2543,7 +2532,7 @@ static int aspeed_mctp_probe(struct platform_device *pdev)
 	}
 	aspeed_mctp_pcie_setup(priv);
 
-	name = kasprintf(GFP_KERNEL, "peci-mctp%d", id);
+	name = devm_kasprintf(priv->dev, GFP_KERNEL, "peci-mctp%d", id);
 	priv->peci_mctp =
 		platform_device_register_data(priv->dev, name, PLATFORM_DEVID_NONE, NULL, 0);
 	if (IS_ERR(priv->peci_mctp))

@@ -23,7 +23,7 @@ struct jtag {
 	struct miscdevice miscdev;
 	const struct jtag_ops *ops;
 	int id;
-	unsigned long *priv;
+	unsigned long priv[0];
 };
 
 static DEFINE_IDA(jtag_ida);
@@ -230,9 +230,6 @@ static long jtag_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		if (get_user(active, (__u32 __user *)arg))
 			return -EFAULT;
 
-		dev_dbg(jtag->miscdev.parent,
-			"JTAG_SIOCTRST: active %d", active);
-
 		err = jtag->ops->trst_set(jtag, active);
 		break;
 
@@ -285,11 +282,8 @@ struct jtag *jtag_alloc(struct device *host, size_t priv_size,
 	if (!ops->status_set || !ops->status_get || !ops->xfer)
 		return NULL;
 
-	jtag = kzalloc(sizeof(*jtag), GFP_KERNEL);
+	jtag = kzalloc(sizeof(*jtag) + priv_size, GFP_KERNEL);
 	if (!jtag)
-		return NULL;
-	jtag->priv = kzalloc(priv_size, GFP_KERNEL);
-	if (!jtag->priv)
 		return NULL;
 
 	jtag->ops = ops;

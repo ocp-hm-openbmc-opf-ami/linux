@@ -419,9 +419,9 @@ static int aspeed_jtag_mode_set(struct jtag *jtag, struct jtag_mode *jtag_mode)
 		aspeed_jtag->llops->master_enable(aspeed_jtag);
 		break;
 	case JTAG_CONTROL_MODE:
-		if (jtag_mode->mode == JTAG_CONTROLLER_OUTPUT_DISABLE)
+		if (jtag_mode->mode == JTAG_MASTER_OUTPUT_DISABLE)
 			aspeed_jtag->llops->output_disable(aspeed_jtag);
-		else if (jtag_mode->mode == JTAG_CONTROLLER_MODE)
+		else if (jtag_mode->mode == JTAG_MASTER_MODE)
 			aspeed_jtag->llops->master_enable(aspeed_jtag);
 		break;
 	default:
@@ -688,8 +688,7 @@ static int aspeed_jtag_shctrl_tms_mask(enum jtag_tapstate from,
 static void aspeed_jtag_set_tap_state_hw2(struct aspeed_jtag *aspeed_jtag,
 					  struct jtag_tap_state *tapstate)
 {
-	u32 reg_val, execute_tck;
-	u32 tck = tapstate->tck;
+	u32 reg_val;
 
 	/* x TMS high + 1 TMS low */
 	if (tapstate->reset || tapstate->endstate == JTAG_STATE_TLRESET) {
@@ -713,8 +712,7 @@ static void aspeed_jtag_set_tap_state_hw2(struct aspeed_jtag *aspeed_jtag,
 					  tapstate->endstate);
 	}
 	/* Run TCK */
-	while (tck) {
-		execute_tck = tck > GENMASK(9, 0) ? GENMASK(9, 0) : tck;
+	if (tapstate->tck) {
 		/* Disable sw mode */
 		aspeed_jtag_write(aspeed_jtag, 0, ASPEED_JTAG_SW);
 		aspeed_jtag_write(aspeed_jtag, 0, ASPEED_JTAG_PADCTRL0);
@@ -723,15 +721,14 @@ static void aspeed_jtag_set_tap_state_hw2(struct aspeed_jtag *aspeed_jtag,
 		aspeed_jtag_write(aspeed_jtag,
 				  reg_val | ASPEED_JTAG_GBLCTRL_FIFO_CTRL_MODE |
 					  ASPEED_JTAG_GBLCTRL_STSHIFT(0) |
-					  ASPEED_JTAG_GBLCTRL_UPDT_SHIFT(execute_tck),
+					  ASPEED_JTAG_GBLCTRL_UPDT_SHIFT(tapstate->tck),
 				  ASPEED_JTAG_GBLCTRL);
 
 		aspeed_jtag_write(aspeed_jtag,
 				  ASPEED_JTAG_SHCTRL_STSHIFT_EN |
-					  ASPEED_JTAG_SHCTRL_LWRDT_SHIFT(execute_tck),
+					  ASPEED_JTAG_SHCTRL_LWRDT_SHIFT(tapstate->tck),
 				  ASPEED_JTAG_SHCTRL);
 		aspeed_jtag_wait_shift_complete(aspeed_jtag);
-		tck -= execute_tck;
 	}
 }
 

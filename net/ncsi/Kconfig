@@ -23,3 +23,16 @@ config NCSI_OEM_CMD_KEEP_PHY
 	help
 	  This allows to keep PHY link up and prevents any channel resets during
 	  the host load.
+config NCSI_AMI_NON_AEN_SUPPORT
+	bool "Non-AEN Support"
+	default n
+	depends on NET_NCSI
+	help
+		If the Network Controller does not support AEN, a Kernel Timer will be invoked
+
+config NCSI_AMI_TIMER_INTERVAL_FOR_GET_LINK_STATUS
+	int "NCSI Timer Delay for Get Link Status"
+	default 5
+	depends on NET_NCSI
+	help
+		Periodic time interval(in seconds) for issuing the Get Link Status command to the network controller.

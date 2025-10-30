@@ -333,44 +333,69 @@ static int ncsi_rsp_handler_gls(struct ncsi_request *nr)
 	struct ncsi_channel_mode *ncm;
 	unsigned long flags;
 	struct ncsi_package *np;
+	unsigned char old_status;
+	bool aen_support = false;
+	static int channel_num = 0;
 
 	/* Find the package and channel */
 	rsp = (struct ncsi_rsp_gls_pkt *)skb_network_header(nr->rsp);
 	ncsi_find_package_and_channel(ndp, rsp->rsp.common.channel,
-				      NULL, &nc);
+				      &np, &nc);
 	if (!nc)
 		return -ENODEV;
 
 	ncm = &nc->modes[NCSI_MODE_LINK];
+	old_status = ncm->data[2];
+	np->previous_channel_state = np->previous_channel_state & ~((unsigned char)1 << nc->id);
+	np->curr_channel_state = np->curr_channel_state & ~((unsigned char)1 << nc->id);
+	np->previous_channel_state |= (!!(old_status & 0x1)) << nc->id;
 	ncm->data[2] = ntohl(rsp->status);
 	ncm->data[3] = ntohl(rsp->other);
 	ncm->data[4] = ntohl(rsp->oem_status);
 
+	np->curr_channel_state |= (!!(ncm->data[2] & 0x1)) << nc->id;
 	/* Reset the channel monitor if it has been enabled */
 	spin_lock_irqsave(&nc->lock, flags);
 	nc->monitor.state = NCSI_CHANNEL_MONITOR_START;
 	spin_unlock_irqrestore(&nc->lock, flags);
-
-	NCSI_FOR_EACH_PACKAGE(ndp, np) {
-		active_channel = ncsi_find_channel(np, np->configured_channel_ID);
-		NCSI_FOR_EACH_CHANNEL(np, channel) {
-			if (ncsi_channel_has_link(channel)) {
-				if (np->preferred_channel) {
-					if (channel->id == np->preferred_channel->id) {
+	channel_num += 1;
+	if (initCompleted) {
+		NCSI_FOR_EACH_PACKAGE(ndp, np) {
+			active_channel = ncsi_find_channel(np, np->configured_channel_ID);
+			NCSI_FOR_EACH_CHANNEL(np, channel) {
+				if (!aen_support)
+					aen_support = (&channel->modes[NCSI_MODE_AEN])->enable ? true : false;
+				if (ncsi_channel_has_link(channel)) {
+					if (np->preferred_channel) {
+						if (channel->id == np->preferred_channel->id) {
+							np->configured_channel_ID = channel->id;
+							if (nr->ndp->ndev.dev && active_channel)
+								ncsi_update_tx_channel(ndp, np, active_channel, channel);
+							else
+								ncsi_update_tx_channel(ndp, np, NULL, channel);
+							break;
+						}
+					}
+					else {
 						np->configured_channel_ID = channel->id;
-						ncsi_update_tx_channel(ndp, np, NULL, channel);
+						if (nr->ndp->ndev.dev && active_channel)
+							ncsi_update_tx_channel(ndp, np, active_channel, channel);
+						else
+							ncsi_update_tx_channel(ndp, np, NULL, channel);
 						break;
 					}
 				}
-				else {
-					np->configured_channel_ID = channel->id;
-					ncsi_update_tx_channel(ndp, np, NULL, channel);
-					break;
-				}
 			}
 		}
+#if defined(CONFIG_NCSI_AMI_NON_AEN_SUPPORT) && CONFIG_NCSI_AMI_NON_AEN_SUPPORT
+		if (!aen_support && initCompleted && channel_num % ndp->channel_count == 0) {
+			schedule_work(&ndp->non_aen_work);
+		}
+#endif
 	}
 
+	if (channel_num % ndp->channel_count == 0)
+		channel_num = 0;
 	return 0;
 }
 

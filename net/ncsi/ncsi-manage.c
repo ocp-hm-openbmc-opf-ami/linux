@@ -25,7 +25,7 @@
 LIST_HEAD(ncsi_dev_list);
 DEFINE_SPINLOCK(ncsi_dev_lock);
 
-static int initCompleted;
+int initCompleted;
 
 bool ncsi_channel_has_link(struct ncsi_channel *channel)
 {
@@ -104,12 +104,38 @@ report:
 	nd->handler(nd);
 }
 
+
+#if defined(CONFIG_NCSI_AMI_NON_AEN_SUPPORT) && CONFIG_NCSI_AMI_NON_AEN_SUPPORT
+void ncsi_non_aen_work(struct work_struct *work)
+{
+	struct ncsi_dev_priv *ndp = container_of(work, struct ncsi_dev_priv, non_aen_work);
+	struct ncsi_package *np;
+	bool old_link_status = false, curr_link_status=false;
+	NCSI_FOR_EACH_PACKAGE(ndp, np) {
+		if (np->previous_channel_state != 0) {
+			old_link_status = true;
+		}
+		if (np->curr_channel_state != 0) {
+			curr_link_status = true;
+		}
+	}
+
+	if(curr_link_status)
+		netif_carrier_on(ndp->ndev.dev);
+	else
+		netif_carrier_off(ndp->ndev.dev);
+
+	if (curr_link_status!=old_link_status) {
+		ncsi_report_link(ndp, false);
+	}
+}
+#endif
+
 static void ncsi_channel_monitor(struct timer_list *t)
 {
 	struct ncsi_channel *nc = from_timer(nc, t, monitor.timer);
 	struct ncsi_package *np = nc->package;
 	struct ncsi_dev_priv *ndp = np->ndp;
-	struct ncsi_channel_mode *ncm;
 	struct ncsi_cmd_arg nca;
 	bool enabled, chained;
 	unsigned int monitor_state;
@@ -141,46 +167,24 @@ bad_state:
 	}
 
 	netif_carrier_on(ndp->ndev.dev);
-	switch (monitor_state) {
-	case NCSI_CHANNEL_MONITOR_START:
-	case NCSI_CHANNEL_MONITOR_RETRY:
-		nca.ndp = ndp;
-		nca.package = np->id;
-		nca.channel = nc->id;
-		nca.type = NCSI_PKT_CMD_GLS;
-		nca.req_flags = 0;
-		ret = ncsi_xmit_cmd(&nca);
-		if (ret)
-			netdev_err(ndp->ndev.dev, "Error %d sending GLS\n",
-				   ret);
-		break;
-	case NCSI_CHANNEL_MONITOR_WAIT ... NCSI_CHANNEL_MONITOR_WAIT_MAX:
-		break;
-	default:
-		netdev_err(ndp->ndev.dev, "NCSI Channel %d timed out!\n",
-			   nc->id);
-		ncsi_report_link(ndp, true);
-		ndp->flags |= NCSI_DEV_RESHUFFLE;
-
-		ncm = &nc->modes[NCSI_MODE_LINK];
-		spin_lock_irqsave(&nc->lock, flags);
-		nc->monitor.enabled = false;
-		nc->state = NCSI_CHANNEL_INVISIBLE;
-		ncm->data[2] &= ~0x1;
-		spin_unlock_irqrestore(&nc->lock, flags);
-
-		spin_lock_irqsave(&ndp->lock, flags);
-		nc->state = NCSI_CHANNEL_ACTIVE;
-		list_add_tail_rcu(&nc->link, &ndp->channel_queue);
-		spin_unlock_irqrestore(&ndp->lock, flags);
-		ncsi_process_next_channel(ndp);
-		return;
-	}
+	nca.ndp = ndp;
+	nca.package = np->id;
+	nca.channel = nc->id;
+	nca.type = NCSI_PKT_CMD_GLS;
+	nca.req_flags = 0;
+	ret = ncsi_xmit_cmd(&nca);
+	if (ret)
+		netdev_err(ndp->ndev.dev, "Error %d sending GLS\n",
+				ret);
 
 	spin_lock_irqsave(&nc->lock, flags);
 	nc->monitor.state++;
 	spin_unlock_irqrestore(&nc->lock, flags);
+#if defined(CONFIG_NCSI_AMI_TIMER_INTERVAL_FOR_GET_LINK_STATUS) && CONFIG_NCSI_AMI_TIMER_INTERVAL_FOR_GET_LINK_STATUS >=1
+	mod_timer(&nc->monitor.timer, jiffies + (CONFIG_NCSI_AMI_TIMER_INTERVAL_FOR_GET_LINK_STATUS*HZ));
+#else
 	mod_timer(&nc->monitor.timer, jiffies + HZ);
+#endif
 }
 
 void ncsi_start_channel_monitor(struct ncsi_channel *nc)
@@ -193,7 +197,11 @@ void ncsi_start_channel_monitor(struct ncsi_channel *nc)
 	nc->monitor.state = NCSI_CHANNEL_MONITOR_START;
 	spin_unlock_irqrestore(&nc->lock, flags);
 
+#if defined(CONFIG_NCSI_AMI_TIMER_INTERVAL_FOR_GET_LINK_STATUS) && CONFIG_NCSI_AMI_TIMER_INTERVAL_FOR_GET_LINK_STATUS >=1
+	mod_timer(&nc->monitor.timer, jiffies + (CONFIG_NCSI_AMI_TIMER_INTERVAL_FOR_GET_LINK_STATUS*HZ));
+#else
 	mod_timer(&nc->monitor.timer, jiffies + HZ);
+#endif
 }
 
 void ncsi_stop_channel_monitor(struct ncsi_channel *nc)
@@ -2036,6 +2044,7 @@ int ncsi_reset_dev(struct ncsi_dev *nd)
 		spin_lock_irqsave(&ndp->lock, flags);
 		ndp->flags &= ~NCSI_DEV_RESET;
 		spin_unlock_irqrestore(&ndp->lock, flags);
+		initCompleted=0;
 		return ncsi_choose_active_channel(ndp);
 	}
 

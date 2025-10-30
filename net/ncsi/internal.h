@@ -212,6 +212,8 @@ struct ncsi_package;
 #define NCSI_MAX_PACKAGE	8
 #define NCSI_MAX_CHANNEL	32
 
+extern int initCompleted;
+
 struct ncsi_channel {
 	unsigned char               id;
 	int                         state;
@@ -260,6 +262,8 @@ struct ncsi_package {
 	u32                  channel_whitelist; /* Channels to configure */
 	struct ncsi_channel  *preferred_channel; /* Primary channel      */
 	unsigned char        configured_channel_ID;
+	u32                  previous_channel_state; /* Old datas for link state */
+	u32                  curr_channel_state; /* Cueent datas for link state */
 };
 
 struct ncsi_request {
@@ -344,6 +348,7 @@ struct ncsi_dev_priv {
 	struct ncsi_channel *active_channel; /* Currently handled channel  */
 	struct list_head    channel_queue;   /* Config queue of channels   */
 	struct work_struct  work;            /* For channel management     */
+	struct work_struct  non_aen_work;    /* For channel management     */
 	struct packet_type  ptype;           /* NCSI packet Rx handler     */
 	struct list_head    node;            /* Form NCSI device list      */
 #define NCSI_MAX_VLAN_VIDS	15

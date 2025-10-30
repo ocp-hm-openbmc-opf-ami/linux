@@ -23,3 +23,9 @@ config NCSI_OEM_CMD_KEEP_PHY
 	help
 	  This allows to keep PHY link up and prevents any channel resets during
 	  the host load.
+config NCSI_AMI_ASYNC_RESET
+	bool "NCSI Async Reset"
+	depends on NET_NCSI
+	help
+	  This feature detects asynchronous reset on the network controller and reconfigures the link, 
+	  a Kernel Timer will be invoked to periodically issue Get Link Status command to the Network Controller.

@@ -212,6 +212,8 @@ struct ncsi_package;
 #define NCSI_MAX_PACKAGE	8
 #define NCSI_MAX_CHANNEL	32
 
+extern int initCompleted;
+
 struct ncsi_channel {
 	unsigned char               id;
 	int                         state;

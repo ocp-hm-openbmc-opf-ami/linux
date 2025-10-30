@@ -1188,6 +1188,12 @@ int ncsi_rcv_rsp(struct sk_buff *skb, struct net_device *dev,
 	struct ncsi_pkt_hdr *hdr;
 	unsigned long flags;
 	int payload, i, ret;
+#if defined(CONFIG_NCSI_AMI_ASYNC_RESET) && CONFIG_NCSI_AMI_ASYNC_RESET
+	struct ncsi_rsp_pkt_hdr *h;
+	struct ncsi_package *np;
+	struct ncsi_channel *nc;
+	struct ncsi_cmd_arg nca;
+#endif
 
 	/* Find the NCSI device */
 	nd = ncsi_find_dev(orig_dev);
@@ -1254,6 +1260,28 @@ int ncsi_rcv_rsp(struct sk_buff *skb, struct net_device *dev,
 						      &nr->nlhdr,
 						      ret);
 		}
+
+		#if defined(CONFIG_NCSI_AMI_ASYNC_RESET) && CONFIG_NCSI_AMI_ASYNC_RESET
+		h = (struct ncsi_rsp_pkt_hdr *)skb_network_header(nr->rsp);
+		if((ntohs(h->reason) == NCSI_PKT_RSP_R_INTERFACE) && initCompleted)
+		{
+			printk("Asynchronous Reset Detected !!!\n");
+			printk("NCSI(%d.%d): Reset for NCSI Interface..\n",NCSI_PACKAGE_INDEX(h->common.channel), NCSI_CHANNEL_INDEX(h->common.channel));
+			nca.ndp = ndp;
+			nca.req_flags = NCSI_REQ_FLAG_EVENT_DRIVEN;
+			nca.type = NCSI_PKT_CMD_CIS;
+			initCompleted = 0;
+			nd->link_up = 0;
+			NCSI_FOR_EACH_PACKAGE(ndp, np) {
+				NCSI_FOR_EACH_CHANNEL(np, nc) {
+					nca.package = np->id;
+					nca.channel = nc->id;
+					ret = ncsi_xmit_cmd(&nca);
+				}
+			}
+			ncsi_reset_dev(&ndp->ndev);
+		}
+#endif
 		goto out;
 	}
 

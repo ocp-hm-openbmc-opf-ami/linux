@@ -25,7 +25,7 @@
 LIST_HEAD(ncsi_dev_list);
 DEFINE_SPINLOCK(ncsi_dev_lock);
 
-static int initCompleted;
+int initCompleted;
 
 bool ncsi_channel_has_link(struct ncsi_channel *channel)
 {

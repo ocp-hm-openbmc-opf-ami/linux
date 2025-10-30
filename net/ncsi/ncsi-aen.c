@@ -54,7 +54,7 @@ static int ncsi_aen_handler_lsc(struct ncsi_dev_priv *ndp,
 	unsigned long flags;
 	bool chained;
 	int state;
-
+	return 0;
 	/* Find the NCSI channel */
 	ncsi_find_package_and_channel(ndp, h->common.channel, NULL, &nc);
 	if (!nc)
@@ -72,7 +72,7 @@ static int ncsi_aen_handler_lsc(struct ncsi_dev_priv *ndp,
 
 	had_link = !!(old_data & 0x1);
 	has_link = !!(data & 0x1);
-
+	
 	netdev_info(ndp->ndev.dev, "NCSI: LSC AEN - channel %u state %s\n",
 		   nc->id, data & 0x1 ? "up" : "down");
 

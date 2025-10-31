@@ -392,11 +392,7 @@
 	memory-region = <&gfx_memory>;
 };
 
-&pciecfg {
-	status = "okay";
-};
-
-&pcie1 {
+&pcie0 {
 	status = "okay";
 };
 

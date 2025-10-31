@@ -14,11 +14,6 @@
 #include <soc/aspeed/reset-aspeed.h>
 #include <dt-bindings/clock/aspeed,ast2700-scu.h>
 
-#define SCU_CLK_12MHZ	(12 * HZ_PER_MHZ)
-#define SCU_CLK_24MHZ	(24 * HZ_PER_MHZ)
-#define SCU_CLK_25MHZ	(25 * HZ_PER_MHZ)
-#define SCU_CLK_192MHZ	(192 * HZ_PER_MHZ)
-
 /* SOC0 */
 #define SCU0_HWSTRAP1		0x010
 #define SCU0_CLK_STOP		0x240
@@ -245,10 +240,6 @@ static const struct clk_parent_data pspclk[] = {
 	{ .fw_name = "pspclk", .name = "pspclk" },
 };
 
-static const struct clk_parent_data soc0_mpll_div8[] = {
-	{ .fw_name = "soc0-mpll_div8", .name = "soc0-mpll_div8" },
-};
-
 static const struct clk_parent_data mphysrc[] = {
 	{ .fw_name = "mphysrc", .name = "mphysrc" },
 };
@@ -271,10 +262,6 @@ static const struct clk_parent_data axi0clk[] = {
 
 static const struct clk_parent_data soc0_ahbmux[] = {
 	{ .fw_name = "soc0-ahbmux", .name = "soc0-ahbmux" },
-};
-
-static const struct clk_parent_data soc0_ahb[] = {
-	{ .fw_name = "soc0-ahb", .name = "soc0-ahb" },
 };
 
 static const struct clk_parent_data soc0_uartclk[] = {
@@ -373,26 +360,6 @@ static const struct clk_parent_data uart12clk[] = {
 	{ .fw_name = "uart12clk", .name = "uart12clk" },
 };
 
-static const struct clk_parent_data uart13clk[] = {
-	{ .fw_name = "uart13clk", .name = "uart13clk" },
-};
-
-static const struct clk_parent_data uart14clk[] = {
-	{ .fw_name = "uart14clk", .name = "uart14clk" },
-};
-
-static const struct clk_parent_data uart15clk[] = {
-	{ .fw_name = "uart15clk", .name = "uart15clk" },
-};
-
-static const struct clk_parent_data uart16clk[] = {
-	{ .fw_name = "uart16clk", .name = "uart16clk" },
-};
-
-static const struct clk_parent_data soc1_ahb[] = {
-	{ .fw_name = "soc1-ahb", .name = "soc1-ahb" },
-};
-
 static const struct clk_parent_data soc1_i3c[] = {
 	{ .fw_name = "soc1-i3c", .name = "soc1-i3c" },
 };
@@ -403,11 +370,6 @@ static const struct clk_parent_data canclk[] = {
 
 static const struct clk_parent_data rmii[] = {
 	{ .fw_name = "rmii", .name = "rmii" },
-};
-
-static const struct clk_parent_data d_clk_sels[] = {
-	{ .fw_name = "soc0-hpll_div2", .name = "soc0-hpll_div2" },
-	{ .fw_name = "soc0-mpll_div2", .name = "soc0-mpll_div2" },
 };
 
 static const struct clk_parent_data hclk_clk_sels[] = {
@@ -531,10 +493,10 @@ static const struct clk_parent_data uartx_clk_sels[] = {
 	}
 
 static const struct ast2700_clk_info ast2700_scu0_clk_info[] __initconst = {
-	FIXED_CLK(SCU0_CLKIN, "soc0-clkin", SCU_CLK_25MHZ),
-	FIXED_CLK(SCU0_CLK_24M, "soc0-clk24Mhz", SCU_CLK_24MHZ),
-	FIXED_CLK(SCU0_CLK_192M, "soc0-clk192Mhz", SCU_CLK_192MHZ),
-	FIXED_CLK(SCU0_CLK_U2PHY_CLK12M, "u2phy_clk12m", SCU_CLK_12MHZ),
+	FIXED_CLK(SCU0_CLKIN, "soc0-clkin", 25 * HZ_PER_MHZ),
+	FIXED_CLK(SCU0_CLK_24M, "soc0-clk24Mhz", 24 * HZ_PER_MHZ),
+	FIXED_CLK(SCU0_CLK_192M, "soc0-clk192Mhz", 192 * HZ_PER_MHZ),
+	FIXED_CLK(SCU0_CLK_U2PHY_CLK12M, "u2phy_clk12m", 12 * HZ_PER_MHZ),
 	PLL_CLK(SCU0_CLK_HPLL, CLK_HPLL, "soc0-hpll", soc0_clkin, SCU0_HPLL_PARAM),
 	PLL_CLK(SCU0_CLK_DPLL, CLK_PLL, "soc0-dpll", soc0_clkin, SCU0_DPLL_PARAM),
 	PLL_CLK(SCU0_CLK_MPLL, CLK_PLL, "soc0-mpll", soc0_clkin, SCU0_MPLL_PARAM),
@@ -559,6 +521,10 @@ static const struct ast2700_clk_info ast2700_scu0_clk_info[] __initconst = {
 		    SCU0_CLK_SEL1, 23, 3, ast2700_clk_div_table2),
 	DIVIDER_CLK(SCU0_CLK_UART4, "uart4clk", soc0_uartclk,
 		    SCU0_CLK_SEL2, 30, 1, ast2700_clk_uart_div_table),
+	DIVIDER_CLK(SCU0_CLK_HPLL_DIV_AHB, "soc0-hpll-ahb", soc0_hpll,
+		    SCU0_HWSTRAP1, 5, 2, ast2700_hclk_div_table),
+	DIVIDER_CLK(SCU0_CLK_MPLL_DIV_AHB, "soc0-mpll-ahb", soc0_mpll,
+		    SCU0_HWSTRAP1, 5, 2, ast2700_hclk_div_table),
 	MUX_CLK(SCU0_CLK_PSP, "pspclk", psp_clk_sels, ARRAY_SIZE(psp_clk_sels),
 		SCU0_HWSTRAP1, 2, 3),
 	MUX_CLK(SCU0_CLK_AHBMUX, "soc0-ahbmux", hclk_clk_sels, ARRAY_SIZE(hclk_clk_sels),
@@ -623,7 +589,7 @@ static const struct ast2700_clk_info ast2700_scu0_clk_info[] __initconst = {
 };
 
 static const struct ast2700_clk_info ast2700_scu1_clk_info[] __initconst = {
-	FIXED_CLK(SCU1_CLKIN, "soc1-clkin", SCU_CLK_25MHZ),
+	FIXED_CLK(SCU1_CLKIN, "soc1-clkin", 25 * HZ_PER_MHZ),
 	PLL_CLK(SCU1_CLK_HPLL, CLK_PLL, "soc1-hpll", soc1_clkin, SCU1_HPLL_PARAM),
 	PLL_CLK(SCU1_CLK_APLL, CLK_PLL, "soc1-apll", soc1_clkin, SCU1_APLL_PARAM),
 	PLL_CLK(SCU1_CLK_DPLL, CLK_PLL, "soc1-dpll", soc1_clkin, SCU1_DPLL_PARAM),
@@ -838,7 +804,7 @@ static struct clk_hw *ast2700_clk_hw_register_hpll(void __iomem *reg,
 			u32 p = (val >> 19) & 0xf;
 
 			mult = (m + 1) / (2 * (n + 1));
-			div = (p + 1);
+			div = p + 1;
 		}
 	}
 
@@ -864,14 +830,14 @@ static struct clk_hw *ast2700_clk_hw_register_pll(int clk_idx, void __iomem *reg
 
 		if (scu) {
 			mult = (m + 1) / (n + 1);
-			div = (p + 1);
+			div = p + 1;
 		} else {
 			if (clk_idx == SCU0_CLK_MPLL) {
 				mult = m / (n + 1);
-				div = (p + 1);
+				div = p + 1;
 			} else {
 				mult = (m + 1) / (2 * (n + 1));
-				div = (p + 1);
+				div = p + 1;
 			}
 		}
 	}
@@ -1069,20 +1035,21 @@ static void ast2700_soc1_configure_mac01_clk(struct ast2700_clk_ctrl *clk_ctrl)
 
 static void ast2700_soc1_configure_i3c_clk(struct ast2700_clk_ctrl *clk_ctrl)
 {
-	if (readl(clk_ctrl->base + SCU1_REVISION_ID) & REVISION_ID)
+	if (readl(clk_ctrl->base + SCU1_REVISION_ID) & REVISION_ID) {
+		u32 val;
+
 		/* I3C 250MHz = HPLL/4 */
-		writel((readl(clk_ctrl->base + SCU1_CLK_SEL2) &
-			~SCU1_CLK_I3C_DIV_MASK) |
-			       FIELD_PREP(SCU1_CLK_I3C_DIV_MASK,
-					  SCU1_CLK_I3C_DIV(4)),
-		       clk_ctrl->base + SCU1_CLK_SEL2);
+		val = readl(clk_ctrl->base + SCU1_CLK_SEL2) & ~SCU1_CLK_I3C_DIV_MASK;
+		val |= FIELD_PREP(SCU1_CLK_I3C_DIV_MASK, SCU1_CLK_I3C_DIV(4));
+		writel(val, clk_ctrl->base + SCU1_CLK_SEL2);
+	}
 }
 
 static int ast2700_soc_clk_probe(struct platform_device *pdev)
 {
 	const struct ast2700_clk_data *clk_data;
-	struct ast2700_clk_ctrl *clk_ctrl;
 	struct clk_hw_onecell_data *clk_hw_data;
+	struct ast2700_clk_ctrl *clk_ctrl;
 	struct device *dev = &pdev->dev;
 	u32 uart_clk_source = 0;
 	void __iomem *clk_base;

@@ -10,6 +10,7 @@
 #include <linux/kernel.h>
 #include <linux/list.h>
 #include <linux/list_sort.h>
+#include <linux/mctp-pcie-vdm.h>
 #include <linux/mfd/syscon.h>
 #include <linux/miscdevice.h>
 #include <linux/mm.h>
@@ -48,6 +49,7 @@
 
 #define ASPEED_MCTP_EID		0x014
 #define  MEMORY_SPACE_MAPPING	GENMASK(31, 28)
+#define  MCTP_EID		GENMASK(7, 0)
 #define ASPEED_MCTP_OBFF_CTRL	0x018
 
 #define ASPEED_MCTP_ENGINE_CTRL		0x01c
@@ -181,13 +183,13 @@
 #define MCTP_HDR_SOM			BIT(7)
 #define MCTP_HDR_EOM			BIT(6)
 #define MCTP_HDR_SOM_EOM		(MCTP_HDR_SOM | MCTP_HDR_EOM)
-#define MCTP_HDR_TYPE_OFFSET		16
+#define MCTP_PAYLOAD_TYPE_OFFSET	0
 #define MCTP_HDR_TYPE_CONTROL		0
 #define MCTP_HDR_TYPE_VDM_PCI		0x7e
 #define MCTP_HDR_TYPE_SPDM		0x5
 #define MCTP_HDR_TYPE_BASE_LAST		MCTP_HDR_TYPE_SPDM
-#define MCTP_HDR_VENDOR_OFFSET		17
-#define MCTP_HDR_VDM_TYPE_OFFSET	19
+#define MCTP_PAYLOAD_VENDOR_OFFSET	1
+#define MCTP_PAYLOAD_VDM_TYPE_OFFSET	3
 
 /* MCTP header DW little endian mask definitions */
 /* 0th DW */
@@ -327,6 +329,9 @@ struct aspeed_mctp {
 	/* Delayed work for periodic detection of Rx packets */
 	struct delayed_work rx_det_dwork;
 	u32 rx_det_period_us;
+#ifdef CONFIG_MCTP_TRANSPORT_PCIE_VDM
+	struct net_device *ndev;
+#endif
 };
 
 struct mctp_client {
@@ -395,25 +400,6 @@ void aspeed_mctp_packet_free(void *packet)
 	kmem_cache_free(packet_cache, packet);
 }
 EXPORT_SYMBOL_GPL(aspeed_mctp_packet_free);
-
-static BLOCKING_NOTIFIER_HEAD(mctp_pcie_vdm_notifier);
-
-int mctp_pcie_vdm_register_notifier(struct notifier_block *nb)
-{
-	return blocking_notifier_chain_register(&mctp_pcie_vdm_notifier, nb);
-}
-EXPORT_SYMBOL_GPL(mctp_pcie_vdm_register_notifier);
-
-int mctp_pcie_vdm_unregister_notifier(struct notifier_block *nb)
-{
-	return blocking_notifier_chain_unregister(&mctp_pcie_vdm_notifier, nb);
-}
-EXPORT_SYMBOL_GPL(mctp_pcie_vdm_unregister_notifier);
-
-static void mctp_pcie_vdm_notify(void *data, unsigned int action)
-{
-	blocking_notifier_call_chain(&mctp_pcie_vdm_notifier, action, data);
-}
 
 static int _get_bdf(struct aspeed_mctp *priv)
 {
@@ -721,26 +707,18 @@ aspeed_mctp_find_handler(struct aspeed_mctp *priv,
 			 struct mctp_pcie_packet *packet)
 {
 	struct mctp_type_handler *handler;
-	u8 *hdr = (u8 *)packet->data.hdr;
+	u8 *payload = (u8 *)packet->data.payload;
 	struct mctp_client *client = NULL;
-	u8 mctp_type, som_eom;
+	u8 mctp_type;
 	u16 vendor = 0;
 	u16 vdm_type = 0;
 
 	lockdep_assert_held(&priv->clients_lock);
 
-	/*
-	 * Middle and EOM fragments cannot be matched to MCTP type.
-	 * For consistency do not match type for any fragmented messages.
-	 */
-	som_eom = hdr[MCTP_HDR_TAG_OFFSET] & MCTP_HDR_SOM_EOM;
-	if (som_eom != MCTP_HDR_SOM_EOM)
-		return NULL;
-
-	mctp_type = hdr[MCTP_HDR_TYPE_OFFSET];
+	mctp_type = payload[MCTP_PAYLOAD_TYPE_OFFSET];
 	if (mctp_type == MCTP_HDR_TYPE_VDM_PCI) {
-		vendor = *((u16 *)&hdr[MCTP_HDR_VENDOR_OFFSET]);
-		vdm_type = *((u16 *)&hdr[MCTP_HDR_VDM_TYPE_OFFSET]);
+		vendor = *((u16 *)&payload[MCTP_PAYLOAD_VENDOR_OFFSET]);
+		vdm_type = *((u16 *)&payload[MCTP_PAYLOAD_VDM_TYPE_OFFSET]);
 	}
 
 	list_for_each_entry(handler, &priv->mctp_type_handlers, link) {
@@ -786,7 +764,9 @@ static void aspeed_mctp_dispatch_packet(struct aspeed_mctp *priv,
 		} else {
 			wake_up_all(&client->wait_queue);
 		}
-		mctp_pcie_vdm_notify(client, MCTP_PCIE_VDM_NOTIFY_RECV);
+#ifdef CONFIG_MCTP_TRANSPORT_PCIE_VDM
+		mctp_pcie_vdm_receive_packet(priv->ndev);
+#endif
 		aspeed_mctp_client_put(client);
 	} else {
 		dev_dbg(priv->dev, "Failed to dispatch RX packet\n");
@@ -892,6 +872,9 @@ static void aspeed_mctp_rx_tasklet(unsigned long data)
 	u32 *hdr, *payload;
 	bool rx_full;
 
+	/* initialized as false */
+	rx_full = false;
+
 	if (priv->match_data->vdm_hdr_direct_xfer && priv->match_data->fifo_auto_surround) {
 		struct mctp_pcie_packet_data *rx_buf;
 		u32 residual_cmds = 0;
@@ -979,7 +962,6 @@ static void aspeed_mctp_rx_tasklet(unsigned long data)
 			rx_packet = aspeed_mctp_packet_alloc(GFP_ATOMIC);
 			if (rx_packet) {
 				memcpy(&rx_packet->data, hdr, sizeof(rx_packet->data));
-
 				aspeed_mctp_swap_pcie_vdm_hdr(&rx_packet->data);
 
 				aspeed_mctp_dispatch_packet(priv, rx_packet);
@@ -1252,6 +1234,7 @@ int aspeed_mctp_send_packet(struct mctp_client *client,
 	struct aspeed_mctp *priv = client->priv;
 	u32 *hdr_dw = (u32 *)packet->data.hdr;
 	u8 *hdr = (u8 *)packet->data.hdr;
+	u8 *payload = (u8 *)packet->data.payload;
 	u16 packet_data_sz_dw;
 	u16 pci_data_len_dw;
 	int ret;
@@ -1282,7 +1265,7 @@ int aspeed_mctp_send_packet(struct mctp_client *client,
 	 * XXX Don't update EID for MCTP Control messages - old EID may
 	 * interfere with MCTP discovery flow.
 	 */
-	if (priv->eid && hdr[MCTP_HDR_TYPE_OFFSET] != MCTP_HDR_TYPE_CONTROL)
+	if (priv->eid && payload[MCTP_PAYLOAD_TYPE_OFFSET] != MCTP_HDR_TYPE_CONTROL)
 		hdr[MCTP_HDR_SRC_EID_OFFSET] = priv->eid;
 
 	ret = ptr_ring_produce_bh(&client->tx_queue, packet);
@@ -1562,7 +1545,8 @@ aspeed_mctp_filter_eid(struct aspeed_mctp *priv, void __user *userbuf)
 	}
 
 	if (eid.enable) {
-		regmap_write(priv->map, ASPEED_MCTP_EID, eid.eid);
+		regmap_update_bits(priv->map, ASPEED_MCTP_EID,
+				   MCTP_EID, eid.eid);
 		regmap_update_bits(priv->map, ASPEED_MCTP_CTRL,
 				   MATCHING_EID, MATCHING_EID);
 	} else {
@@ -1952,6 +1936,82 @@ static __poll_t aspeed_mctp_poll(struct file *file,
 	return ret;
 }
 
+#ifdef CONFIG_MCTP_TRANSPORT_PCIE_VDM
+static int aspeed_mctp_pcie_vdm_op_send_pkt(struct device *dev,
+					    u8 *data, size_t size)
+{
+	struct mctp_pcie_packet *packet;
+	struct platform_device *pdev;
+	struct aspeed_mctp *priv;
+	int rc;
+
+	pdev = to_platform_device(dev);
+	priv = platform_get_drvdata(pdev);
+	// freed at aspeed-mctp tx tasklet or send failure
+	packet = aspeed_mctp_packet_alloc(GFP_KERNEL);
+
+	if (!packet) {
+		dev_err(priv->dev, "failed to alloc packet\n");
+		return -ENOMEM;
+	}
+
+	memcpy((u8 *)&packet->data.hdr, data, PCIE_VDM_HDR_SIZE);
+	memcpy((u8 *)&packet->data.payload, data + PCIE_VDM_HDR_SIZE, size);
+	packet->size = (size + PCIE_VDM_HDR_SIZE);
+
+	rc = aspeed_mctp_send_packet(priv->default_client, packet);
+	if (rc) {
+		dev_err(priv->dev, "failed to send packet\n");
+		aspeed_mctp_packet_free(packet);
+		return rc;
+	}
+	return 0;
+}
+
+static u8 *aspeed_mctp_pcie_vdm_op_recv_pkt(struct device *dev)
+{
+	struct platform_device *pdev;
+	struct aspeed_mctp *priv;
+	struct mctp_pcie_packet *rx_packet;
+
+	pdev = to_platform_device(dev);
+	priv = platform_get_drvdata(pdev);
+	rx_packet = aspeed_mctp_receive_packet(priv->default_client, 0);
+
+	if (IS_ERR(rx_packet)) {
+		if (PTR_ERR(rx_packet) == -ETIME) {
+			dev_dbg(priv->dev, "no packet received\n");
+		} else {
+			dev_err(priv->dev, "failed to receive packet: %ld\n",
+				PTR_ERR(rx_packet));
+		}
+		return (u8 *)rx_packet;
+	}
+	return (u8 *)&rx_packet->data;
+}
+
+static void aspeed_mctp_pcie_vdm_op_uninit(struct device *dev)
+{
+	struct platform_device *pdev;
+	struct aspeed_mctp *priv;
+
+	pdev = to_platform_device(dev);
+	priv = platform_get_drvdata(pdev);
+
+	aspeed_mctp_flush_all_tx_queues(priv);
+	aspeed_mctp_flush_rx_queue(priv->default_client);
+	aspeed_mctp_delete_client(priv->default_client);
+}
+
+static const struct mctp_pcie_vdm_ops aspeed_mctp_pcie_vdm_ops = {
+	.send_packet = aspeed_mctp_pcie_vdm_op_send_pkt,
+	.recv_packet = aspeed_mctp_pcie_vdm_op_recv_pkt,
+	.free_packet = aspeed_mctp_packet_free,
+	.uninit = aspeed_mctp_pcie_vdm_op_uninit,
+};
+
+#endif
+
 static const struct file_operations aspeed_mctp_fops = {
 	.owner = THIS_MODULE,
 	.open = aspeed_mctp_open,
@@ -2009,13 +2069,14 @@ static void aspeed_mctp_pcie_setup(struct aspeed_mctp *priv)
 		if (priv->match_data->need_address_mapping)
 			regmap_update_bits(priv->map, ASPEED_MCTP_EID,
 					   MEMORY_SPACE_MAPPING, BIT(31));
+
+		/* Only set TX MPS since HW will parse RX packet to decide how many bytes to receive
+		 * based on the length field in PCIe VDM header.
+		 */
 		if (priv->match_data->dma_need_64bits_width) {
 			tx_max_payload_size =
 				FIELD_GET(TX_MAX_PAYLOAD_SIZE_MASK,
 					  ilog2(ASPEED_MCTP_MTU >> 6));
-			rx_max_payload_size =
-				FIELD_GET(RX_MAX_PAYLOAD_SIZE_MASK,
-					  (ilog2(ASPEED_MCTP_MTU >> 6)) << RX_MAX_PAYLOAD_SIZE_SHIFT);
 		} else {
 			/*
 			 * In ast2600, tx som and eom will not match expected result.
@@ -2027,9 +2088,6 @@ static void aspeed_mctp_pcie_setup(struct aspeed_mctp *priv)
 			tx_max_payload_size =
 				FIELD_GET(TX_MAX_PAYLOAD_SIZE_MASK,
 						fls(ASPEED_MCTP_MTU >> 6));
-			rx_max_payload_size =
-				FIELD_GET(RX_MAX_PAYLOAD_SIZE_MASK,
-					   (fls(ASPEED_MCTP_MTU >> 6)) << RX_MAX_PAYLOAD_SIZE_SHIFT);
 		}
 
 		regmap_update_bits(priv->map, ASPEED_MCTP_ENGINE_CTRL,
@@ -2425,6 +2483,22 @@ static int aspeed_mctp_probe(struct platform_device *pdev)
 		goto out_drv;
 	}
 
+#ifdef CONFIG_MCTP_TRANSPORT_PCIE_VDM
+	struct net_device *ndev;
+	struct mctp_client *client;
+
+	/** use priv's default client to send/receive mctp packets */
+	client = aspeed_mctp_create_client(priv);
+	aspeed_mctp_register_default_handler(client);
+
+	ndev = mctp_pcie_vdm_add_dev(priv->dev, &aspeed_mctp_pcie_vdm_ops);
+	if (IS_ERR(ndev)) {
+		dev_err(priv->dev, "Failed to add mctp pcie vdm device Err %ld\n", PTR_ERR(ndev));
+		goto out_drv;
+	}
+	priv->ndev = ndev;
+#endif
+
 	ret = aspeed_mctp_dma_init(priv);
 	if (ret) {
 		dev_err(priv->dev, "Failed to init DMA\n");
@@ -2442,7 +2516,7 @@ static int aspeed_mctp_probe(struct platform_device *pdev)
 		return id;
 	priv->mctp_miscdev.parent = priv->dev;
 	priv->mctp_miscdev.minor = MISC_DYNAMIC_MINOR;
-	priv->mctp_miscdev.name = kasprintf(GFP_KERNEL, "aspeed-mctp%d", id);
+	priv->mctp_miscdev.name = devm_kasprintf(priv->dev, GFP_KERNEL, "aspeed-mctp%d", id);
 	priv->mctp_miscdev.fops = &aspeed_mctp_fops;
 	ret = misc_register(&priv->mctp_miscdev);
 	if (ret) {
@@ -2458,7 +2532,7 @@ static int aspeed_mctp_probe(struct platform_device *pdev)
 	}
 	aspeed_mctp_pcie_setup(priv);
 
-	name = kasprintf(GFP_KERNEL, "peci-mctp%d", id);
+	name = devm_kasprintf(priv->dev, GFP_KERNEL, "peci-mctp%d", id);
 	priv->peci_mctp =
 		platform_device_register_data(priv->dev, name, PLATFORM_DEVID_NONE, NULL, 0);
 	if (IS_ERR(priv->peci_mctp))
@@ -2478,6 +2552,10 @@ out:
 static int aspeed_mctp_remove(struct platform_device *pdev)
 {
 	struct aspeed_mctp *priv = platform_get_drvdata(pdev);
+
+#ifdef CONFIG_MCTP_TRANSPORT_PCIE_VDM
+	mctp_pcie_vdm_remove_dev(priv->ndev);
+#endif
 
 	platform_device_unregister(priv->peci_mctp);
 

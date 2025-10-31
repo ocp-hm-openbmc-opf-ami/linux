@@ -88,6 +88,21 @@
 	status = "disabled";
 };
 
+/* Add internal-pullup for i3c4 and i3c5 */
+&i3c4 {
+	internal-pullup = <2>;
+	initial-role = "target";
+	pid = <0x000007ec 0x06014000>;
+	dcr = /bits/ 8 <0xcc>;
+	status = "okay";
+};
+
+&i3c5 {
+	internal-pullup = <2>;
+	initial-role = "primary";
+	status = "okay";
+};
+
 /* AST2700 VFF DCSCM use MAC0 and MAC1 for NCSI */
 &sgpios {
 	status = "disabled";
@@ -204,6 +219,9 @@
 	pinctrl-names = "default";
 	status = "okay";
 
+	/delete-property/ spi-aspeed-full-duplex;
+	/delete-node/ tpmdev@0;
+
 	flash@0 {
 		status = "okay";
 		reg = < 0 >;
@@ -213,7 +231,7 @@
 		spi-max-frequency = <25000000>;
 	};
 
-	tpm1: tpmdev@1 {
+	tpmdev@1 {
 		status = "okay";
 		reg = <1>;
 		compatible = "tcg,tpm_tis-spi";

@@ -704,6 +704,9 @@ static ssize_t aspeed_xdma_write(struct file *file, const char __user *buf,
 	if (len != sizeof(op))
 		return -EINVAL;
 
+	if (READ_ONCE(client->in_progress))
+		return -EBUSY;
+
 	if (copy_from_user(&op, buf, len))
 		return -EFAULT;
 
@@ -769,7 +772,8 @@ static __poll_t aspeed_xdma_poll(struct file *file,
 			mask |= EPOLLOUT | EPOLLWRNORM;
 	}
 
-	aspeed_xdma_reset(ctx);
+	if (mask)
+		aspeed_xdma_reset(ctx);
 
 	return mask;
 }
@@ -1352,7 +1356,7 @@ static const struct aspeed_xdma_chip aspeed_ast2600_xdma_chip = {
 
 static const struct aspeed_xdma_chip aspeed_ast2700_xdma0_chip = {
 	.control = XDMA_AST2700_CTRL_US_COMP | XDMA_AST2700_CTRL_DS_COMP |
-		XDMA_AST2700_CTRL_DS_DIRTY | XDMA_AST2700_CTRL_DS_SIZE_256,
+		XDMA_AST2700_CTRL_DS_DIRTY,
 	.scu_bmc_class = SCU_AST2700_PCIE0_BMC_CLASS_REV,
 	.scu_misc_ctrl = SCU_AST2600_MISC_CTRL,
 	.scu_pcie_conf = SCU_AST2700_PCIE0_CONF,
@@ -1377,7 +1381,7 @@ static const struct aspeed_xdma_chip aspeed_ast2700_xdma0_chip = {
 
 static const struct aspeed_xdma_chip aspeed_ast2700_xdma1_chip = {
 	.control = XDMA_AST2700_CTRL_US_COMP | XDMA_AST2700_CTRL_DS_COMP |
-		XDMA_AST2700_CTRL_DS_DIRTY | XDMA_AST2700_CTRL_DS_SIZE_256,
+		XDMA_AST2700_CTRL_DS_DIRTY,
 	.scu_bmc_class = SCU_AST2700_PCIE1_BMC_CLASS_REV,
 	.scu_misc_ctrl = SCU_AST2600_MISC_CTRL,
 	.scu_pcie_conf = SCU_AST2700_PCIE1_CONF,

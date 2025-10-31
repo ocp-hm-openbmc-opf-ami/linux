@@ -36,6 +36,7 @@
 /* AST2700 SCU */
 #define SCU0_REVISION_ID		0x0
 #define REVISION_ID				GENMASK(23, 16)
+#define SCU0_PCIE_CONF_CTRL		0x970
 /* Host2BMC */
 #define ASPEED_BMC_MEM_BAR			0xF10
 #define  PCIE2PCI_MEM_BAR_ENABLE		BIT(1)
@@ -117,7 +118,6 @@ struct aspeed_bmc_device {
 	struct miscdevice miscdev;
 	int id;
 	void __iomem *reg_base;
-	void __iomem *bmc_mem_virt;
 	dma_addr_t bmc_mem_phy;
 	phys_addr_t bmc_mem_size;
 
@@ -129,10 +129,9 @@ struct aspeed_bmc_device {
 	const struct aspeed_platform *platform;
 
 	/* AST2700 */
-	struct regmap *config;
 	struct regmap *device;
 	struct regmap *e2m;
-	/*AST2600*/
+
 	struct regmap *scu;
 	int pcie_irq;
 };
@@ -401,12 +400,6 @@ static int aspeed_ast2700_init(struct platform_device *pdev)
 	u32 scu_id;
 	int i;
 
-	bmc_device->config = syscon_regmap_lookup_by_phandle(dev->of_node, "aspeed,config");
-	if (IS_ERR(bmc_device->config)) {
-		dev_err(&pdev->dev, "failed to find config regmap\n");
-		return PTR_ERR(bmc_device->config);
-	}
-
 	bmc_device->device = syscon_regmap_lookup_by_phandle(dev->of_node, "aspeed,device");
 	if (IS_ERR(bmc_device->device)) {
 		dev_err(&pdev->dev, "failed to find device regmap\n");
@@ -428,7 +421,8 @@ static int aspeed_ast2700_init(struct platform_device *pdev)
 	if (bmc_device->pcie2lpc) {
 		pcie_config_ctl = SCU_PCIE_CONF_BMC_DEV_EN_E2L |
 				  SCU_PCIE_CONF_BMC_DEV_EN_LPC_DECODE;
-		regmap_update_bits(bmc_device->config, 0x10, pcie_config_ctl, pcie_config_ctl);
+		regmap_update_bits(bmc_device->scu, SCU0_PCIE_CONF_CTRL,
+				   pcie_config_ctl, pcie_config_ctl);
 	}
 
 	/* update class code to others as it is a MFD device */
@@ -580,7 +574,7 @@ static int aspeed_bmc_device_probe(struct platform_device *pdev)
 
 	bmc_device->platform = md;
 
-	bmc_device->id = of_alias_get_id(dev->of_node, "bmc_dev");
+	bmc_device->id = of_alias_get_id(dev->of_node, "bmcdev");
 	if (bmc_device->id < 0)
 		bmc_device->id = 0;
 
@@ -606,12 +600,6 @@ static int aspeed_bmc_device_probe(struct platform_device *pdev)
 
 	bmc_device->bmc_mem_phy = res.start;
 	bmc_device->bmc_mem_size = resource_size(&res);
-	bmc_device->bmc_mem_virt = devm_ioremap_resource(dev, &res);
-	if (!bmc_device->bmc_mem_virt) {
-		dev_err(dev, "cannot map bmc dev memory region\n");
-		ret = -ENOMEM;
-		goto out_region;
-	}
 
 	bmc_device->irq = platform_get_irq(pdev, 0);
 	if (bmc_device->irq < 0) {
@@ -673,7 +661,6 @@ out_irq:
 	devm_free_irq(&pdev->dev, bmc_device->irq, bmc_device);
 out_unmap:
 	iounmap(bmc_device->reg_base);
-	devm_iounmap(&pdev->dev, bmc_device->bmc_mem_virt);
 out_region:
 	devm_kfree(&pdev->dev, bmc_device);
 	dev_warn(dev, "aspeed bmc device: driver init failed (ret=%d)!\n", ret);
@@ -692,8 +679,6 @@ static int  aspeed_bmc_device_remove(struct platform_device *pdev)
 	devm_free_irq(&pdev->dev, bmc_device->pcie_irq, bmc_device);
 
 	iounmap(bmc_device->reg_base);
-
-	devm_iounmap(&pdev->dev, bmc_device->bmc_mem_virt);
 
 	devm_kfree(&pdev->dev, bmc_device);
 

@@ -382,7 +382,7 @@ static void aspeed_spi_start_user(struct aspeed_spi_chip *chip)
 
 static void aspeed_spi_stop_user(struct aspeed_spi_chip *chip)
 {
-	u32 ctl = chip->ctl_val[ASPEED_SPI_READ] |
+	u32 ctl = chip->ctl_val[ASPEED_SPI_BASE] |
 		CTRL_IO_MODE_USER | CTRL_CE_STOP_ACTIVE;
 
 	writel(ctl, chip->ctl);
@@ -586,9 +586,6 @@ static int do_aspeed_spi_exec_op(struct spi_mem *mem, const struct spi_mem_op *o
 	    (op->cmd.opcode == SPINOR_OP_SRSTEN ||
 	     op->cmd.opcode == SPINOR_OP_SRST))
 		return ret;
-
-	if (aspi->data->safs_stop)
-		aspi->data->safs_stop(aspi);
 
 	if (op->data.dir == SPI_MEM_DATA_IN) {
 		if (!op->addr.nbytes)

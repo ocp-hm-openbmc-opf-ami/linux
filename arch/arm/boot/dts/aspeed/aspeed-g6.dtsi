@@ -473,75 +473,33 @@
 				reg = <0x1e6e2530 0x8>;
 			};
 
-			pcie_phy0: pcie_phy@1e6ed000 {
+			pcie_phy0: pcie-phy@1e6ed000 {
 				compatible = "aspeed,ast2600-pcie-phy", "syscon";
 				reg = <0x1e6ed000 0x100>;
 			};
 
-			pcie_phy1: rc_bridge@1e6ed200 {
+			pcie_phy1: pcie-phy@1e6ed200 {
 				compatible = "aspeed,ast2600-pcie-phy", "syscon";
 				reg = <0x1e6ed200 0x100>;
 			};
 
-			pciecfg: pciecfg@1e770000 {
-				compatible = "aspeed,ast2600-pciecfg", "syscon";
+			pcie_cfg: pcie-cfg@1e770000 {
+				compatible = "aspeed,ast2600-pcie-cfg", "syscon";
 				reg = <0x1e770000 0x80>;
 			};
 
-			pcie0: pcie@1e770080 {
+			pcie0: pcie@1e7700c0 {
 				compatible = "aspeed,ast2600-pcie";
 				device_type = "pci";
-				reg = <0x1e770080 0x40>;
+				reg = <0x1e7700c0 0x40>;
 				linux,pci-domain = <0>;
-				#address-cells = <3>;
-				#size-cells = <2>;
-				interrupts = <GIC_SPI 167 IRQ_TYPE_LEVEL_HIGH>;
-				bus-range = <0x00 0x7f>;
-				ranges = <0x01000000 0 0x00000000 0x00000000 0x0 0x08000   /* I/O */
-					0x02000000 0x0 0x60000000 0x60000000 0 0x10000000>; /* memory */
-
-				status = "disabled";
-
-				resets = <&syscon ASPEED_RESET_H2X>,
-					 <&syscon ASPEED_RESET_PCIE_DEV_O>;
-				reset-names = "h2x", "perst";
-				clocks = <&syscon ASPEED_CLK_GATE_BCLK>;
-				pinctrl-names = "default";
-				pinctrl-0 = <&pinctrl_pcierc0_default>;
-
-				#interrupt-cells = <1>;
-				msi-parent = <&pcie0>;
-				msi-controller;
-				msi_address = <0x1e770058>;
-
-				ahbc = <&ahbc>;
-				pciecfg = <&pciecfg>;
-				pciephy = <&pcie_phy0>;
-
-				interrupt-map-mask = <0 0 0 7>;
-				interrupt-map = <0 0 0 1 &pcie_intc0 0>,
-						<0 0 0 2 &pcie_intc0 1>,
-						<0 0 0 3 &pcie_intc0 2>,
-						<0 0 0 4 &pcie_intc0 3>;
-				pcie_intc0: interrupt-controller {
-					interrupt-controller;
-					#address-cells = <0>;
-					#interrupt-cells = <1>;
-				};
-			};
-
-			pcie1: pcie@1e7700C0 {
-				compatible = "aspeed,ast2600-pcie";
-				device_type = "pci";
-				reg = <0x1e7700C0 0x40>;
-				linux,pci-domain = <1>;
 				#address-cells = <3>;
 				#size-cells = <2>;
 				interrupts = <GIC_SPI 168 IRQ_TYPE_LEVEL_HIGH>;
 				bus-range = <0x80 0xff>;
 
-				ranges = <0x01000000 0 0x00018000 0x00018000 0x0 0x08000
-					0x02000000 0x0 0x70000000 0x70000000 0 0x10000000>; /* memory */
+				ranges = <0x01000000 0x0 0x00018000 0x00018000 0x0 0x00008000
+					  0x02000000 0x0 0x70000000 0x70000000 0x0 0x10000000>;
 
 				status = "disabled";
 
@@ -553,20 +511,19 @@
 				pinctrl-0 = <&pinctrl_pcierc1_default>;
 
 				#interrupt-cells = <1>;
-				msi-parent = <&pcie1>;
+				msi-parent = <&pcie0>;
 				msi-controller;
-				msi_address = <0x1e77005C>;
 
-				ahbc = <&ahbc>;
-				pciecfg = <&pciecfg>;
-				pciephy = <&pcie_phy1>;
+				aspeed,ahbc = <&ahbc>;
+				aspeed,pciecfg = <&pcie_cfg>;
+				aspeed,pciephy = <&pcie_phy1>;
 
 				interrupt-map-mask = <0 0 0 7>;
-				interrupt-map = <0 0 0 1 &pcie_intc1 0>,
-						<0 0 0 2 &pcie_intc1 1>,
-						<0 0 0 3 &pcie_intc1 2>,
-						<0 0 0 4 &pcie_intc1 3>;
-				pcie_intc1: interrupt-controller {
+				interrupt-map = <0 0 0 1 &pcie_intc0 0>,
+						<0 0 0 2 &pcie_intc0 1>,
+						<0 0 0 3 &pcie_intc0 2>,
+						<0 0 0 4 &pcie_intc0 3>;
+				pcie_intc0: interrupt-controller {
 					interrupt-controller;
 					#address-cells = <0>;
 					#interrupt-cells = <1>;
@@ -608,7 +565,6 @@
 			gfx: display@1e6e6000 {
 				compatible = "aspeed,ast2600-gfx", "syscon";
 				reg = <0x1e6e6000 0x1000>;
-				reg-io-width = <4>;
 				clocks = <&syscon ASPEED_CLK_GATE_D1CLK>;
 				resets = <&syscon ASPEED_RESET_CRT>,
 				<&syscon ASPEED_RESET_GRAPHICS>;
@@ -973,7 +929,6 @@
 			lpc: lpc@1e789000 {
 				compatible = "aspeed,ast2600-lpc-v2", "simple-mfd", "syscon";
 				reg = <0x1e789000 0x1000>;
-				reg-io-width = <4>;
 
 				#address-cells = <1>;
 				#size-cells = <1>;
@@ -1294,7 +1249,7 @@
 
 			fsim0: fsi@1e79b000 {
 				#interrupt-cells = <1>;
-				compatible = "aspeed,ast2600-fsi-master", "fsi-master";
+				compatible = "aspeed,ast2600-fsi-master";
 				reg = <0x1e79b000 0x94>;
 				interrupts = <GIC_SPI 100 IRQ_TYPE_LEVEL_HIGH>;
 				pinctrl-names = "default";
@@ -1306,7 +1261,7 @@
 
 			fsim1: fsi@1e79b100 {
 				#interrupt-cells = <1>;
-				compatible = "aspeed,ast2600-fsi-master", "fsi-master";
+				compatible = "aspeed,ast2600-fsi-master";
 				reg = <0x1e79b100 0x94>;
 				interrupts = <GIC_SPI 101 IRQ_TYPE_LEVEL_HIGH>;
 				pinctrl-names = "default";

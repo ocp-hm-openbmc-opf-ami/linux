@@ -88,6 +88,21 @@
 	status = "disabled";
 };
 
+/* Add internal-pullup for i3c4 and i3c5 */
+&i3c4 {
+	internal-pullup = <2>;
+	initial-role = "target";
+	pid = <0x000007ec 0x06014000>;
+	dcr = /bits/ 8 <0xcc>;
+	status = "okay";
+};
+
+&i3c5 {
+	internal-pullup = <2>;
+	initial-role = "primary";
+	status = "okay";
+};
+
 /* AST2700 VFF DCSCM use MAC0 and MAC1 for NCSI */
 &sgpios {
 	status = "disabled";
@@ -107,16 +122,7 @@
 };
 
 &mac1 {
-	status = "okay";
-
-	phy-mode = "rmii";
-	use-ncsi;
-
-	pinctrl-names = "default";
-	/* If you want to use RMII1 RCLKO as internal clock for RMII,
-	 * add &pinctrl_rmii1_rclko_default in pinctrl-0.
-	 */
-	pinctrl-0 = <&pinctrl_rmii1_default>;
+	status = "disabled";
 };
 
 &syscon1 {
@@ -201,6 +207,10 @@
 &pcie1 {
 	status = "okay";
 	perst-rc-out-gpio = <&gpio1 ASPEED_GPIO(T, 7) GPIO_ACTIVE_HIGH>;
+};
+
+&spi1 {
+	status = "disabled";
 };
 
 &spi2 {

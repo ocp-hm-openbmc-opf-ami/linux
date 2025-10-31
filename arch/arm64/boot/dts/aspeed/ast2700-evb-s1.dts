@@ -10,15 +10,105 @@
 &espi1 {
 	status = "okay";
 	perif-dma-mode;
+#if 0 // TODO: No enough memory for espi1 MMBI
 	perif-mmbi-enable;
 	perif-mmbi-src-addr = <0x0 0xa8000000>;
 	perif-mmbi-tgt-memory = <&espi1_mmbi_memory>;
 	perif-mmbi-instance-num = <0x1>;
+#endif
 	perif-mcyc-enable;
 	perif-mcyc-src-addr = <0x0 0x98000000>;
 	perif-mcyc-size = <0x0 0x10000>;
 	oob-dma-mode;
 	flash-dma-mode;
+};
+
+&bmc_dev0 {
+	status = "disabled";
+};
+
+&xdma0 {
+	status = "disabled";
+};
+
+&pcie_vuart0 {
+	status = "disabled";
+};
+
+&pcie_vuart1 {
+	status = "disabled";
+};
+
+&pcie_lpc0_kcs0 {
+	status = "disabled";
+};
+
+&pcie_lpc0_kcs1 {
+	status = "disabled";
+};
+
+&pcie_lpc0_kcs2 {
+	status = "disabled";
+};
+
+&pcie_lpc0_kcs3 {
+	status = "disabled";
+};
+
+&pcie_lpc0_ibt {
+	status = "disabled";
+};
+
+&pcie0_mmbi0 {
+	status = "disabled";
+};
+
+&pcie0 {
+	status = "okay";
+};
+
+&bmc_dev1 {
+	status = "disabled";
+};
+
+&xdma1 {
+	status = "disabled";
+};
+
+&pcie_vuart2 {
+	status = "disabled";
+};
+
+&pcie_vuart3 {
+	status = "disabled";
+};
+
+&pcie_lpc1_kcs0 {
+	status = "disabled";
+};
+
+&pcie_lpc1_kcs1 {
+	status = "disabled";
+};
+
+&pcie_lpc1_kcs2 {
+	status = "disabled";
+};
+
+&pcie_lpc1_kcs3 {
+	status = "disabled";
+};
+
+&pcie_lpc1_ibt {
+	status = "disabled";
+};
+
+&pcie1_mmbi4 {
+	status = "disabled";
+};
+
+&pcie1 {
+	status = "okay";
 };
 
 &sdio_controller {

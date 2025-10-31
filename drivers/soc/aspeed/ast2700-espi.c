@@ -10,6 +10,7 @@
 #include <linux/bitfield.h>
 #include <linux/count_zeros.h>
 #include <linux/of_device.h>
+#include <linux/of_reserved_mem.h>
 #include <linux/of_address.h>
 #include <linux/interrupt.h>
 #include <linux/platform_device.h>
@@ -909,6 +910,16 @@ static int ast2700_espi_perif_probe(struct ast2700_espi *espi)
 			return -EINVAL;
 		}
 
+		np = of_parse_phandle(dev->of_node, "memory-region", 0);
+		if (np) {
+			of_reserved_mem_device_init(dev);
+			rc = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(64));
+			if (rc) {
+				dev_err(dev, "Failed to mask DMA.\n");
+				return -ENODEV;
+			}
+		}
+
 		perif->mcyc.virt = dmam_alloc_coherent(dev, perif->mcyc.size,
 						       &perif->mcyc.taddr, GFP_KERNEL);
 		if (!perif->mcyc.virt) {
@@ -1038,24 +1049,57 @@ static long ast2700_espi_vw_ioctl(struct file *fp, unsigned int cmd, unsigned lo
 {
 	struct ast2700_espi_vw *vw;
 	struct ast2700_espi *espi;
-	uint64_t gpio;
+	uint32_t gpio0, gpio1;
+	uint32_t hw_mode;
 
 	vw = container_of(fp->private_data, struct ast2700_espi_vw, mdev);
 	espi = container_of(vw, struct ast2700_espi, vw);
-	gpio = ((uint64_t)vw->gpio.val1 << 32) | vw->gpio.val0;
+	gpio0 = vw->gpio.val0;
+	gpio1 = vw->gpio.val1;
+	hw_mode = vw->gpio.hw_mode;
+
+	if (hw_mode) {
+		dev_err(espi->dev, "HW mode: vGPIO reflect on physical GPIO. Get state from GPIO driver.\n");
+		return -EFAULT;
+	}
 
 	switch (cmd) {
 	case ASPEED_ESPI_VW_GET_GPIO_VAL:
-		if (put_user(gpio, (uint64_t __user *)arg))
+		if (put_user(gpio0, (uint32_t __user *)arg)) {
+			dev_err(espi->dev, "failed to get vGPIO value0\n");
 			return -EFAULT;
+		}
+
+		dev_info(espi->dev, "Get vGPIO value0: 0x%x\n", gpio0);
 		break;
 
 	case ASPEED_ESPI_VW_PUT_GPIO_VAL:
-		if (get_user(gpio, (uint64_t __user *)arg))
+		if (get_user(gpio0, (uint32_t __user *)arg)) {
+			dev_err(espi->dev, "failed to put vGPIO value0\n");
 			return -EFAULT;
+		}
 
-		writel(gpio >> 32, espi->regs + ESPI_CH1_GPIO_VAL1);
-		writel(gpio & 0xffffffff, espi->regs + ESPI_CH1_GPIO_VAL0);
+		dev_info(espi->dev, "Put vGPIO value0: 0x%x\n", gpio0);
+		writel(gpio0, espi->regs + ESPI_CH1_GPIO_VAL0);
+		break;
+
+	case ASPEED_ESPI_VW_GET_GPIO_VAL1:
+		if (put_user(gpio1, (uint32_t __user *)arg)) {
+			dev_err(espi->dev, "failed to get vGPIO value1\n");
+			return -EFAULT;
+		}
+
+		dev_info(espi->dev, "Get vGPIO value1: 0x%x\n", gpio1);
+		break;
+
+	case ASPEED_ESPI_VW_PUT_GPIO_VAL1:
+		if (get_user(gpio1, (uint32_t __user *)arg)) {
+			dev_err(espi->dev, "failed to put vGPIO value1\n");
+			return -EFAULT;
+		}
+
+		dev_info(espi->dev, "Put vGPIO value1: 0x%x\n", gpio1);
+		writel(gpio1, espi->regs + ESPI_CH1_GPIO_VAL1);
 		break;
 
 	default:
@@ -1966,7 +2010,7 @@ static int ast2700_espi_flash_probe(struct ast2700_espi *espi)
 	flash->edaf.mode = EDAF_MODE_HW;
 
 	of_property_read_u32(dev->of_node, "flash-edaf-mode", &flash->edaf.mode);
-	dev_err(dev, "eDAF mode: 0x%x\n", flash->edaf.mode);
+	dev_info(dev, "eDAF mode: 0x%x\n", flash->edaf.mode);
 	if (flash->edaf.mode == EDAF_MODE_MIX) {
 		np = of_parse_phandle(dev->of_node, "flash-edaf-tgt-addr", 0);
 		if (!np || of_address_to_resource(np, 0, &res)) {
@@ -1978,14 +2022,14 @@ static int ast2700_espi_flash_probe(struct ast2700_espi *espi)
 
 		flash->edaf.taddr = res.start;
 		flash->edaf.size = resource_size(&res);
-		dev_err(dev, "eDAF address: 0x%llx\n", flash->edaf.taddr);
-		dev_err(dev, "eDAF size: 0x%llx\n", flash->edaf.size);
-	}
+		dev_info(dev, "eDAF address: 0x%llx\n", flash->edaf.taddr);
+		dev_info(dev, "eDAF size: 0x%llx\n", flash->edaf.size);
 
-	virt = devm_ioremap_resource(dev, &res);
-	if (!virt) {
-		dev_err(dev, "cannot map MMBI memory region\n");
-		return -ENOMEM;
+		virt = devm_ioremap_resource(dev, &res);
+		if (!virt) {
+			dev_err(dev, "cannot map eDAF memory region\n");
+			return -ENOMEM;
+		}
 	}
 
 	flash->dma.enable = of_property_read_bool(dev->of_node, "flash-dma-mode");

@@ -22,17 +22,24 @@
 #include "8250.h"
 
 #define DEVICE_NAME "aspeed-uart"
+#define UNKNOWN 0
+#define AST2500_PLAT 1
+#define AST2600_PLAT 2
+#define AST2700_PLAT 3
 
 /* offsets for the aspeed virtual uart registers */
 #define VUART_GCRA	0x20
 #define   VUART_GCRA_VUART_EN			BIT(0)
 #define   VUART_GCRA_SIRQ_POLARITY		BIT(1)
+#define   VUART_GCRA_CHARACTER_TIMEOUT_TIME_MASK	GENMASK(3, 2)
 #define   VUART_GCRA_DISABLE_HOST_TX_DISCARD	BIT(5)
 #define VUART_GCRB	0x24
 #define   VUART_GCRB_HOST_SIRQ_MASK		GENMASK(7, 4)
 #define   VUART_GCRB_HOST_SIRQ_SHIFT		4
 #define VUART_ADDRL	0x28
 #define VUART_ADDRH	0x2c
+#define VUART_GCRG	0x38
+#define   VUART_GCRG_CHARACTER_TIMEOUT_TIME_CONTROL	BIT(1)
 
 #define DMA_TX_BUFSZ	PAGE_SIZE
 #define DMA_RX_BUFSZ	(64 * 1024)
@@ -43,6 +50,7 @@ struct ast8250_vuart {
 	u32 port;
 	u32 sirq;
 	u32 sirq_pol;
+	bool character_timeout_time_en;
 };
 
 struct ast8250_udma {
@@ -179,6 +187,18 @@ static void ast8250_vuart_init(struct ast8250_data *data)
 	else
 		reg &= ~VUART_GCRA_SIRQ_POLARITY;
 	writeb(reg, data->regs + VUART_GCRA);
+
+	if (vuart->character_timeout_time_en) {
+		/* Character timeout time */
+		reg = readb(data->regs + VUART_GCRA);
+		reg |= VUART_GCRA_CHARACTER_TIMEOUT_TIME_MASK;
+		writeb(reg, data->regs + VUART_GCRA);
+
+		/* Character timeout time by LCLK control bit */
+		reg = readb(data->regs + VUART_GCRG);
+		reg |= VUART_GCRG_CHARACTER_TIMEOUT_TIME_CONTROL;
+		writeb(reg, data->regs + VUART_GCRG);
+	}
 }
 
 static void ast8250_vuart_set_host_tx_discard(struct ast8250_data *data, bool discard)
@@ -346,6 +366,7 @@ static int ast8250_probe(struct platform_device *pdev)
 	struct uart_port *port = &uart.port;
 	struct device *dev = &pdev->dev;
 	struct ast8250_data *data;
+	uint32_t plat = (unsigned long)of_device_get_match_data(dev);
 
 	struct resource *res;
 	u32 irq;
@@ -419,6 +440,11 @@ static int ast8250_probe(struct platform_device *pdev)
 			return -ENODEV;
 		}
 
+		if (plat == AST2700_PLAT)
+			data->vuart.character_timeout_time_en = true;
+		else
+			data->vuart.character_timeout_time_en = false;
+
 		ast8250_vuart_init(data);
 		ast8250_vuart_set_host_tx_discard(data, true);
 		ast8250_vuart_set_enable(data, true);
@@ -483,9 +509,9 @@ static const struct dev_pm_ops ast8250_pm_ops = {
 };
 
 static const struct of_device_id ast8250_of_match[] = {
-	{ .compatible = "aspeed,ast2500-uart" },
-	{ .compatible = "aspeed,ast2600-uart" },
-	{ .compatible = "aspeed,ast2700-uart" },
+	{ .compatible = "aspeed,ast2500-uart", .data = (void *)AST2500_PLAT},
+	{ .compatible = "aspeed,ast2600-uart", .data = (void *)AST2600_PLAT},
+	{ .compatible = "aspeed,ast2700-uart", .data = (void *)AST2700_PLAT},
 	{ },
 };
 

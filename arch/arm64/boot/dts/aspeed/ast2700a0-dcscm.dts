@@ -6,19 +6,15 @@
 #include <dt-bindings/gpio/aspeed-gpio.h>
 #include <dt-bindings/i2c/i2c.h>
 
+#define PCIE0_EP 1
+#define PCIE1_EP 1
+
 / {
 	model = "AST2700A0-DCSCM";
 	compatible = "aspeed,ast2700";
 
 	chosen {
-		stdout-path = &uart12;
-	};
-
-	firmware {
-		optee: optee {
-			compatible = "linaro,optee-tz";
-			method = "smc";
-		};
+		stdout-path = "serial12:115200n8";
 	};
 
 	memory@400000000 {
@@ -52,20 +48,6 @@
 			alignment = <0x0 0x01000000>;
 			compatible = "shared-dma-pool";
 			reusable;
-		};
-
-		xdma_memory0: xdma0 {
-			size = <0x0 0x01000000>;
-			alignment = <0x0 0x01000000>;
-			compatible = "shared-dma-pool";
-			no-map;
-		};
-
-		xdma_memory1: xdma1 {
-			size = <0x0 0x01000000>;
-			alignment = <0x0 0x01000000>;
-			compatible = "shared-dma-pool";
-			no-map;
 		};
 	};
 
@@ -546,7 +528,7 @@
 	gpio_143 {
 		gpio-hog;
 		gpios = <143 GPIO_ACTIVE_HIGH>;
-		output-high;
+		output-low;
 		line-name = "SURPRISE_RESET";
 	};
 };

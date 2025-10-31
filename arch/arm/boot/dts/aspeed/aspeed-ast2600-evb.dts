@@ -793,11 +793,7 @@
 };
 #endif
 
-&pciecfg {
-	status = "okay";
-};
-
-&pcie1 {
+&pcie0 {
 	status = "okay";
 };
 
@@ -896,6 +892,14 @@
 };
 
 &uart_routing {
+	status = "okay";
+};
+
+&vuart1 {
+	virtual;
+	port = <0x3f8>;
+	sirq = <4>;
+	sirq-polarity = <0>;
 	status = "okay";
 };
 

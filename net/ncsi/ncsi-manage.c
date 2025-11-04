@@ -109,7 +109,6 @@ static void ncsi_channel_monitor(struct timer_list *t)
 	struct ncsi_channel *nc = from_timer(nc, t, monitor.timer);
 	struct ncsi_package *np = nc->package;
 	struct ncsi_dev_priv *ndp = np->ndp;
-	struct ncsi_channel_mode *ncm;
 	struct ncsi_cmd_arg nca;
 	bool enabled, chained;
 	unsigned int monitor_state;
@@ -141,41 +140,15 @@ bad_state:
 	}
 
 	netif_carrier_on(ndp->ndev.dev);
-	switch (monitor_state) {
-	case NCSI_CHANNEL_MONITOR_START:
-	case NCSI_CHANNEL_MONITOR_RETRY:
-		nca.ndp = ndp;
-		nca.package = np->id;
-		nca.channel = nc->id;
-		nca.type = NCSI_PKT_CMD_GLS;
-		nca.req_flags = 0;
-		ret = ncsi_xmit_cmd(&nca);
-		if (ret)
-			netdev_err(ndp->ndev.dev, "Error %d sending GLS\n",
-				   ret);
-		break;
-	case NCSI_CHANNEL_MONITOR_WAIT ... NCSI_CHANNEL_MONITOR_WAIT_MAX:
-		break;
-	default:
-		netdev_err(ndp->ndev.dev, "NCSI Channel %d timed out!\n",
-			   nc->id);
-		ncsi_report_link(ndp, true);
-		ndp->flags |= NCSI_DEV_RESHUFFLE;
-
-		ncm = &nc->modes[NCSI_MODE_LINK];
-		spin_lock_irqsave(&nc->lock, flags);
-		nc->monitor.enabled = false;
-		nc->state = NCSI_CHANNEL_INVISIBLE;
-		ncm->data[2] &= ~0x1;
-		spin_unlock_irqrestore(&nc->lock, flags);
-
-		spin_lock_irqsave(&ndp->lock, flags);
-		nc->state = NCSI_CHANNEL_ACTIVE;
-		list_add_tail_rcu(&nc->link, &ndp->channel_queue);
-		spin_unlock_irqrestore(&ndp->lock, flags);
-		ncsi_process_next_channel(ndp);
-		return;
-	}
+	nca.ndp = ndp;
+	nca.package = np->id;
+	nca.channel = nc->id;
+	nca.type = NCSI_PKT_CMD_GLS;
+	nca.req_flags = 0;
+	ret = ncsi_xmit_cmd(&nca);
+	if (ret)
+		netdev_err(ndp->ndev.dev, "Error %d sending GLS\n",
+				ret);
 
 	spin_lock_irqsave(&nc->lock, flags);
 	nc->monitor.state++;

@@ -52,13 +52,6 @@
 /* MCTP message type */
 #define MCTP_MSG_TYPE_MASK GENMASK(6, 0)
 #define MCTP_PCIE_VDM_MSG_TYPE 0x7E
-#define MCTP_CONTROL_MSG_TYPE 0x00
-
-#define MCTP_CTRL_MSG_RQDI_REQ 0x80
-#define MCTP_CTRL_MSG_RQDI_RSP 0x00
-
-#define MCTP_CTRL_MSG_RQDI_REQ_DATA_OFFSET 3
-#define MCTP_CTRL_MSG_RQDI_RSP_DATA_OFFSET 4
 
 #define MCTP_PCIE_SWAP_NET_ENDIAN(arr, len)       \
 	do {                                      \
@@ -91,11 +84,6 @@ enum mctp_ctrl_command_code {
 	MCTP_CTRL_CMD_DISCOVERY_NOTIFY = 0x0D
 };
 
-struct mctp_ctrl_msg_hdr {
-	u8 ctrl_msg_class;
-	u8 command_code;
-};
-
 struct mctp_pcie_vdm_hdr {
 	u32 length : 10, rsvd0 : 2, attr : 2, ep : 1, td : 1, rsvd1 : 4, tc : 3,
 		rsvd2 : 1, route_type : 5, fmt : 2, rsvd3 : 1;
@@ -104,13 +92,6 @@ struct mctp_pcie_vdm_hdr {
 	u16 pci_req_id;
 	u16 pci_vendor_id;
 	u16 pci_target_id;
-};
-
-struct mctp_pcie_vdm_route_info {
-	u8 eid;
-	u8 dirty;
-	u16 bdf_addr;
-	struct hlist_node hnode;
 };
 
 struct mctp_pcie_vdm_dev {
@@ -166,35 +147,6 @@ static int mctp_pcie_vdm_xmit(struct net_device *ndev, struct sk_buff *skb)
 	payload_len_dw = (ALIGN(skb->len, sizeof(u32)) - MCTP_PCIE_VDM_HDR_SIZE) / sizeof(u32);
 	payload_len_byte = skb->len - MCTP_PCIE_VDM_HDR_SIZE;
 
-	if (message_type == MCTP_CONTROL_MSG_TYPE) {
-		mctp_pcie_vdm_ctrl_msg_handler(vdm_dev, hdr_byte);
-	} else {
-		if (hdr->route_type ==
-		    (MCTP_PCIE_VDM_TYPE_MSG | MCTP_PCIE_VDM_ROUTE_BY_ID)) {
-			struct mctp_pcie_vdm_route_info *route;
-			bool exist = false;
-			u16 bdf = 0x00;
-			u8 dst_eid =
-				FIELD_GET(GENMASK(15, 8),
-					  *((u32 *)skb->data +
-					    sizeof(struct mctp_pcie_vdm_hdr) /
-						    sizeof(u32)));
-
-			hash_for_each_possible(vdm_dev->route_table, route,
-					       hnode, dst_eid) {
-				if (route->eid == dst_eid) {
-					exist = true;
-					bdf = route->bdf_addr;
-					hdr->pci_target_id = bdf;
-					break;
-				}
-			}
-			if (exist)
-				pr_debug("%s fill bdf 0x%x to eid %d", __func__,
-					 bdf, dst_eid);
-		}
-	}
-
 	hdr->length = payload_len_dw;
 	hdr->tag_pad_len =
 		ALIGN(payload_len_byte, sizeof(u32)) - payload_len_byte;
@@ -240,13 +192,6 @@ static netdev_tx_t mctp_pcie_vdm_start_xmit(struct sk_buff *skb,
 static void mctp_pcie_vdm_uninit(struct net_device *ndev)
 {
 	struct mctp_pcie_vdm_dev *vdm_dev;
-
-	struct mctp_pcie_vdm_route_info *route;
-	struct hlist_node *tmp;
-	int bkt;
-
-	pr_debug("%s: uninitializing vdm_dev %s\n", __func__,
-		 vdm_dev->ndev->name);
 
 	vdm_dev = netdev_priv(ndev);
 	pr_info("%s: uninitializing vdm_dev %s\n", __func__,
@@ -319,7 +264,7 @@ static int mctp_pcie_vdm_add_net_dev(struct net_device **dev)
 	*dev = ndev;
 	int rc;
 
-	rc = mctp_register_netdev(ndev, NULL);
+	rc = mctp_register_netdev(ndev, NULL, MCTP_PHYS_BINDING_PCIE_VDM);
 	if (rc) {
 		pr_err("%s: failed to register net device\n", __func__);
 		free_netdev(ndev);

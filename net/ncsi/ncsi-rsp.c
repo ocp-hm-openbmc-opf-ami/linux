@@ -1261,7 +1261,7 @@ int ncsi_rcv_rsp(struct sk_buff *skb, struct net_device *dev,
 						      ret);
 		}
 
-		#if defined(CONFIG_NCSI_AMI_ASYNC_RESET) && CONFIG_NCSI_AMI_ASYNC_RESET
+#if defined(CONFIG_NCSI_AMI_ASYNC_RESET) && CONFIG_NCSI_AMI_ASYNC_RESET
 		h = (struct ncsi_rsp_pkt_hdr *)skb_network_header(nr->rsp);
 		if((ntohs(h->reason) == NCSI_PKT_RSP_R_INTERFACE) && initCompleted)
 		{

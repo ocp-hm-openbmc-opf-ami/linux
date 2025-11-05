@@ -1277,6 +1277,9 @@ int ncsi_rcv_rsp(struct sk_buff *skb, struct net_device *dev,
 					nca.package = np->id;
 					nca.channel = nc->id;
 					ret = ncsi_xmit_cmd(&nca);
+					if (ret)
+						netdev_err(ndp->ndev.dev, "Error %d sending CIS\n", ret);
+
 				}
 			}
 			ncsi_reset_dev(&ndp->ndev);

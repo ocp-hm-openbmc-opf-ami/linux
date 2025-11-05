@@ -692,11 +692,9 @@ static void dw_i3c_master_end_xfer_locked(struct dw_i3c_master *master, u32 isr)
 		switch (xfer->cmds[i].error) {
 		case RESPONSE_NO_ERROR:
 			break;
-		case RESPONSE_ERROR_TRANSF_ABORT:
-			ret = -EINTR;
-			break;
 		case RESPONSE_ERROR_PARITY:
 		case RESPONSE_ERROR_IBA_NACK:
+		case RESPONSE_ERROR_TRANSF_ABORT:
 		case RESPONSE_ERROR_CRC:
 		case RESPONSE_ERROR_FRAME:
 			ret = -EIO;
@@ -715,7 +713,7 @@ static void dw_i3c_master_end_xfer_locked(struct dw_i3c_master *master, u32 isr)
 	xfer->ret = ret;
 	complete(&xfer->comp);
 
-	if (ret < 0 && ret != -EINTR) {
+	if (ret < 0) {
 		/*
 		 * The controller will enter the HALT state if an error occurs.
 		 * Therefore, there is no need to manually halt the controller
@@ -2161,8 +2159,6 @@ static void dw_i3c_master_handle_ibi_sir(struct dw_i3c_master *master,
 	return;
 
 err_drain:
-	if (terminate_ibi)
-		i3c_generic_ibi_recycle_slot(data->ibi_pool, slot);
 	dw_i3c_master_drain_ibi_queue(master, len);
 	state = FIELD_GET(CM_TFR_STS, readl(master->regs + PRESENT_STATE));
 	if (terminate_ibi && state == CM_TFR_STS_MASTER_SERV_IBI)

@@ -337,6 +337,7 @@ struct ast2600_i2c_bus {
 	struct i2c_client		*ara;
 #if IS_ENABLED(CONFIG_I2C_SLAVE)
 	int				slave_operate;
+	int				previous_idx;
 	unsigned char			*slave_dma_buf;
 	dma_addr_t			slave_dma_addr;
 	u8 slave_attached;
@@ -961,10 +962,11 @@ static void ast2600_i2c_slave_packet_dma_irq(struct ast2600_i2c_bus *i2c_bus, u3
 		writel(ac_timing, i2c_bus->reg_base + AST2600_I2CC_AC_TIMING);
 		ac_timing |= AST2600_I2CC_TTIMEOUT(i2c_bus->timeout);
 		writel(ac_timing, i2c_bus->reg_base + AST2600_I2CC_AC_TIMING);
-		cmd = SLAVE_TRIGGER_CMD | AST2600_I2CS_RX_DMA_EN;
+		/* set rx dma length ,re-send slave trigger command and clear irq status */
 		writel(AST2600_I2CS_SET_RX_DMA_LEN(I2C_SLAVE_MSG_BUF_SIZE),
 		       i2c_bus->reg_base + AST2600_I2CS_DMA_LEN);
-		writel(cmd, i2c_bus->reg_base + AST2600_I2CS_CMD_STS);
+		writel(SLAVE_TRIGGER_CMD | AST2600_I2CS_RX_DMA_EN,
+		       i2c_bus->reg_base + AST2600_I2CS_CMD_STS);
 		writel(AST2600_I2CS_PKT_DONE, i2c_bus->reg_base + AST2600_I2CS_ISR);
 		i2c_slave_event(i2c_bus->slave, I2C_SLAVE_STOP, &value);
 		return;
@@ -1105,7 +1107,7 @@ static void ast2600_i2c_slave_packet_buff_irq(struct ast2600_i2c_bus *i2c_bus, u
 		writel(ac_timing, i2c_bus->reg_base + AST2600_I2CC_AC_TIMING);
 		ac_timing |= AST2600_I2CC_TTIMEOUT(i2c_bus->timeout);
 		writel(ac_timing, i2c_bus->reg_base + AST2600_I2CC_AC_TIMING);
-		/* Clear irq and re-send slave trigger command */
+		/* Re-send slave trigger command and clear irq */
 		writel(SLAVE_TRIGGER_CMD, i2c_bus->reg_base + AST2600_I2CS_CMD_STS);
 		writel(AST2600_I2CS_PKT_DONE, i2c_bus->reg_base + AST2600_I2CS_ISR);
 		i2c_slave_event(i2c_bus->slave, I2C_SLAVE_STOP, &value);
@@ -1218,28 +1220,6 @@ static void ast2600_i2c_slave_packet_buff_irq(struct ast2600_i2c_bus *i2c_bus, u
 		       i2c_bus->reg_base + AST2600_I2CC_BUFF_CTRL);
 		cmd = SLAVE_TRIGGER_CMD | AST2600_I2CS_TX_BUFF_EN;
 		break;
-	case AST2600_I2CS_SLAVE_PENDING | AST2600_I2CS_STOP |
-	     AST2600_I2CS_TX_NAK | AST2600_I2CS_SLAVE_MATCH | AST2600_I2CS_RX_DONE:
-		i2c_slave_event(i2c_bus->slave, I2C_SLAVE_STOP, &value);
-		i2c_slave_event(i2c_bus->slave, I2C_SLAVE_WRITE_REQUESTED, &value);
-		slave_rx_len = AST2600_I2CC_GET_RX_BUF_LEN(readl(i2c_bus->reg_base +
-						AST2600_I2CC_BUFF_CTRL));
-		for (i = 0; i < slave_rx_len; i++) {
-			value = readb(i2c_bus->buf_base + 0x10 + i);
-			i2c_slave_event(i2c_bus->slave, I2C_SLAVE_WRITE_RECEIVED, &value);
-		}
-		writel(AST2600_I2CC_SET_RX_BUF_LEN(i2c_bus->buf_size),
-		       i2c_bus->reg_base + AST2600_I2CC_BUFF_CTRL);
-		cmd = SLAVE_TRIGGER_CMD | AST2600_I2CS_RX_BUFF_EN;
-		break;
-	case AST2600_I2CS_SLAVE_PENDING | AST2600_I2CS_WAIT_RX_DMA | AST2600_I2CS_STOP |
-	     AST2600_I2CS_TX_NAK | AST2600_I2CS_SLAVE_MATCH | AST2600_I2CS_RX_DONE:
-		i2c_slave_event(i2c_bus->slave, I2C_SLAVE_STOP, &value);
-		i2c_slave_event(i2c_bus->slave, I2C_SLAVE_READ_REQUESTED, &value);
-		writel(AST2600_I2CC_SET_RX_BUF_LEN(i2c_bus->buf_size),
-		       i2c_bus->reg_base + AST2600_I2CC_BUFF_CTRL);
-		cmd = SLAVE_TRIGGER_CMD | AST2600_I2CS_RX_BUFF_EN;
-		break;
 	case AST2600_I2CS_SLAVE_MATCH | AST2600_I2CS_WAIT_TX_DMA | AST2600_I2CS_RX_DONE:
 	case AST2600_I2CS_WAIT_TX_DMA | AST2600_I2CS_RX_DONE:
 	case AST2600_I2CS_WAIT_TX_DMA:
@@ -1269,7 +1249,19 @@ static void ast2600_i2c_slave_packet_buff_irq(struct ast2600_i2c_bus *i2c_bus, u
 		cmd = SLAVE_TRIGGER_CMD | AST2600_I2CS_RX_BUFF_EN;
 		writel(cmd, i2c_bus->reg_base + AST2600_I2CS_CMD_STS);
 		break;
-
+	/* the pending slave needs to be cleared with TX_NAK and STOP here */
+	/* other flags will be handled in the next irq callback */
+	/* the slave index will be updated when the slave match occurs */
+	/* use the pervious idx to do the slave stop event */
+	case AST2600_I2CS_SLAVE_PENDING | AST2600_I2CS_TX_NAK | AST2600_I2CS_STOP |
+		AST2600_I2CS_SLAVE_MATCH | AST2600_I2CS_RX_DONE:
+	case AST2600_I2CS_SLAVE_PENDING | AST2600_I2CS_TX_NAK | AST2600_I2CS_STOP |
+		AST2600_I2CS_SLAVE_MATCH | AST2600_I2CS_RX_DONE | AST2600_I2CS_WAIT_RX_DMA:
+		cmd = SLAVE_TRIGGER_CMD;
+		i2c_bus->slave = i2c_bus->multi_slave[i2c_bus->previous_idx];
+		i2c_slave_event(i2c_bus->slave, I2C_SLAVE_STOP, &value);
+		i2c_bus->slave_operate = 0;
+		break;
 	case AST2600_I2CS_TX_NAK | AST2600_I2CS_STOP:
 	case AST2600_I2CS_STOP:
 		cmd = SLAVE_TRIGGER_CMD;
@@ -1288,6 +1280,8 @@ static void ast2600_i2c_slave_packet_buff_irq(struct ast2600_i2c_bus *i2c_bus, u
 
 	if ((sts & AST2600_I2CS_STOP) && !(sts & AST2600_I2CS_SLAVE_PENDING))
 		i2c_bus->slave_operate = 0;
+	else
+		i2c_bus->previous_idx = AST2600_I2CS_GET_SLAVE(sts);
 }
 
 static void ast2600_i2c_slave_byte_irq(struct ast2600_i2c_bus *i2c_bus, u32 sts)
@@ -1308,8 +1302,8 @@ static void ast2600_i2c_slave_byte_irq(struct ast2600_i2c_bus *i2c_bus, u32 sts)
 		writel(ac_timing, i2c_bus->reg_base + AST2600_I2CC_AC_TIMING);
 		ac_timing |= AST2600_I2CC_TTIMEOUT(i2c_bus->timeout);
 		writel(ac_timing, i2c_bus->reg_base + AST2600_I2CC_AC_TIMING);
-		/* Clear irq and re-send slave trigger command */
-		writel(cmd, i2c_bus->reg_base + AST2600_I2CS_CMD_STS);
+		/* Re-send slave trigger command and clear irq */
+		writel(AST2600_I2CS_ACTIVE_ALL, i2c_bus->reg_base + AST2600_I2CS_CMD_STS);
 		writel(sts, i2c_bus->reg_base + AST2600_I2CS_ISR);
 		readl(i2c_bus->reg_base + AST2600_I2CS_ISR);
 		i2c_slave_event(i2c_bus->slave, I2C_SLAVE_STOP, &value);
@@ -2362,24 +2356,26 @@ static int ast2600_i2c_probe(struct platform_device *pdev)
 	if (ret < 0)
 		return dev_err_probe(dev, ret, "Unable to request irq %d\n", i2c_bus->irq);
 
+	/* Set interrupt generation of I2C master controller */
+	writel(AST2600_I2CM_PKT_DONE | AST2600_I2CM_BUS_RECOVER,
+	       i2c_bus->reg_base + AST2600_I2CM_IER);
+
+	ret = devm_i2c_add_adapter(dev, &i2c_bus->adap);
+	if (ret)
+		return ret;
+
 	i2c_bus->alert_enable = device_property_read_bool(dev, "smbus-alert");
 	if (i2c_bus->alert_enable) {
 		i2c_bus->ara = i2c_new_smbus_alert_device(&i2c_bus->adap, &i2c_bus->alert_data);
 		if (!i2c_bus->ara)
 			dev_warn(dev, "Failed to register ARA client\n");
-
-		writel(AST2600_I2CM_PKT_DONE | AST2600_I2CM_BUS_RECOVER | AST2600_I2CM_SMBUS_ALT,
-		       i2c_bus->reg_base + AST2600_I2CM_IER);
+		else
+			writel(AST2600_I2CM_PKT_DONE | AST2600_I2CM_BUS_RECOVER |
+			       AST2600_I2CM_SMBUS_ALT,
+			       i2c_bus->reg_base + AST2600_I2CM_IER);
 	} else {
 		i2c_bus->alert_enable = false;
-		/* Set interrupt generation of I2C master controller */
-		writel(AST2600_I2CM_PKT_DONE | AST2600_I2CM_BUS_RECOVER,
-		       i2c_bus->reg_base + AST2600_I2CM_IER);
 	}
-
-	ret = devm_i2c_add_adapter(dev, &i2c_bus->adap);
-	if (ret)
-		return ret;
 
 	dev_info(dev, "%s [%d]: adapter [%d KHz] mode [%d] version [%d]\n",
 		 dev->of_node->name, i2c_bus->adap.nr, i2c_bus->timing_info.bus_freq_hz / 1000,

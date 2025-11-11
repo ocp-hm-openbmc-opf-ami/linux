@@ -1885,6 +1885,9 @@ struct ncsi_dev *ncsi_register_dev(struct net_device *dev,
 	INIT_LIST_HEAD(&ndp->vlan_vids);
 	INIT_WORK(&ndp->work, ncsi_dev_work);
 	INIT_WORK(&ndp->aen_work, ncsi_aen_work);
+#if defined(CONFIG_NCSI_NON_AEN_SUPPORT) && CONFIG_NCSI_NON_AEN_SUPPORT
+	INIT_WORK(&ndp->non_aen_work, ncsi_non_aen_work);
+#endif
 	ndp->package_whitelist = UINT_MAX;
 
 	/* Initialize private NCSI device */

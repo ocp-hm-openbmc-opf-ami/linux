@@ -143,7 +143,6 @@ static void ncsi_channel_monitor(struct timer_list *t)
 	struct ncsi_dev_priv *ndp = np->ndp;
 	struct ncsi_cmd_arg nca;
 	bool enabled, chained;
-	unsigned int monitor_state;
 	unsigned long flags;
 	int state, ret;
 
@@ -151,7 +150,6 @@ static void ncsi_channel_monitor(struct timer_list *t)
 	state = nc->state;
 	chained = !list_empty(&nc->link);
 	enabled = nc->monitor.enabled;
-	monitor_state = nc->monitor.state;
 	spin_unlock_irqrestore(&nc->lock, flags);
 
 	if (!enabled)

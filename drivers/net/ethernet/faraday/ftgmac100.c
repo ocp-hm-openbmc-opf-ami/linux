@@ -1621,10 +1621,6 @@ static int ftgmac100_open(struct net_device *netdev)
 		goto err_alloc;
 	}
 
-	if (netdev->phydev) {
-		/* If we have a PHY, start polling */
-		phy_start(netdev->phydev);
-	}
 	if (priv->use_ncsi) {
 		/* If using NC-SI, set our carrier on and start the stack */
 		netif_carrier_on(netdev);
@@ -1633,6 +1629,10 @@ static int ftgmac100_open(struct net_device *netdev)
 		err = ncsi_start_dev(priv->ndev);
 		if (err)
 			goto err_ncsi;
+	}
+	else if (netdev->phydev) {
+		/* If we have a PHY, start polling */
+		phy_start(netdev->phydev);
 	}
 
 	return 0;
@@ -1670,10 +1670,10 @@ static int ftgmac100_stop(struct net_device *netdev)
 	netif_stop_queue(netdev);
 	napi_disable(&priv->napi);
 	netif_napi_del(&priv->napi);
-	if (netdev->phydev)
-		phy_stop(netdev->phydev);
 	if (priv->use_ncsi)
 		ncsi_stop_dev(priv->ndev);
+	else if (netdev->phydev)
+		phy_stop(netdev->phydev);
 
 	ftgmac100_stop_hw(priv);
 	free_irq(netdev->irq, netdev);

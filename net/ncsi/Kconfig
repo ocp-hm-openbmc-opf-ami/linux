@@ -36,3 +36,8 @@ config NCSI_AMI_TIMER_INTERVAL_FOR_GET_LINK_STATUS
 	depends on NET_NCSI
 	help
 		Periodic time interval(in seconds) for issuing the Get Link Status command to the network controller.
+config NCSI_AMI_MANUAL_DETECT
+	bool "NCSI Manual Detect"
+	depends on NET_NCSI
+	help
+	  Manual Detect NCSI devices instead of start NCSI devices during boot.

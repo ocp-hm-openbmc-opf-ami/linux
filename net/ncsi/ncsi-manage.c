@@ -21,11 +21,16 @@
 #include "internal.h"
 #include "ncsi-pkt.h"
 #include "ncsi-netlink.h"
+#include <linux/proc_fs.h>
+#include <net/sch_generic.h>
 
 LIST_HEAD(ncsi_dev_list);
 DEFINE_SPINLOCK(ncsi_dev_lock);
 
 int initCompleted;
+#ifdef CONFIG_NCSI_AMI_MANUAL_DETECT
+int ncsi_enabled = 0;
+#endif
 
 bool ncsi_channel_has_link(struct ncsi_channel *channel)
 {
@@ -1926,6 +1931,11 @@ EXPORT_SYMBOL_GPL(ncsi_register_dev);
 int ncsi_start_dev(struct ncsi_dev *nd)
 {
 	struct ncsi_dev_priv *ndp = TO_NCSI_DEV_PRIV(nd);
+#ifdef CONFIG_NCSI_AMI_MANUAL_DETECT
+	if (!ncsi_enabled) {
+		return 0;
+	}
+#endif
 
 	if (nd->state != ncsi_dev_state_registered &&
 	    nd->state != ncsi_dev_state_functional)
@@ -1952,6 +1962,8 @@ void ncsi_stop_dev(struct ncsi_dev *nd)
 	int old_state;
 	unsigned long flags;
 
+	if (!initCompleted)
+		return;
 	/* Stop the channel monitor on any active channels. Don't reset the
 	 * channel state so we know which were active when ncsi_start_dev()
 	 * is next called.
@@ -2080,3 +2092,52 @@ void ncsi_unregister_dev(struct ncsi_dev *nd)
 	kfree(ndp);
 }
 EXPORT_SYMBOL_GPL(ncsi_unregister_dev);
+
+#ifdef CONFIG_NCSI_AMI_MANUAL_DETECT
+static int ncsi_manual_detect_show(struct seq_file *m, void *v)
+{
+	seq_printf(m, "%d\n", ncsi_enabled);
+	return 0;
+}
+
+static ssize_t ncsi_trigger_write(struct file *file, const char __user *buffer, size_t count, loff_t *pos)
+{
+	ncsi_enabled = 1;
+
+	struct ncsi_dev_priv *ndp;
+	NCSI_FOR_EACH_DEV(ndp) {
+		struct ncsi_dev *nd = &ndp->ndev;
+		netdev_info(ndp->ndev.dev, "Manually enabling NCSI\n");
+
+		ncsi_stop_dev(&ndp->ndev);
+		ndp->flags = 0;
+		msleep(100);
+
+		nd->dev->flags |= IFF_UP;
+		dev_set_rx_mode(nd->dev);
+		dev_activate(nd->dev);
+
+		ncsi_start_dev(&ndp->ndev);
+	}
+
+	return count;
+}
+
+static int ncsi_manual_detect_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, ncsi_manual_detect_show, NULL);
+}
+
+static const struct proc_ops ncsi_proc_ops = {
+	.proc_open	= ncsi_manual_detect_open,
+	.proc_read	= seq_read,
+	.proc_write	= ncsi_trigger_write,
+};
+
+static int __init ncsi_manual_control_init(void)
+{
+    proc_create("ncsi_manual_detect", 0220, NULL, &ncsi_proc_ops);
+    return 0;
+}
+late_initcall(ncsi_manual_control_init);
+#endif

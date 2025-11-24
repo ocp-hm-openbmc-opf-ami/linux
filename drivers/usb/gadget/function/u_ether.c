@@ -1039,7 +1039,7 @@ int gether_set_ifname(struct net_device *net, const char *name, int len)
 {
 	struct eth_dev *dev = netdev_priv(net);
 	char tmp[IFNAMSIZ];
-	const char *p;
+	//const char *p;
 
 	if (name[len - 1] == '\n')
 		len--;
@@ -1051,10 +1051,14 @@ int gether_set_ifname(struct net_device *net, const char *name, int len)
 	if (!dev_valid_name(tmp))
 		return -EINVAL;
 
+	/*
+	 * Allow manual specification of exact interface name instead of
+	 * requiring kernel auto-generation with %d format.
+	 */
 	/* Require exactly one %d, so binding will not fail with EEXIST. */
-	p = strchr(name, '%');
-	if (!p || p[1] != 'd' || strchr(p + 2, '%'))
-		return -EINVAL;
+	// p = strchr(name, '%');
+	// if (!p || p[1] != 'd' || strchr(p + 2, '%'))
+	// 	return -EINVAL;
 
 	strscpy(net->name, tmp);
 	dev->ifname_set = true;

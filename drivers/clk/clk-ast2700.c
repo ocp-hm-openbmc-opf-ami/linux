@@ -3,7 +3,6 @@
  * Copyright (c) 2024 ASPEED Technology Inc.
  * Author: Ryan Chen <ryan_chen@aspeedtech.com>
  */
-
 #include <linux/clk-provider.h>
 #include <linux/io.h>
 #include <linux/mod_devicetable.h>

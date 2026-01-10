@@ -580,6 +580,8 @@ static int aspeed_adc_vref_config(struct iio_dev *indio_dev)
 	}
 	adc_engine_control_reg_val =
 		readl(data->base + ASPEED_REG_ENGINE_CONTROL);
+	adc_engine_control_reg_val &= ~ASPEED_ADC_REF_VOLTAGE;
+
 	data->regulator = devm_regulator_get_optional(data->dev, "vref");
 	if (!IS_ERR(data->regulator)) {
 		ret = regulator_enable(data->regulator);
@@ -863,12 +865,12 @@ static const struct aspeed_adc_trim_locate ast2600_adc1_trim = {
 };
 
 static const struct aspeed_adc_trim_locate ast2700_adc0_trim = {
-	.offset = 0x828,
+	.offset = 0x820,
 	.field = GENMASK(3, 0),
 };
 
 static const struct aspeed_adc_trim_locate ast2700_adc1_trim = {
-	.offset = 0x828,
+	.offset = 0x820,
 	.field = GENMASK(7, 4),
 };
 

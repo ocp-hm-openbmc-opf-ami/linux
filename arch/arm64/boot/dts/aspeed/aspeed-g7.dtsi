@@ -634,21 +634,17 @@
 			status = "disabled";
 		};
 
-		intc0_11: interrupt-controller@12101b00 {
-			compatible = "aspeed,ast2700-intc-ic";
-			reg = <0x0 0x12101b00 0x0 0x10>;
-			#interrupt-cells = <1>;
+		intc0: interrupt-controller@12100000 {
+			compatible = "aspeed,ast2700-intc0-ic";
+			reg = <0x0 0x12100000 0x0 0x3c00>;
 			interrupt-controller;
-			interrupts = <GIC_SPI 192 IRQ_TYPE_LEVEL_HIGH>,
-					<GIC_SPI 193 IRQ_TYPE_LEVEL_HIGH>,
-					<GIC_SPI 194 IRQ_TYPE_LEVEL_HIGH>,
-					<GIC_SPI 195 IRQ_TYPE_LEVEL_HIGH>,
-					<GIC_SPI 196 IRQ_TYPE_LEVEL_HIGH>,
-					<GIC_SPI 197 IRQ_TYPE_LEVEL_HIGH>,
-					<GIC_SPI 198 IRQ_TYPE_LEVEL_HIGH>,
-					<GIC_SPI 199 IRQ_TYPE_LEVEL_HIGH>,
-					<GIC_SPI 200 IRQ_TYPE_LEVEL_HIGH>,
-					<GIC_SPI 201 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-parent = <&gic>;
+			#interrupt-cells = <1>;
+			aspeed,interrupt-ranges =
+				<0 128 &gic GIC_SPI 0 IRQ_TYPE_LEVEL_HIGH>, /* linear range 1 to 1*/
+				<480 8 &gic GIC_SPI 144 IRQ_TYPE_LEVEL_HIGH>, /* sw int SSP */
+				<488 8 &gic GIC_SPI 152 IRQ_TYPE_LEVEL_HIGH>, /* sw int TSP */
+				<496 10 &gic GIC_SPI 192 IRQ_TYPE_LEVEL_HIGH>; /* M0-M9 intm */
 		};
 
 		bmc_dev0: bmc-dev@12110000 {
@@ -2092,7 +2088,7 @@
 			reg = <0x0 0x14c30000 0x0 0x40>;
 			reg-shift = <2>;
 			reg-io-width = <4>;
-			interrupts-extended = <&intc1_0 17>;
+			interrupts-extended = <&intc1 0 17>;
 			clocks = <&syscon0 SCU0_CLK_APB>;
 			virtual;
 			dma-channel = <12>;
@@ -2104,7 +2100,7 @@
 			reg = <0x0 0x14c30100 0x0 0x40>;
 			reg-shift = <2>;
 			reg-io-width = <4>;
-			interrupts-extended = <&intc1_0 18>;
+			interrupts-extended = <&intc1 0 18>;
 			clocks = <&syscon0 SCU0_CLK_APB>;
 			virtual;
 			dma-channel = <13>;
@@ -2116,7 +2112,7 @@
 			reg = <0x0 0x14c30200 0x0 0x40>;
 			reg-shift = <2>;
 			reg-io-width = <4>;
-			interrupts-extended = <&intc1_1 17>;
+			interrupts-extended = <&intc1 1 17>;
 			clocks = <&syscon0 SCU0_CLK_APB>;
 			virtual;
 			dma-channel = <14>;
@@ -2128,7 +2124,7 @@
 			reg = <0x0 0x14c30300 0x0 0x40>;
 			reg-shift = <2>;
 			reg-io-width = <4>;
-			interrupts-extended = <&intc1_1 18>;
+			interrupts-extended = <&intc1 1 18>;
 			clocks = <&syscon0 SCU0_CLK_APB>;
 			virtual;
 			dma-channel = <15>;

@@ -852,6 +852,7 @@
 				compatible = "aspeed,ast2600-uart";
 				reg = <0x1e784000 0x1000>;
 				reg-shift = <2>;
+				reg-io-width = <4>;
 				interrupts = <GIC_SPI 8 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&syscon ASPEED_CLK_GATE_UART5CLK>;
 				no-loopback-test;
@@ -894,6 +895,8 @@
 			vuart1: serial@1e787000 {
 				compatible = "aspeed,ast2600-uart";
 				reg = <0x1e787000 0x40>;
+				reg-shift = <2>;
+				reg-io-width = <4>;
 				interrupts = <GIC_SPI 147 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&syscon ASPEED_CLK_APB1>;
 				virtual;
@@ -904,6 +907,8 @@
 			pcie_vuart0: serial@1e787800 {
 				compatible = "aspeed,ast2600-uart";
 				reg = <0x1e787800 0x40>;
+				reg-shift = <2>;
+				reg-io-width = <4>;
 				interrupts = <GIC_SPI 180 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&syscon ASPEED_CLK_APB1>;
 				virtual;
@@ -913,6 +918,8 @@
 			vuart2: serial@1e788000 {
 				compatible = "aspeed,ast2600-uart";
 				reg = <0x1e788000 0x40>;
+				reg-shift = <2>;
+				reg-io-width = <4>;
 				interrupts = <GIC_SPI 148 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&syscon ASPEED_CLK_APB1>;
 				virtual;
@@ -923,6 +930,8 @@
 			pcie_vuart1: serial@1e788800 {
 				compatible = "aspeed,ast2600-uart";
 				reg = <0x1e788800 0x40>;
+				reg-shift = <2>;
+				reg-io-width = <4>;
 				interrupts = <GIC_SPI 181 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&syscon ASPEED_CLK_APB2>;
 				virtual;
@@ -1216,6 +1225,8 @@
 			uart10: serial@1e790400 {
 				compatible = "aspeed,ast2600-uart";
 				reg = <0x1e790400 0x20>;
+				reg-shift = <2>;
+				reg-io-width = <4>;
 				interrupts = <GIC_SPI 61 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&syscon ASPEED_CLK_GATE_UART10CLK>;
 				pinctrl-names = "default";
@@ -1228,6 +1239,8 @@
 			uart11: serial@1e790500 {
 				compatible = "aspeed,ast2600-uart";
 				reg = <0x1e790500 0x20>;
+				reg-shift = <2>;
+				reg-io-width = <4>;
 				interrupts = <GIC_SPI 62 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&syscon ASPEED_CLK_GATE_UART11CLK>;
 				pinctrl-names = "default";
@@ -1240,6 +1253,8 @@
 			uart12: serial@1e790600 {
 				compatible = "aspeed,ast2600-uart";
 				reg = <0x1e790600 0x20>;
+				reg-shift = <2>;
+				reg-io-width = <4>;
 				interrupts = <GIC_SPI 63 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&syscon ASPEED_CLK_GATE_UART12CLK>;
 				pinctrl-names = "default";
@@ -1252,6 +1267,8 @@
 			uart13: serial@1e790700 {
 				compatible = "aspeed,ast2600-uart";
 				reg = <0x1e790700 0x20>;
+				reg-shift = <2>;
+				reg-io-width = <4>;
 				interrupts = <GIC_SPI 64 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&syscon ASPEED_CLK_GATE_UART13CLK>;
 				pinctrl-names = "default";

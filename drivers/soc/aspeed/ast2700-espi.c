@@ -2307,7 +2307,7 @@ static int ast2700_espi_probe(struct platform_device *pdev)
 		return rc;
 	}
 
-	scu1 = syscon_regmap_lookup_by_phandle(dev->of_node, "syscon");
+	scu1 = syscon_regmap_lookup_by_phandle(dev->of_node, "aspeed,syscon");
 	if (IS_ERR(scu1)) {
 		dev_err(dev, "failed to find SCU1 regmap\n");
 		return PTR_ERR(scu1);

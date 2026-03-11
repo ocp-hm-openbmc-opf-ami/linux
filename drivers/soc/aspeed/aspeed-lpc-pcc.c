@@ -111,6 +111,7 @@ struct aspeed_pcc_ctrl {
 	struct regmap *regmap;
 	int irq;
 	uint32_t port;
+	uint32_t rec_mode;
 	struct aspeed_pcc_dma dma;
 	struct kfifo fifo;
 	wait_queue_head_t wq;
@@ -252,10 +253,22 @@ static int aspeed_pcc_enable(struct aspeed_pcc_ctrl *pcc, struct device *dev)
 	if (rc)
 		return rc;
 
+	/*
+	 * ASPEED SDK changeset (kept for SDK upgrade tracking):
+	 */
+#if 0
 	/* record mode: Set 2-Byte mode. */
 	regmap_update_bits(pcc->regmap, PCCR0,
 			   PCCR0_MODE_SEL_MASK,
 			   PCC_REC_2B << PCCR0_MODE_SEL_SHIFT);
+#endif
+	/*
+	 * AMI changeset:
+	 * record mode: configured via DTS rec-mode property
+	 */
+	regmap_update_bits(pcc->regmap, PCCR0,
+			   PCCR0_MODE_SEL_MASK,
+			   pcc->rec_mode << PCCR0_MODE_SEL_SHIFT);
 
 	/* port address */
 	regmap_update_bits(pcc->regmap, PCCR1,
@@ -324,6 +337,15 @@ static int aspeed_pcc_probe(struct platform_device *pdev)
 	if (rc) {
 		dev_err(dev, "no pcc ports configured\n");
 		return rc;
+	}
+
+	rc = of_property_read_u32(dev->of_node, "rec-mode", &pcc->rec_mode);
+	if (rc) {
+		dev_info(dev, "no rec-mode configured, defaulting to 2-byte mode\n");
+		pcc->rec_mode = PCC_REC_2B;
+	} else if (!is_valid_rec_mode(pcc->rec_mode)) {
+		dev_err(dev, "invalid rec-mode value %u\n", pcc->rec_mode);
+		return -EINVAL;
 	}
 
 	rc = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(64));

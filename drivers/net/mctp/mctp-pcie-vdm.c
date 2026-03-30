@@ -100,7 +100,6 @@ struct mctp_pcie_vdm_dev {
 	const struct mctp_pcie_vdm_ops *callback_ops;
 };
 
-
 static const struct mctp_pcie_vdm_hdr mctp_pcie_vdm_hdr_template = {
 	.fmt = MCTP_PCIE_VDM_FMT_4DW,
 	.route_type = MCTP_PCIE_VDM_TYPE_MSG | MCTP_PCIE_VDM_ROUTE_BY_ID,
@@ -160,7 +159,7 @@ static int mctp_pcie_vdm_xmit(struct net_device *ndev, struct sk_buff *skb)
 	rc = vdm_dev->callback_ops->send_packet(vdm_dev->dev, skb->data, payload_len_dw * sizeof(u32));
 
 	if (rc) {
-		pr_err("%s: failed to send packet, rc %d\n", __func__, rc);
+		pr_debug("%s: failed to send packet, rc %d\n", __func__, rc);
 		stats->tx_errors++;
 	} else {
 		stats->tx_packets++;
@@ -180,7 +179,7 @@ static netdev_tx_t mctp_pcie_vdm_start_xmit(struct sk_buff *skb,
 	if (skb) {
 		rc = mctp_pcie_vdm_xmit(ndev, skb);
 		if (rc) {
-			pr_err("%s: failed to send packet, rc %d\n", __func__, rc);
+			pr_debug("%s: failed to send packet, rc %d\n", __func__, rc);
 			ret = NETDEV_TX_BUSY;
 		} else {
 			ret = NETDEV_TX_OK;
@@ -313,9 +312,11 @@ void mctp_pcie_vdm_receive_packet(struct net_device *ndev)
 
 		cb = __mctp_cb(skb);
 		cb->halen = 3; // route type | bdf address
-		cb->haddr[0] = vdm_hdr->route_type & GENMASK(2, 0);
-		cb->haddr[1] = vdm_hdr->pci_req_id >> 8;
-		cb->haddr[2] = vdm_hdr->pci_req_id & 0xFF;
+		cb->haddr[0] = vdm_hdr->route_type;
+		// address is also converted to little-endian, but we want to keep it as big-endian
+		// because kernel network layer assumes address in big-endian format
+		cb->haddr[1] = vdm_hdr->pci_req_id & 0xFF;
+		cb->haddr[2] = vdm_hdr->pci_req_id >> 8;
 		net_status = netif_rx(skb);
 		if (net_status == NET_RX_SUCCESS) {
 			stats->rx_packets++;

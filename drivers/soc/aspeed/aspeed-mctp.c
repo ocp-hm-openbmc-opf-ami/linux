@@ -10,7 +10,6 @@
 #include <linux/kernel.h>
 #include <linux/list.h>
 #include <linux/list_sort.h>
-#include <linux/mctp-pcie-vdm.h>
 #include <linux/mfd/syscon.h>
 #include <linux/miscdevice.h>
 #include <linux/mm.h>
@@ -27,8 +26,12 @@
 #include <linux/uaccess.h>
 #include <linux/workqueue.h>
 #include <linux/of_reserved_mem.h>
+#include <linux/platform_device.h>
 
 #include <uapi/linux/aspeed-mctp.h>
+#ifdef CONFIG_MCTP_TRANSPORT_PCIE_VDM
+#include <linux/mctp-pcie-vdm.h>
+#endif
 
 /* AST2600 MCTP Controller registers */
 #define ASPEED_MCTP_CTRL	0x000
@@ -369,7 +372,7 @@ struct aspeed_mctp_endpoint {
 
 struct kmem_cache *packet_cache;
 
-void data_dump(struct aspeed_mctp *priv, struct mctp_pcie_packet_data *data)
+static void data_dump(struct aspeed_mctp *priv, struct mctp_pcie_packet_data *data)
 {
 	int i;
 
@@ -813,7 +816,7 @@ static void aspeed_mctp_tx_tasklet(unsigned long data)
 		aspeed_mctp_tx_trigger(tx, full);
 }
 
-void aspeed_mctp_rx_hdr_prep(struct aspeed_mctp *priv, u8 *hdr, u32 rx_lo)
+static void aspeed_mctp_rx_hdr_prep(struct aspeed_mctp *priv, u8 *hdr, u32 rx_lo)
 {
 	u16 bdf;
 	u8 routing_type;
@@ -1418,7 +1421,7 @@ int aspeed_mctp_add_type_handler(struct mctp_client *client, u8 mctp_type,
 		if (pci_vendor_id != 0 || vdm_type != 0 || vdm_mask != 0)
 			return -EINVAL;
 	} else if (mctp_type == MCTP_HDR_TYPE_VDM_PCI) {
-		/* For Vendor Defined PCI type the the vendor ID must be nonzero */
+		/* For Vendor Defined PCI type the vendor ID must be nonzero */
 		if (pci_vendor_id == 0 || pci_vendor_id == 0xffff)
 			return -EINVAL;
 	} else {
@@ -1453,9 +1456,9 @@ out_unlock:
 }
 EXPORT_SYMBOL_GPL(aspeed_mctp_add_type_handler);
 
-int aspeed_mctp_remove_type_handler(struct mctp_client *client,
-				    u8 mctp_type, u16 pci_vendor_id,
-				    u16 vdm_type, u16 vdm_mask)
+static int aspeed_mctp_remove_type_handler(struct mctp_client *client,
+					   u8 mctp_type, u16 pci_vendor_id,
+					   u16 vdm_type, u16 vdm_mask)
 {
 	struct aspeed_mctp *priv = client->priv;
 	struct mctp_type_handler *handler, *tmp;
@@ -1480,7 +1483,6 @@ int aspeed_mctp_remove_type_handler(struct mctp_client *client,
 	return ret;
 }
 
-EXPORT_SYMBOL_GPL(aspeed_mctp_register_default_handler);
 int aspeed_mctp_register_default_handler(struct mctp_client *client)
 {
 	struct aspeed_mctp *priv = client->priv;
@@ -1497,6 +1499,7 @@ int aspeed_mctp_register_default_handler(struct mctp_client *client)
 
 	return ret;
 }
+EXPORT_SYMBOL_GPL(aspeed_mctp_register_default_handler);
 
 static int
 aspeed_mctp_register_type_handler(struct mctp_client *client,
@@ -1961,7 +1964,7 @@ static int aspeed_mctp_pcie_vdm_op_send_pkt(struct device *dev,
 
 	rc = aspeed_mctp_send_packet(priv->default_client, packet);
 	if (rc) {
-		dev_err(priv->dev, "failed to send packet\n");
+		dev_dbg(priv->dev, "failed to send packet\n");
 		aspeed_mctp_packet_free(packet);
 		return rc;
 	}
@@ -2090,7 +2093,7 @@ static void aspeed_mctp_pcie_setup(struct aspeed_mctp *priv)
 			 */
 			tx_max_payload_size =
 				FIELD_GET(TX_MAX_PAYLOAD_SIZE_MASK,
-						fls(ASPEED_MCTP_MTU >> 6));
+					  fls(ASPEED_MCTP_MTU >> 6));
 		}
 
 		regmap_update_bits(priv->map, ASPEED_MCTP_ENGINE_CTRL,
@@ -2290,6 +2293,12 @@ static int aspeed_mctp_dma_init(struct aspeed_mctp *priv)
 	BUILD_BUG_ON(TX_PACKET_COUNT >= TX_MAX_PACKET_COUNT);
 	BUILD_BUG_ON(RX_PACKET_COUNT >= RX_MAX_PACKET_COUNT);
 
+	ret = dma_set_mask_and_coherent(priv->dev, DMA_BIT_MASK(64));
+	if (ret) {
+		dev_err(priv->dev, "cannot set 64-bits DMA mask\n");
+		return ret;
+	}
+
 	ret = of_reserved_mem_device_init(priv->dev);
 	if (ret) {
 		dev_err(priv->dev, "device does not have specific DMA pool: %d\n",
@@ -2301,12 +2310,6 @@ static int aspeed_mctp_dma_init(struct aspeed_mctp *priv)
 				       priv->dev);
 	if (ret)
 		return ret;
-
-	ret = dma_set_mask_and_coherent(priv->dev, DMA_BIT_MASK(64));
-	if (ret) {
-		dev_err(priv->dev, "cannot set 64-bits DMA mask\n");
-		return ret;
-	}
 
 	alloc_size = PAGE_ALIGN(priv->rx_packet_count * priv->match_data->packet_unit_size);
 	rx->data.vaddr =
@@ -2399,8 +2402,8 @@ static int aspeed_mctp_irq_init(struct aspeed_mctp *priv)
 		aspeed_mctp_irq_enable(priv);
 	}
 	irq = platform_get_irq_byname(pdev, "pcie");
-	if (!irq)
-		return -ENODEV;
+	if (irq < 0)
+		return irq;
 
 	ret = devm_request_irq(priv->dev, irq, aspeed_mctp_pcie_rst_irq_handler,
 			       IRQF_SHARED, dev_name(&pdev->dev), priv);
@@ -2486,6 +2489,24 @@ static int aspeed_mctp_probe(struct platform_device *pdev)
 		goto out_drv;
 	}
 
+	ret = aspeed_mctp_dma_init(priv);
+	if (ret) {
+		dev_err(priv->dev, "Failed to init DMA\n");
+		goto out_drv;
+	}
+
+	ret = aspeed_mctp_hw_reset(priv);
+	if (ret)
+		goto out_dma;
+
+	aspeed_mctp_channels_init(priv);
+
+	id = of_alias_get_id(priv->dev->of_node, "mctp");
+	if (id < 0) {
+		ret = id;
+		goto out_dma;
+	}
+
 #ifdef CONFIG_MCTP_TRANSPORT_PCIE_VDM
 	struct net_device *ndev;
 	struct mctp_client *client;
@@ -2497,26 +2518,11 @@ static int aspeed_mctp_probe(struct platform_device *pdev)
 	ndev = mctp_pcie_vdm_add_dev(priv->dev, &aspeed_mctp_pcie_vdm_ops);
 	if (IS_ERR(ndev)) {
 		dev_err(priv->dev, "Failed to add mctp pcie vdm device Err %ld\n", PTR_ERR(ndev));
-		goto out_drv;
+		goto out_dma;
 	}
 	priv->ndev = ndev;
 #endif
 
-	ret = aspeed_mctp_dma_init(priv);
-	if (ret) {
-		dev_err(priv->dev, "Failed to init DMA\n");
-		goto out_drv;
-	}
-
-	ret = aspeed_mctp_hw_reset(priv);
-	if (ret)
-		goto out_drv;
-
-	aspeed_mctp_channels_init(priv);
-
-	id = of_alias_get_id(priv->dev->of_node, "mctp");
-	if (id < 0)
-		return id;
 	priv->mctp_miscdev.parent = priv->dev;
 	priv->mctp_miscdev.minor = MISC_DYNAMIC_MINOR;
 	priv->mctp_miscdev.name = devm_kasprintf(priv->dev, GFP_KERNEL, "aspeed-mctp%d", id);
@@ -2531,7 +2537,7 @@ static int aspeed_mctp_probe(struct platform_device *pdev)
 	ret = aspeed_mctp_irq_init(priv);
 	if (ret) {
 		dev_err(priv->dev, "Failed to init IRQ!\n");
-		goto out_dma;
+		goto out_irq;
 	}
 	aspeed_mctp_pcie_setup(priv);
 
@@ -2542,7 +2548,11 @@ static int aspeed_mctp_probe(struct platform_device *pdev)
 		dev_err(priv->dev, "Failed to register peci-mctp device\n");
 
 	return 0;
-
+out_irq:
+	misc_deregister(&priv->mctp_miscdev);
+#ifdef CONFIG_MCTP_TRANSPORT_PCIE_VDM
+	mctp_pcie_vdm_remove_dev(priv->ndev);
+#endif
 out_dma:
 	aspeed_mctp_dma_fini(priv);
 out_drv:
@@ -2569,7 +2579,7 @@ static int aspeed_mctp_remove(struct platform_device *pdev)
 	aspeed_mctp_dma_fini(priv);
 
 	aspeed_mctp_drv_fini(priv);
-
+	
 	return 0;
 }
 
@@ -2632,7 +2642,6 @@ static struct platform_driver aspeed_mctp_driver = {
 
 static int __init aspeed_mctp_init(void)
 {
-	pr_info("aspeed_mctp_init\n");
 	packet_cache =
 		kmem_cache_create_usercopy("mctp-packet",
 					   sizeof(struct mctp_pcie_packet),

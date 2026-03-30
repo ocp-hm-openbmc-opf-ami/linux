@@ -120,8 +120,8 @@ static int mctp_dump_addrinfo(struct sk_buff *skb, struct netlink_callback *cb)
 	int ifindex = 0, rc;
 
 	/* Filter by ifindex if a header is provided */
-	if (cb->nlh->nlmsg_len >= nlmsg_msg_size(sizeof(*hdr))) {
-		hdr = nlmsg_data(cb->nlh);
+	hdr = nlmsg_payload(cb->nlh, sizeof(*hdr));
+	if (hdr) {
 		ifindex = hdr->ifa_index;
 	} else {
 		if (cb->strict_check) {
@@ -536,14 +536,10 @@ int __init mctp_device_init(void)
 	int err;
 
 	register_netdevice_notifier(&mctp_dev_nb);
+
 	rtnl_af_register(&mctp_af_ops);
-
+	
 	err = rtnl_register_many(mctp_device_rtnl_msg_handlers);
-	if (err) {
-		rtnl_af_unregister(&mctp_af_ops);
-		unregister_netdevice_notifier(&mctp_dev_nb);
-	}
-
 	return err;
 }
 

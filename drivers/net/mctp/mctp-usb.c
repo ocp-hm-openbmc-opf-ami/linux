@@ -48,17 +48,16 @@ static void mctp_usb_out_complete(struct urb *urb)
 	case -ECONNRESET:
 	case -ESHUTDOWN:
 	case -EPROTO:
-		netdev->stats.tx_dropped++;
+		dev_dstats_tx_dropped(netdev);
 		break;
 	case 0:
-		netdev->stats.tx_packets++;
-		netdev->stats.tx_bytes += skb->len;
+		dev_dstats_tx_add(netdev, skb->len);
 		netif_wake_queue(netdev);
 		consume_skb(skb);
 		return;
 	default:
 		netdev_dbg(netdev, "unexpected tx urb status: %d\n", status);
-		netdev->stats.tx_dropped++;
+		dev_dstats_tx_dropped(netdev);
 	}
 
 	kfree_skb(skb);
@@ -97,16 +96,18 @@ static netdev_tx_t mctp_usb_start_xmit(struct sk_buff *skb,
 			  skb->data, skb->len,
 			  mctp_usb_out_complete, skb);
 
+	/* Stops TX queue first to prevent race condition with URB complete */
+	netif_stop_queue(dev);
 	rc = usb_submit_urb(urb, GFP_ATOMIC);
-	if (rc)
+	if (rc) {
+		netif_wake_queue(dev);
 		goto err_drop;
-	else
-		netif_stop_queue(dev);
+	}
 
 	return NETDEV_TX_OK;
 
 err_drop:
-	dev->stats.tx_dropped++;
+	dev_dstats_tx_dropped(dev);
 	kfree_skb(skb);
 	return NETDEV_TX_OK;
 }
@@ -184,6 +185,7 @@ static void mctp_usb_in_complete(struct urb *urb)
 		struct mctp_usb_hdr *hdr;
 		u8 pkt_len; /* length of MCTP packet, no USB header */
 
+		skb_reset_mac_header(skb);
 		hdr = skb_pull_data(skb, sizeof(*hdr));
 		if (!hdr)
 			break;
@@ -224,8 +226,7 @@ static void mctp_usb_in_complete(struct urb *urb)
 			skb_trim(skb, pkt_len);
 		}
 
-		netdev->stats.rx_packets++;
-		netdev->stats.rx_bytes += skb->len;
+		dev_dstats_rx_add(netdev, skb->len);
 
 		skb->protocol = htons(ETH_P_MCTP);
 		skb_reset_network_header(skb);
@@ -258,6 +259,8 @@ static int mctp_usb_open(struct net_device *dev)
 	struct mctp_usb *mctp_usb = netdev_priv(dev);
 
 	WRITE_ONCE(mctp_usb->stopped, false);
+
+	netif_start_queue(dev);
 
 	return mctp_usb_rx_queue(mctp_usb, GFP_KERNEL);
 }
@@ -297,6 +300,7 @@ static void mctp_usb_netdev_setup(struct net_device *dev)
 	dev->tx_queue_len = DEFAULT_TX_QUEUE_LEN;
 	dev->flags = IFF_NOARP;
 	dev->netdev_ops = &mctp_usb_netdev_ops;
+	dev->pcpu_stat_type = NETDEV_PCPU_STAT_DSTATS;
 }
 
 static int mctp_usb_probe(struct usb_interface *intf,

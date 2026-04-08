@@ -844,6 +844,7 @@
 				no-loopback-test;
 				pinctrl-names = "default";
 				pinctrl-0 = <&pinctrl_txd1_default &pinctrl_rxd1_default>;
+				dma-channel = <0>;
 				status = "disabled";
 			};
 
@@ -851,6 +852,7 @@
 				compatible = "aspeed,ast2600-uart";
 				reg = <0x1e784000 0x1000>;
 				reg-shift = <2>;
+				reg-io-width = <4>;
 				interrupts = <GIC_SPI 8 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&syscon ASPEED_CLK_GATE_UART5CLK>;
 				no-loopback-test;
@@ -893,15 +895,20 @@
 			vuart1: serial@1e787000 {
 				compatible = "aspeed,ast2600-uart";
 				reg = <0x1e787000 0x40>;
+				reg-shift = <2>;
+				reg-io-width = <4>;
 				interrupts = <GIC_SPI 147 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&syscon ASPEED_CLK_APB1>;
 				virtual;
+				dma-channel = <12>;
 				status = "disabled";
 			};
 
 			pcie_vuart0: serial@1e787800 {
 				compatible = "aspeed,ast2600-uart";
 				reg = <0x1e787800 0x40>;
+				reg-shift = <2>;
+				reg-io-width = <4>;
 				interrupts = <GIC_SPI 180 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&syscon ASPEED_CLK_APB1>;
 				virtual;
@@ -911,15 +918,20 @@
 			vuart2: serial@1e788000 {
 				compatible = "aspeed,ast2600-uart";
 				reg = <0x1e788000 0x40>;
+				reg-shift = <2>;
+				reg-io-width = <4>;
 				interrupts = <GIC_SPI 148 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&syscon ASPEED_CLK_APB1>;
 				virtual;
+				dma-channel = <13>;
 				status = "disabled";
 			};
 
 			pcie_vuart1: serial@1e788800 {
 				compatible = "aspeed,ast2600-uart";
 				reg = <0x1e788800 0x40>;
+				reg-shift = <2>;
+				reg-io-width = <4>;
 				interrupts = <GIC_SPI 181 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&syscon ASPEED_CLK_APB2>;
 				virtual;
@@ -1108,6 +1120,7 @@
 				no-loopback-test;
 				pinctrl-names = "default";
 				pinctrl-0 = <&pinctrl_txd2_default &pinctrl_rxd2_default>;
+				dma-channel = <1>;
 				status = "disabled";
 			};
 
@@ -1122,6 +1135,7 @@
 				no-loopback-test;
 				pinctrl-names = "default";
 				pinctrl-0 = <&pinctrl_txd3_default &pinctrl_rxd3_default>;
+				dma-channel = <2>;
 				status = "disabled";
 			};
 
@@ -1136,6 +1150,7 @@
 				no-loopback-test;
 				pinctrl-names = "default";
 				pinctrl-0 = <&pinctrl_txd4_default &pinctrl_rxd4_default>;
+				dma-channel = <3>;
 				status = "disabled";
 			};
 		};
@@ -1157,6 +1172,7 @@
 				no-loopback-test;
 				pinctrl-names = "default";
 				pinctrl-0 = <&pinctrl_uart6_default>;
+				dma-channel = <4>;
 
 				status = "disabled";
 			};
@@ -1171,6 +1187,7 @@
 				no-loopback-test;
 				pinctrl-names = "default";
 				pinctrl-0 = <&pinctrl_uart7_default>;
+				dma-channel = <5>;
 
 				status = "disabled";
 			};
@@ -1185,6 +1202,7 @@
 				no-loopback-test;
 				pinctrl-names = "default";
 				pinctrl-0 = <&pinctrl_uart8_default>;
+				dma-channel = <6>;
 
 				status = "disabled";
 			};
@@ -1199,6 +1217,7 @@
 				no-loopback-test;
 				pinctrl-names = "default";
 				pinctrl-0 = <&pinctrl_uart9_default>;
+				dma-channel = <7>;
 
 				status = "disabled";
 			};
@@ -1206,44 +1225,56 @@
 			uart10: serial@1e790400 {
 				compatible = "aspeed,ast2600-uart";
 				reg = <0x1e790400 0x20>;
+				reg-shift = <2>;
+				reg-io-width = <4>;
 				interrupts = <GIC_SPI 61 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&syscon ASPEED_CLK_GATE_UART10CLK>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&pinctrl_uart10_default>;
 				no-loopback-test;
+				dma-channel = <8>;
 				status = "disabled";
 			};
 
 			uart11: serial@1e790500 {
 				compatible = "aspeed,ast2600-uart";
 				reg = <0x1e790500 0x20>;
+				reg-shift = <2>;
+				reg-io-width = <4>;
 				interrupts = <GIC_SPI 62 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&syscon ASPEED_CLK_GATE_UART11CLK>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&pinctrl_uart11_default>;
 				no-loopback-test;
+				dma-channel = <9>;
 				status = "disabled";
 			};
 
 			uart12: serial@1e790600 {
 				compatible = "aspeed,ast2600-uart";
 				reg = <0x1e790600 0x20>;
+				reg-shift = <2>;
+				reg-io-width = <4>;
 				interrupts = <GIC_SPI 63 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&syscon ASPEED_CLK_GATE_UART12CLK>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&pinctrl_uart12g1_default>;
 				no-loopback-test;
+				dma-channel = <10>;
 				status = "disabled";
 			};
 
 			uart13: serial@1e790700 {
 				compatible = "aspeed,ast2600-uart";
 				reg = <0x1e790700 0x20>;
+				reg-shift = <2>;
+				reg-io-width = <4>;
 				interrupts = <GIC_SPI 64 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&syscon ASPEED_CLK_GATE_UART13CLK>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&pinctrl_uart13g1_default>;
 				no-loopback-test;
+				dma-channel = <11>;
 				status = "disabled";
 			};
 

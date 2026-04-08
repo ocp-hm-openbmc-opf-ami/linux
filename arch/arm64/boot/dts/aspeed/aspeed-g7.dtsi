@@ -2302,6 +2302,7 @@
 			no-loopback-test;
 			pinctrl-names = "default";
 			pinctrl-0 = <&pinctrl_txd0_default &pinctrl_rxd0_default>;
+			dma-channel = <0>;
 			status = "disabled";
 		};
 
@@ -2316,6 +2317,7 @@
 			no-loopback-test;
 			pinctrl-names = "default";
 			pinctrl-0 = <&pinctrl_txd1_default &pinctrl_rxd1_default>;
+			dma-channel = <1>;
 			status = "disabled";
 		};
 
@@ -2330,6 +2332,7 @@
 			no-loopback-test;
 			pinctrl-names = "default";
 			pinctrl-0 = <&pinctrl_txd2_default &pinctrl_rxd2_default>;
+			dma-channel = <2>;
 			status = "disabled";
 		};
 
@@ -2344,6 +2347,7 @@
 			no-loopback-test;
 			pinctrl-names = "default";
 			pinctrl-0 = <&pinctrl_txd3_default &pinctrl_rxd3_default>;
+			dma-channel = <3>;
 			status = "disabled";
 		};
 
@@ -2358,6 +2362,7 @@
 			no-loopback-test;
 			pinctrl-names = "default";
 			pinctrl-0 = <&pinctrl_txd5_default &pinctrl_rxd5_default>;
+			dma-channel = <4>;
 			status = "disabled";
 		};
 
@@ -2372,6 +2377,7 @@
 			no-loopback-test;
 			pinctrl-names = "default";
 			pinctrl-0 = <&pinctrl_txd6_default &pinctrl_rxd6_default>;
+			dma-channel = <5>;
 			status = "disabled";
 		};
 
@@ -2386,6 +2392,7 @@
 			no-loopback-test;
 			pinctrl-names = "default";
 			pinctrl-0 = <&pinctrl_txd7_default &pinctrl_rxd7_default>;
+			dma-channel = <6>;
 			status = "disabled";
 		};
 
@@ -2400,6 +2407,7 @@
 			no-loopback-test;
 			pinctrl-names = "default";
 			pinctrl-0 = <&pinctrl_txd8_default &pinctrl_rxd8_default>;
+			dma-channel = <7>;
 			status = "disabled";
 		};
 
@@ -2413,6 +2421,7 @@
 			no-loopback-test;
 			pinctrl-names = "default";
 			pinctrl-0 = <&pinctrl_txd9_default &pinctrl_rxd9_default>;
+			dma-channel = <8>;
 			status = "disabled";
 		};
 
@@ -2426,6 +2435,7 @@
 			no-loopback-test;
 			pinctrl-names = "default";
 			pinctrl-0 = <&pinctrl_txd10_default &pinctrl_rxd10_default>;
+			dma-channel = <9>;
 			status = "disabled";
 		};
 
@@ -2439,6 +2449,7 @@
 			no-loopback-test;
 			pinctrl-names = "default";
 			pinctrl-0 = <&pinctrl_txd11_default &pinctrl_rxd11_default>;
+			dma-channel = <10>;
 			status = "disabled";
 		};
 

@@ -33,7 +33,8 @@
 #include <net/mctp.h>
 #include <net/mctpdevice.h>
 
-#define MCTP_PCIE_VDM_MIN_MTU 64
+// 64bytes mctp payload + 4bytes mctp header
+#define MCTP_PCIE_VDM_MIN_MTU (64 + 4)
 #define MCTP_PCIE_VDM_MAX_MTU 512
 /* 16byte */
 #define MCTP_PCIE_VDM_HDR_SIZE 16
@@ -312,12 +313,9 @@ void mctp_pcie_vdm_receive_packet(struct net_device *ndev)
 
 		cb = __mctp_cb(skb);
 		cb->halen = 3; // route type | bdf address
-		cb->haddr[0] = vdm_hdr->route_type;
-		// address is also converted to little-endian, but we want to keep it as big-endian
-		// because kernel network layer assumes address in big-endian format
-		cb->haddr[1] = vdm_hdr->pci_req_id & 0xFF;
-		cb->haddr[2] = vdm_hdr->pci_req_id >> 8;
-
+		cb->haddr[0] = vdm_hdr->route_type & GENMASK(2, 0);
+		cb->haddr[1] = vdm_hdr->pci_req_id >> 8;
+		cb->haddr[2] = vdm_hdr->pci_req_id & 0xFF;
 		net_status = netif_rx(skb);
 		if (net_status == NET_RX_SUCCESS) {
 			stats->rx_packets++;

@@ -150,6 +150,7 @@ struct aspeed_pcie_rc_platform {
 	int reg_intx_sts;
 	int reg_msi_en;
 	int reg_msi_sts;
+	int msi_support;
 	int msi_address;
 };
 
@@ -183,14 +184,6 @@ struct aspeed_pcie {
 	DECLARE_BITMAP(msi_irq_in_use, MAX_MSI_HOST_IRQS);
 };
 
-static void aspeed_pcie_intx_ack_irq(struct irq_data *d)
-{
-	struct aspeed_pcie *pcie = irq_data_get_irq_chip_data(d);
-	int intx_en = pcie->platform->reg_intx_en;
-
-	writel(readl(pcie->reg + intx_en) | BIT(d->hwirq), pcie->reg + intx_en);
-}
-
 static void aspeed_pcie_intx_mask_irq(struct irq_data *d)
 {
 	struct aspeed_pcie *pcie = irq_data_get_irq_chip_data(d);
@@ -209,7 +202,6 @@ static void aspeed_pcie_intx_unmask_irq(struct irq_data *d)
 
 static struct irq_chip aspeed_intx_irq_chip = {
 	.name = "ASPEED:IntX",
-	.irq_ack = aspeed_pcie_intx_ack_irq,
 	.irq_mask = aspeed_pcie_intx_mask_irq,
 	.irq_unmask = aspeed_pcie_intx_unmask_irq,
 };
@@ -808,6 +800,9 @@ static int aspeed_pcie_init_irq_domain(struct aspeed_pcie *pcie)
 	writel(0, pcie->reg + pcie->platform->reg_intx_en);
 	writel(~0, pcie->reg + pcie->platform->reg_intx_sts);
 
+	if (!pcie->platform->msi_support)
+		return 0;
+
 #ifdef CONFIG_PCI_MSI
 	pcie->dev_domain =
 		irq_domain_add_linear(NULL, MAX_MSI_HOST_IRQS, &aspeed_msi_domain_ops, pcie);
@@ -1190,6 +1185,7 @@ static struct aspeed_pcie_rc_platform pcie_rc_ast2600 = {
 	.reg_intx_sts = 0x08,
 	.reg_msi_en = 0x20,
 	.reg_msi_sts = 0x28,
+	.msi_support = false,
 	.msi_address = 0x1e77005c,
 };
 
@@ -1199,6 +1195,7 @@ static struct aspeed_pcie_rc_platform pcie_rc_ast2700 = {
 	.reg_intx_sts = 0x48,
 	.reg_msi_en = 0x50,
 	.reg_msi_sts = 0x58,
+	.msi_support = true,
 	.msi_address = 0x000000f0,
 };
 

@@ -1961,6 +1961,7 @@ void ncsi_stop_dev(struct ncsi_dev *nd)
 	int old_state;
 	unsigned long flags;
 
+	nd->state = ncsi_dev_state_functional;
 	if (!initCompleted)
 		return;
 	/* Stop the channel monitor on any active channels. Don't reset the

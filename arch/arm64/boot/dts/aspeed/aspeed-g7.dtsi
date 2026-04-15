@@ -1301,18 +1301,6 @@
 			status = "disabled";
 		};
 
-		sgmii: phy@14C01000 {
-			compatible = "aspeed,ast2700-sgmii";
-			reg = <0x0 0x14c01000 0x0 0x40>;
-
-			aspeed,plda = <&pcie_phy2>;
-
-			pinctrl-names = "default";
-			pinctrl-0 = <&pinctrl_sgmii_default>;
-			#phy-cells = <0>;
-			status = "disabled";
-		};
-
 		mac0: ethernet@14050000 {
 			compatible = "aspeed,ast2700-mac", "faraday,ftgmac100";
 			reg = <0x0 0x14050000 0x0 0x200>;
@@ -1321,6 +1309,8 @@
 			clocks = <&syscon1 SCU1_CLK_GATE_MAC0CLK>;
 			resets = <&syscon1 SCU1_RESET_MAC0>;
 			status = "disabled";
+
+			aspeed,scu = <&syscon1>;
 		};
 
 		mac1: ethernet@14060000 {
@@ -1331,6 +1321,8 @@
 			clocks = <&syscon1 SCU1_CLK_GATE_MAC1CLK>;
 			resets = <&syscon1 SCU1_RESET_MAC1>;
 			status = "disabled";
+
+			aspeed,scu = <&syscon1>;
 		};
 
 		mac2: ethernet@14070000 {
@@ -1344,6 +1336,8 @@
 			clocks = <&syscon1 SCU1_CLK_GATE_MAC2CLK>;
 			resets = <&syscon1 SCU1_RESET_MAC2>;
 			status = "disabled";
+
+			aspeed,scu = <&syscon1>;
 		};
 
 		sdio_controller: sdc@14080000 {
@@ -1508,6 +1502,19 @@
 			status = "disabled";
 		};
 
+		sgmii: phy@14c01000 {
+			compatible = "aspeed,ast2700-sgmii";
+			reg = <0x0 0x14c01000 0x0 0x40>;
+
+			phys = <&pcie_phy2>;
+			aspeed,scu = <&syscon1>;
+
+			pinctrl-names = "default";
+			pinctrl-0 = <&pinctrl_sgmii_default>;
+			#phy-cells = <0>;
+			status = "disabled";
+		};
+
 		syscon1: syscon@14c02000 {
 			compatible = "aspeed,ast2700-scu1", "syscon", "simple-mfd";
 			reg = <0x0 0x14c02000 0x0 0x1000>;
@@ -1516,6 +1523,11 @@
 			#size-cells = <1>;
 			#clock-cells = <1>;
 			#reset-cells = <1>;
+
+			assigned-clocks = <&syscon1 SCU1_CLK_MACHCLK>,
+					  <&syscon1 SCU1_CLK_RGMII>,
+					  <&syscon1 SCU1_CLK_RMII>;
+			assigned-clock-rates = <200000000>, <125000000>, <50000000>;
 
 			scu_ic2: interrupt-controller@100 {
 				compatible = "aspeed,ast2700-scu-ic2";
@@ -1783,6 +1795,7 @@
 		pcie_phy2: phy@14c1c000 {
 			compatible = "aspeed,ast2700-pcie-phy", "syscon";
 			reg = <0x0 0x14c1c000 0x0 0x800>;
+			#phy-cells = <0>;
 		};
 
 		e2m_config2: e2m-config@14c1d000 {

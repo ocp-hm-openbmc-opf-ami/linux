@@ -3,6 +3,7 @@
 
 #include <linux/cdev.h>
 #include <linux/fs.h>
+#include <linux/i2c.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/poll.h>
@@ -11,6 +12,7 @@
 #include <linux/slab.h>
 #include <linux/timer.h>
 #include <linux/types.h>
+#include <linux/uaccess.h>
 #include <linux/workqueue.h>
 
 #include <linux/i3c/device.h>
@@ -44,6 +46,11 @@ struct i3c_mctp {
 	struct i3c_mctp_client *peci_client;
 	u16 max_read_len;
 	u16 max_write_len;
+	/* EID management */
+	struct mutex eid_lock;
+	struct i3c_mctp_eid_info eid_info[I3C_MCTP_EID_INFO_MAX];
+	u16 eid_info_count;
+	u8 own_eid;
 };
 
 struct i3c_mctp_client {
@@ -325,6 +332,65 @@ static __poll_t i3c_mctp_poll(struct file *file, struct poll_table_struct *pt)
 	return ret;
 }
 
+static int i3c_mctp_ioctl_set_eid_info(struct i3c_mctp *priv, unsigned long arg)
+{
+	struct i3c_mctp_set_eid_info req;
+	size_t bytes;
+
+	if (copy_from_user(&req, (void __user *)arg, sizeof(req)))
+		return -EFAULT;
+
+	if (req.count > I3C_MCTP_EID_INFO_MAX)
+		return -EINVAL;
+
+	bytes = (size_t)req.count * sizeof(struct i3c_mctp_eid_info);
+
+	mutex_lock(&priv->eid_lock);
+	if (bytes && copy_from_user(priv->eid_info,
+				    (void __user *)(uintptr_t)req.ptr, bytes)) {
+		mutex_unlock(&priv->eid_lock);
+		return -EFAULT;
+	}
+	priv->eid_info_count = req.count;
+	mutex_unlock(&priv->eid_lock);
+
+	return 0;
+}
+
+static int i3c_mctp_ioctl_set_own_eid(struct i3c_mctp *priv, unsigned long arg)
+{
+	struct i3c_mctp_set_own_eid req;
+
+	if (copy_from_user(&req, (void __user *)arg, sizeof(req)))
+		return -EFAULT;
+
+	mutex_lock(&priv->eid_lock);
+	priv->own_eid = req.eid;
+	mutex_unlock(&priv->eid_lock);
+
+	return 0;
+}
+
+static long i3c_mctp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+{
+	struct i3c_mctp *priv = file->private_data;
+
+	switch (cmd) {
+	case I3C_MCTP_IOCTL_SET_EID_INFO:
+		return i3c_mctp_ioctl_set_eid_info(priv, arg);
+	case I3C_MCTP_IOCTL_SET_OWN_EID:
+		return i3c_mctp_ioctl_set_own_eid(priv, arg);
+	case I3C_MCTP_IOCTL_REGISTER_DEFAULT_CLIENT:
+		/*
+		 * The default client is created at probe time and is bound
+		 * to this file via open(); nothing more to do here.
+		 */
+		return priv->default_client ? 0 : -ENODEV;
+	default:
+		return -ENOTTY;
+	}
+}
+
 static const struct file_operations i3c_mctp_fops = {
 	.owner = THIS_MODULE,
 	.read = i3c_mctp_read,
@@ -332,6 +398,8 @@ static const struct file_operations i3c_mctp_fops = {
 	.poll = i3c_mctp_poll,
 	.open = i3c_mctp_open,
 	.release = i3c_mctp_release,
+	.unlocked_ioctl = i3c_mctp_ioctl,
+	.compat_ioctl = i3c_mctp_ioctl,
 };
 
 /**
@@ -388,6 +456,7 @@ static struct i3c_mctp *i3c_mctp_alloc(struct i3c_device *i3c)
 	priv->i3c = i3c;
 
 	spin_lock_init(&priv->device_file_lock);
+	mutex_init(&priv->eid_lock);
 
 	return priv;
 }
@@ -491,6 +560,56 @@ int i3c_mctp_get_eid(struct i3c_mctp_client *client, u8 domain_id, u8 *eid)
 EXPORT_SYMBOL_GPL(i3c_mctp_get_eid);
 
 /**
+ * calculate_pec() - calculate SMBus PEC for an MCTP-over-I3C transfer
+ *
+ * @i3c: I3C device that the transfer is targeted to
+ * @read: true for a read transfer, false for a write transfer
+ * @buf: payload buffer to compute PEC over
+ * @len: payload length in bytes
+ *
+ * The PEC is computed over the 8-bit target address (dyn_addr << 1 | R/W)
+ * followed by the payload bytes.
+ *
+ * Return: computed PEC byte.
+ */
+#ifdef SW_PEC
+static u8 calculate_pec(struct i3c_device *i3c, bool read, const u8 *buf, u32 len)
+{
+	struct i3c_device_info info;
+	u8 addr;
+	u8 pec;
+
+	i3c_device_get_info(i3c, &info);
+
+	addr = (info.dyn_addr << 1) | (read ? 1 : 0);
+	pec = i2c_smbus_pec(0, &addr, 1);
+	pec = i2c_smbus_pec(pec, (u8 *)buf, len);
+	return pec;
+}
+#endif
+/**
+ * check_if_pec_match() - verify PEC byte appended to the received buffer
+ *
+ * @i3c: I3C device the packet was received from
+ * @read: true if this transfer was a read
+ * @buf: buffer containing payload followed by the received PEC byte
+ * @len: payload length (the PEC byte is at buf[len])
+ *
+ * Return: 0 if PEC matches, -EAGAIN on mismatch.
+ */
+#ifdef SW_PEC
+static int check_if_pec_match(struct i3c_device *i3c, bool read, const u8 *buf, u32 len)
+{
+	u8 pec = calculate_pec(i3c, read, buf, len);
+
+	if (pec != buf[len]) {
+		dev_err(i3cdev_to_dev(i3c), "PEC mismatch : %d != %d", pec, buf[len]);
+		return -EAGAIN;
+	}
+	return 0;
+}
+#endif
+/**
  * i3c_mctp_send_packet() - send mctp packet
  *
  * @tx_packet: the allocated packet that needs to be send via I3C
@@ -500,6 +619,28 @@ EXPORT_SYMBOL_GPL(i3c_mctp_get_eid);
  */
 int i3c_mctp_send_packet(struct i3c_device *i3c, struct i3c_mctp_packet *tx_packet)
 {
+#ifdef SW_PEC
+	struct i3c_priv_xfer xfers = {
+		.rnw = false,
+	};
+	size_t size_with_pec = tx_packet->size + 1;
+	u8 *data;
+	int ret;
+
+	data = kmalloc(size_with_pec, GFP_KERNEL);
+	if (!data)
+		return -ENOMEM;
+
+	memcpy(data, &tx_packet->data, tx_packet->size);
+	data[tx_packet->size] = calculate_pec(i3c, false, data, tx_packet->size);
+
+	xfers.len = size_with_pec;
+	xfers.data.out = data;
+
+	ret = i3c_device_do_priv_xfers(i3c, &xfers, 1);
+	kfree(data);
+	return ret;
+#else
 	if (i3c->desc->info.hdr_cap & BIT(I3C_HDR_DDR) &&
 	    IS_ENABLED(CONFIG_I3C_MCTP_HDR_DDR)) {
 		struct i3c_hdr_cmd cmds;
@@ -516,6 +657,7 @@ int i3c_mctp_send_packet(struct i3c_device *i3c, struct i3c_mctp_packet *tx_pack
 	xfers.len = tx_packet->size;
 	xfers.data.out = &tx_packet->data;
 	return i3c_device_do_priv_xfers(i3c, &xfers, 1);
+#endif
 }
 EXPORT_SYMBOL_GPL(i3c_mctp_send_packet);
 

@@ -1897,6 +1897,7 @@ static int ast2600_i2c_controller_irq(struct ast2600_i2c_bus *i2c_bus)
 		writel(ctrl, i2c_bus->reg_base + AST2600_I2CC_FUN_CTRL);
 		i2c_bus->cmd_err = -EPROTO;
 		complete(&i2c_bus->cmd_complete);
+		dev_err_ratelimited(i2c_bus->dev, "received master error interrupt: 0x%08x\n", sts);
 		return 1;
 	}
 

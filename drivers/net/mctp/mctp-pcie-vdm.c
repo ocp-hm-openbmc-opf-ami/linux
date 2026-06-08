@@ -153,6 +153,8 @@ static int mctp_pcie_vdm_xmit(struct net_device *ndev, struct sk_buff *skb)
 	if (rc) {
 		pr_debug("%s: failed to send packet, rc %d\n", __func__, rc);
 		stats->tx_errors++;
+		if (rc != -ENOSPC && rc != -EBUSY)
+			stats->tx_dropped++;
 	} else {
 		stats->tx_packets++;
 		stats->tx_bytes += (skb->len - sizeof(struct mctp_pcie_vdm_hdr));
@@ -167,25 +169,17 @@ static netdev_tx_t mctp_pcie_vdm_start_xmit(struct sk_buff *skb,
 
 	pr_debug("%s: skb len %u\n", __func__, skb->len);
 
-	if (!skb)
-		return NETDEV_TX_OK;
-
-	if (!netif_running(ndev) || !netif_carrier_ok(ndev)) {
-		pr_debug_ratelimited("%s: net device %s carrier/link down, dropping packet\n",
-				   __func__, ndev->name);
-		ndev->stats.tx_dropped++;
+	if (skb) {
+		rc = mctp_pcie_vdm_xmit(ndev, skb);
+		if (rc)
+			pr_debug("%s: failed to send packet, rc %d\n", __func__, rc);
+		/*
+		 * Always drop the skb instead of returning NETDEV_TX_BUSY on
+		 * failure, since returning BUSY causes the qdisc to requeue
+		 * and retry the same packet indefinitely.
+		 */
 		kfree_skb(skb);
-		return NETDEV_TX_OK;
 	}
-
-	rc = mctp_pcie_vdm_xmit(ndev, skb);
-	if (rc) {
-		pr_debug_ratelimited("%s: failed to send packet, rc %d, dropping\n",
-				   __func__, rc);
-		ndev->stats.tx_dropped++;
-	}
-	dev_consume_skb_any(skb);
-
 	return NETDEV_TX_OK;
 }
 

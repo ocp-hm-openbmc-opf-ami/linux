@@ -361,3 +361,17 @@ void mctp_pcie_vdm_remove_dev(struct net_device *vdm_dev)
 	}
 }
 EXPORT_SYMBOL_GPL(mctp_pcie_vdm_remove_dev);
+
+void mctp_pcie_vdm_set_carrier(struct net_device *ndev, bool up)
+{
+	if (!ndev) {
+		pr_debug("%s: ndev is NULL\n", __func__);
+		return;
+	}
+
+	if (up)
+		netif_carrier_on(ndev);
+	else
+		netif_carrier_off(ndev);
+}
+EXPORT_SYMBOL_GPL(mctp_pcie_vdm_set_carrier);

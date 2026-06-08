@@ -2131,12 +2131,6 @@ static void aspeed_mctp_pcie_setup(struct aspeed_mctp *priv)
 				schedule_delayed_work(&priv->rx_det_dwork,
 						      usecs_to_jiffies(priv->rx_det_period_us));
 		}
-#if IS_ENABLED(CONFIG_MCTP_TRANSPORT_PCIE_VDM)
-		if (!priv->pcie_vdm_enabled) {
-			aspeed_mctp_pcie_vdm_register(priv);
-			priv->pcie_vdm_enabled = true;
-		}
-#endif
 		aspeed_mctp_rx_trigger(&priv->rx);
 		aspeed_mctp_send_pcie_uevent(kobj, true);
 	} else {
@@ -2551,6 +2545,13 @@ static int aspeed_mctp_probe(struct platform_device *pdev)
 		goto out_dma;
 	}
 	priv->mctp_miscdev.this_device->type = &aspeed_mctp_type;
+
+#if IS_ENABLED(CONFIG_MCTP_TRANSPORT_PCIE_VDM)
+	if (!priv->pcie_vdm_enabled) {
+		aspeed_mctp_pcie_vdm_register(priv);
+		priv->pcie_vdm_enabled = true;
+	}
+#endif
 
 	ret = aspeed_mctp_irq_init(priv);
 	if (ret) {

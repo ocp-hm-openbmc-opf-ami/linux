@@ -14,6 +14,7 @@
 #include <linux/irqdomain.h>
 #include <linux/of_address.h>
 #include <linux/of_irq.h>
+#include <linux/platform_device.h>
 
 #define ASPEED_SCU_IC_STATUS		GENMASK(28, 16)
 #define ASPEED_SCU_IC_STATUS_SHIFT	16
@@ -37,7 +38,7 @@ struct aspeed_scu_ic_variant {
 	.isr			=	_isr,		\
 }
 
-static const struct aspeed_scu_ic_variant scu_ic_variants[]	__initconst = {
+static const struct aspeed_scu_ic_variant scu_ic_variants[] = {
 	SCU_VARIANT("aspeed,ast2400-scu-ic",	0, GENMASK(15, 0),	7, 0x00, 0x00),
 	SCU_VARIANT("aspeed,ast2500-scu-ic",	0, GENMASK(15, 0),	7, 0x00, 0x00),
 	SCU_VARIANT("aspeed,ast2600-scu-ic0",	0, GENMASK(5, 0),	6, 0x00, 0x00),
@@ -262,12 +263,16 @@ static const struct aspeed_scu_ic_variant *aspeed_scu_ic_find_variant(struct dev
 	return NULL;
 }
 
-static int __init aspeed_scu_ic_of_init(struct device_node *node, struct device_node *parent)
+static int aspeed_scu_ic_probe(struct platform_device *pdev, struct device_node *parent)
 {
 	const struct aspeed_scu_ic_variant *variant;
 	struct aspeed_scu_ic *scu_ic;
+	struct device_node *np = pdev->dev.of_node;
 
-	variant = aspeed_scu_ic_find_variant(node);
+	if (!np)
+		return -ENODEV;
+
+	variant = aspeed_scu_ic_find_variant(np);
 	if (!variant)
 		return -ENODEV;
 
@@ -281,14 +286,16 @@ static int __init aspeed_scu_ic_of_init(struct device_node *node, struct device_
 	scu_ic->ier		= variant->ier;
 	scu_ic->isr		= variant->isr;
 
-	return aspeed_scu_ic_of_init_common(scu_ic, node);
+	return aspeed_scu_ic_of_init_common(scu_ic, np);
 }
 
-IRQCHIP_DECLARE(ast2400_scu_ic, "aspeed,ast2400-scu-ic", aspeed_scu_ic_of_init);
-IRQCHIP_DECLARE(ast2500_scu_ic, "aspeed,ast2500-scu-ic", aspeed_scu_ic_of_init);
-IRQCHIP_DECLARE(ast2600_scu_ic0, "aspeed,ast2600-scu-ic0", aspeed_scu_ic_of_init);
-IRQCHIP_DECLARE(ast2600_scu_ic1, "aspeed,ast2600-scu-ic1", aspeed_scu_ic_of_init);
-IRQCHIP_DECLARE(ast2700_scu_ic0, "aspeed,ast2700-scu-ic0", aspeed_scu_ic_of_init);
-IRQCHIP_DECLARE(ast2700_scu_ic1, "aspeed,ast2700-scu-ic1", aspeed_scu_ic_of_init);
-IRQCHIP_DECLARE(ast2700_scu_ic2, "aspeed,ast2700-scu-ic2", aspeed_scu_ic_of_init);
-IRQCHIP_DECLARE(ast2700_scu_ic3, "aspeed,ast2700-scu-ic3", aspeed_scu_ic_of_init);
+IRQCHIP_PLATFORM_DRIVER_BEGIN(aspeed_scu_ic)
+IRQCHIP_MATCH("aspeed,ast2400-scu-ic", aspeed_scu_ic_probe)
+IRQCHIP_MATCH("aspeed,ast2500-scu-ic", aspeed_scu_ic_probe)
+IRQCHIP_MATCH("aspeed,ast2600-scu-ic0", aspeed_scu_ic_probe)
+IRQCHIP_MATCH("aspeed,ast2600-scu-ic1", aspeed_scu_ic_probe)
+IRQCHIP_MATCH("aspeed,ast2700-scu-ic0", aspeed_scu_ic_probe)
+IRQCHIP_MATCH("aspeed,ast2700-scu-ic1", aspeed_scu_ic_probe)
+IRQCHIP_MATCH("aspeed,ast2700-scu-ic2", aspeed_scu_ic_probe)
+IRQCHIP_MATCH("aspeed,ast2700-scu-ic3", aspeed_scu_ic_probe)
+IRQCHIP_PLATFORM_DRIVER_END(aspeed_scu_ic)

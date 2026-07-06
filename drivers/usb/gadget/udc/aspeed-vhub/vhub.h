@@ -29,12 +29,14 @@
 #define AST_VHUB_EP1_STS_CHG	0x3C	/* Endpoint 1 Status Change Bitmap Data */
 #define AST_VHUB_SETUP0		0x80	/* Root Device Setup Data Buffer0 */
 #define AST_VHUB_SETUP1		0x84	/* Root Device Setup Data Buffer1 */
+#define AST_VHUB_PHY_00		0x800   /* USB PHY Control/Status #1 */
 
 /* Main control reg */
 #define VHUB_CTRL_PHY_CLK			(1 << 31)
 #define VHUB_CTRL_PHY_LOOP_TEST			(1 << 25)
 #define VHUB_CTRL_DN_PWN			(1 << 24)
 #define VHUB_CTRL_DP_PWN			(1 << 23)
+#define VHUB_CTRL_ENLARGE_FIFO			(1 << 21)
 #define VHUB_CTRL_LONG_DESC			(1 << 18)
 #define VHUB_CTRL_ISO_RSP_CTRL			(1 << 17)
 #define VHUB_CTRL_SPLIT_IN			(1 << 16)
@@ -184,6 +186,13 @@
 #define VHUB_EP_DMA_SET_CPU_WPTR(x)	(x)
 #define VHUB_EP_DMA_SINGLE_KICK		(1 << 0) /* WPTR = 1 for single mode */
 
+/*******************************************
+ *                                         *
+ * PHY Control/Status register definitions *
+ *                                         *
+ *******************************************/
+#define AST_VHUB0_FIFO_FORCE_RETRY	BIT(13)
+
 /*******************************
  *                             *
  * DMA descriptors definitions *
@@ -198,6 +207,14 @@
 #define VHUB_DSC1_IN_SPID_MDATA		(3 << 14)
 #define VHUB_DSC1_IN_SET_LEN(x)		((x) & 0xfff)
 #define VHUB_DSC1_IN_LEN(x)		((x) & 0xfff)
+
+/***********************************
+ *                                 *
+ * USB2COM register definitions *
+ *                                 *
+ ***********************************/
+#define AST_VHUB_COM_MODE_SEL		0x10
+#define AST_VHUB_COM_EN_CTRL		0x1C
 
 /****************************************
  *                                      *
@@ -217,6 +234,8 @@
 #define AST_VHUB_DESCS_COUNT	256	/* Use 256 descriptor mode (valid
 					 * values are 256 and 32)
 					 */
+
+#define AST_VHUB_NUM_UART_PORTS	15	/* USB2COM ports */
 
 struct ast_vhub;
 struct ast_vhub_dev;
@@ -388,6 +407,7 @@ struct ast_vhub {
 	spinlock_t			lock;
 	struct work_struct		wake_work;
 	struct clk			*clk;
+	struct reset_control		*rst;
 
 	/* EP0 DMA buffers allocated in one chunk */
 	void				*ep0_bufs;
@@ -417,8 +437,15 @@ struct ast_vhub {
 	/* Force full speed only */
 	bool				force_usb1 : 1;
 
+	/* Enlarge FIFO for ast2700 soc0 vhub1 */
+	bool				enlarge_fifo : 1;
+
+	/* Force TXFIFO retry when is DRAM busy for ast2700 soc0 vhub0 */
+	bool				txfifo_retry_quirk : 1;
+
 	/* Upstream bus speed captured at bus reset */
 	unsigned int			speed;
+	u8				current_config;
 
 	/* Standard USB Descriptors of the vhub. */
 	struct usb_device_descriptor	vhub_dev_desc;

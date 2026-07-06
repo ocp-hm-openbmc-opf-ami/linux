@@ -23,6 +23,7 @@
 #include <linux/of.h>
 #include <linux/regmap.h>
 #include <linux/dma-mapping.h>
+#include <linux/reset.h>
 
 #include "vhub.h"
 
@@ -239,8 +240,23 @@ void ast_vhub_init_hw(struct ast_vhub *vhub)
 	if (vhub->force_usb1)
 		ctrl |= VHUB_CTRL_FULL_SPEED_ONLY;
 
+	/* Enlarge FIFO for ast2700 soc0 vhub1 */
+	if (vhub->enlarge_fifo)
+		ctrl |= VHUB_CTRL_ENLARGE_FIFO;
+
+	ctrl |= VHUB_CTRL_AUTO_REMOTE_WAKEUP;
 	ctrl |= VHUB_CTRL_UPSTREAM_CONNECT;
 	writel(ctrl, vhub->regs + AST_VHUB_CTRL);
+
+	/* AST2700 SoC0 vhub0 only: force retry via CRC error injection
+	 * when DRAM access is delayed due to bus contention.
+	 */
+	if (vhub->txfifo_retry_quirk) {
+		u32 val = readl(vhub->regs + AST_VHUB_PHY_00);
+
+		val |= AST_VHUB0_FIFO_FORCE_RETRY;
+		writel(val, vhub->regs + AST_VHUB_PHY_00);
+	}
 
 	/* Enable some interrupts */
 	writel(VHUB_IRQ_HUB_EP0_IN_ACK_STALL |
@@ -280,6 +296,8 @@ static void ast_vhub_remove(struct platform_device *pdev)
 	if (vhub->clk)
 		clk_disable_unprepare(vhub->clk);
 
+	reset_control_assert(vhub->rst);
+
 	spin_unlock_irqrestore(&vhub->lock, flags);
 
 	if (vhub->ep0_bufs)
@@ -291,9 +309,65 @@ static void ast_vhub_remove(struct platform_device *pdev)
 	vhub->ep0_bufs = NULL;
 }
 
+static int ast_vhub_init_uart(struct device *dev, struct ast_vhub *vhub)
+{
+	const struct device_node *np = dev->of_node;
+	void __iomem *regs = vhub->regs + 0x800;
+	int i, rc = 0;
+	int num_ports;
+	u32 ports[AST_VHUB_NUM_UART_PORTS], port;
+	u32 mode_sel = 0, dev_en = 0;
+
+	num_ports = of_property_count_u32_elems(np, "aspeed,uart-ports");
+	if (num_ports == -EINVAL) {
+		/* Property not found */
+		return 0;
+	}
+	if (num_ports < 0) {
+		dev_err(dev, "Failed to read uart-ports property\n");
+		return num_ports;
+	}
+	if (num_ports > AST_VHUB_NUM_UART_PORTS) {
+		dev_warn(dev, "Too many UART ports (%d), max is %d\n",
+			 num_ports, AST_VHUB_NUM_UART_PORTS);
+		num_ports = AST_VHUB_NUM_UART_PORTS;
+	}
+
+	rc = of_property_read_u32_array(np, "aspeed,uart-ports",
+					ports, num_ports);
+	if (rc)
+		return rc;
+
+	dev_en = readl(regs + AST_VHUB_COM_EN_CTRL);
+
+	for (i = 0; i < num_ports; i++) {
+		// io-die uart only
+		if (ports[i] == 4 || ports[i] > AST_VHUB_NUM_UART_PORTS) {
+			dev_warn(dev, "Ignoring invalid UART port %d\n",
+				 ports[i]);
+			continue;
+		}
+
+		if (ports[i] < 4)
+			port = ports[i];
+		else
+			port = ports[i] - 1;
+
+		mode_sel |= (0x2 << (port * 2));
+		dev_en |= BIT(port + 16);
+	}
+
+	dev_info(dev, "Enabled UART ports\n");
+
+	writel(mode_sel, regs + AST_VHUB_COM_MODE_SEL);
+	writel(dev_en, regs + AST_VHUB_COM_EN_CTRL);
+	return 0;
+}
+
 static int ast_vhub_probe(struct platform_device *pdev)
 {
 	enum usb_device_speed max_speed;
+	const u64 *dma_mask_ptr;
 	struct ast_vhub *vhub;
 	struct resource *res;
 	int i, rc = 0;
@@ -323,6 +397,10 @@ static int ast_vhub_probe(struct platform_device *pdev)
 	if (!vhub->epns)
 		return -ENOMEM;
 
+	vhub->enlarge_fifo = of_property_read_bool(np, "aspeed,enlarge-fifo");
+	vhub->txfifo_retry_quirk =
+		of_property_read_bool(np, "aspeed,txfifo-retry-quirk");
+
 	spin_lock_init(&vhub->lock);
 	vhub->pdev = pdev;
 	vhub->port_irq_mask = GENMASK(VHUB_IRQ_DEV1_BIT + vhub->max_ports - 1,
@@ -348,6 +426,21 @@ static int ast_vhub_probe(struct platform_device *pdev)
 		goto err;
 	}
 
+	vhub->rst = devm_reset_control_get_optional_shared(&pdev->dev, NULL);
+	if (IS_ERR(vhub->rst)) {
+		rc = PTR_ERR(vhub->rst);
+		goto err;
+	}
+
+	if (vhub->rst) {
+		mdelay(10);
+		rc = reset_control_deassert(vhub->rst);
+		if (rc)
+			goto err;
+	}
+
+	ast_vhub_init_uart(&pdev->dev, vhub);
+
 	/* Check if we need to limit the HW to USB1 */
 	max_speed = usb_get_maximum_speed(&pdev->dev);
 	if (max_speed != USB_SPEED_UNKNOWN && max_speed < USB_SPEED_HIGH)
@@ -368,6 +461,13 @@ static int ast_vhub_probe(struct platform_device *pdev)
 	if (rc) {
 		dev_err(&pdev->dev, "Failed to request interrupt\n");
 		goto err;
+	}
+
+	dma_mask_ptr = (u64 *)of_device_get_match_data(&pdev->dev);
+	if (dma_mask_ptr) {
+		rc = dma_coerce_mask_and_coherent(&pdev->dev, *dma_mask_ptr);
+		if (rc)
+			goto err;
 	}
 
 	/*
@@ -412,15 +512,25 @@ static int ast_vhub_probe(struct platform_device *pdev)
 	return rc;
 }
 
+static const u64 dma_mask_32 =	DMA_BIT_MASK(32);
+static const u64 dma_mask_64 =	DMA_BIT_MASK(64);
+
 static const struct of_device_id ast_vhub_dt_ids[] = {
 	{
 		.compatible = "aspeed,ast2400-usb-vhub",
+		.data = &dma_mask_32,
 	},
 	{
 		.compatible = "aspeed,ast2500-usb-vhub",
+		.data = &dma_mask_32,
 	},
 	{
 		.compatible = "aspeed,ast2600-usb-vhub",
+		.data = &dma_mask_32,
+	},
+	{
+		.compatible = "aspeed,ast2700-usb-vhub",
+		.data = &dma_mask_64,
 	},
 	{ }
 };

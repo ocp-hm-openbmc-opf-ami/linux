@@ -643,6 +643,28 @@ config MCHP_LAN966X_PCI
 	    - lan966x-serdes (PHY_LAN966X_SERDES)
 	    - lan966x-miim (MDIO_MSCC_MIIM)
 	    - lan966x-switch (LAN966X_SWITCH)
+config NPCM_PCI_MBOX
+	tristate "NPCM PCI Mailbox Controller"
+	depends on (ARCH_NPCM || COMPILE_TEST) && REGMAP && MFD_SYSCON
+	help
+	  Expose the NPCM BMC PCI MBOX registers found on Nuvoton SOCs
+	  to userspace.
+
+config NPCM8XX_JTAG_MASTER
+	tristate "NPCM8xx JTAG Master driver"
+	depends on (ARCH_NPCM || COMPILE_TEST)
+	help
+	  NPCM8xx JTAG Master Interfaces.
+
+config NPCM750_VCD
+	tristate "Nuvoton VCD support"
+        help
+          Enable Nuvoton vcd.
+
+config NPCM750_ECE
+	tristate "Nuvoton ECE support"
+	help
+	  Enable Nuvoton Encoding and Compression Engine.
 
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
@@ -661,4 +683,5 @@ source "drivers/misc/mchp_pci1xxxx/Kconfig"
 source "drivers/misc/keba/Kconfig"
 source "drivers/misc/amd-sbi/Kconfig"
 source "drivers/misc/rp1/Kconfig"
+source "drivers/misc/npcm-vdm/Kconfig"
 endmenu

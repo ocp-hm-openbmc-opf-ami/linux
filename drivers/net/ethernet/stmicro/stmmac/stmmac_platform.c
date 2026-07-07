@@ -20,6 +20,12 @@
 #include "stmmac.h"
 #include "stmmac_platform.h"
 
+void __iomem *npcm_base;
+bool sgmii_npcm = false;
+
+#define IND_AC_INDX	0x1FE
+#define SR_MII_CTRL	0x003E0000
+
 #ifdef CONFIG_OF
 
 /**
@@ -431,7 +437,7 @@ stmmac_probe_config_dt(struct platform_device *pdev, u8 *mac)
 	struct device_node *np = pdev->dev.of_node;
 	struct plat_stmmacenet_data *plat;
 	struct stmmac_dma_cfg *dma_cfg;
-	static int bus_id = -ENODEV;
+	u16 RegValue;
 	int phy_mode;
 	void *ret;
 	int rc;
@@ -448,21 +454,30 @@ stmmac_probe_config_dt(struct platform_device *pdev, u8 *mac)
 		eth_zero_addr(mac);
 	}
 
-	phy_mode = device_get_phy_mode(&pdev->dev);
-	if (phy_mode < 0)
-		return ERR_PTR(phy_mode);
+	if (of_get_property(pdev->dev.of_node, "use-ncsi", NULL)) {
+		plat->use_ncsi = true;
+	}
+	else
+		plat->use_ncsi = false;
 
-	plat->phy_interface = phy_mode;
+	if (!plat->use_ncsi) {
+		phy_mode = device_get_phy_mode(&pdev->dev);
+		if (phy_mode < 0)
+			return ERR_PTR(phy_mode);
 
+		plat->phy_interface = phy_mode;
+	}
 	rc = stmmac_of_get_mac_mode(np);
 	if (rc >= 0 && rc != phy_mode)
 		dev_warn(&pdev->dev,
 			 "\"mac-mode\" property used for %s but differs to \"phy-mode\" of %s, and will be ignored. Please report.\n",
 			 phy_modes(rc), phy_modes(phy_mode));
 
-	/* Some wrapper drivers still rely on phy_node. Let's save it while
-	 * they are not converted to phylink. */
-	plat->phy_node = of_parse_phandle(np, "phy-handle", 0);
+	if (!plat->use_ncsi) {
+		/* Some wrapper drivers still rely on phy_node. Let's save it while
+		 * they are not converted to phylink. */
+		plat->phy_node = of_parse_phandle(np, "phy-handle", 0);
+	}
 
 	/* PHYLINK automatically parses the phy-handle property */
 	plat->port_node = of_fwnode_handle(np);
@@ -471,14 +486,8 @@ stmmac_probe_config_dt(struct platform_device *pdev, u8 *mac)
 	of_property_read_u32(np, "max-speed", &plat->max_speed);
 
 	plat->bus_id = of_alias_get_id(np, "ethernet");
-	if (plat->bus_id < 0) {
-		if (bus_id < 0)
-			bus_id = of_alias_get_highest_id("ethernet");
-		/* No ethernet alias found, init at -1 so first bus_id is 0 */
-		if (bus_id < 0)
-			bus_id = -1;
-		plat->bus_id = ++bus_id;
-	}
+	if (plat->bus_id < 0)
+		plat->bus_id = 0;
 
 	/* Default to phy auto-detection */
 	plat->phy_addr = -1;
@@ -515,6 +524,9 @@ stmmac_probe_config_dt(struct platform_device *pdev, u8 *mac)
 		plat->flags |= STMMAC_FLAG_EN_TX_LPI_CLOCKGATING;
 	}
 
+	plat->eee_force_disable =
+		of_property_read_bool(np, "snps,eee-force-disable");
+
 	/* Set the maxmtu to a default of JUMBO_LEN in case the
 	 * parameter is not present in the device tree.
 	 */
@@ -535,6 +547,7 @@ stmmac_probe_config_dt(struct platform_device *pdev, u8 *mac)
 		of_device_is_compatible(np, "snps,dwmac-3.50a") ||
 		of_device_is_compatible(np, "snps,dwmac-3.70a") ||
 		of_device_is_compatible(np, "snps,dwmac-3.72a") ||
+		of_device_is_compatible(np, "nuvoton,npcm-dwmac") ||
 		of_device_is_compatible(np, "snps,dwmac")) {
 		/* Note that the max-frame-size parameter as defined in the
 		 * ePAPR v1.1 spec is defined as max-frame-size, it's
@@ -664,6 +677,24 @@ stmmac_probe_config_dt(struct platform_device *pdev, u8 *mac)
 	if (IS_ERR(plat->stmmac_ahb_rst)) {
 		ret = plat->stmmac_ahb_rst;
 		goto error_hw_init;
+	}
+
+	if (of_device_is_compatible(np, "nuvoton,npcm-dwmac")) {
+		sgmii_npcm = true;
+		npcm_base = devm_platform_ioremap_resource(pdev, 1);
+		if (IS_ERR(npcm_base)) {
+			dev_warn(&pdev->dev, "devm_platform_ioremap_resource failed\n");
+			sgmii_npcm = false;
+		}
+		iowrite16((u16)(SR_MII_CTRL >> 9), npcm_base + IND_AC_INDX);
+		RegValue = ioread16(npcm_base + 0x2);
+		RegValue = ioread16(npcm_base + 0x0);
+		RegValue |= BIT(15);
+		iowrite16(RegValue, npcm_base + 0x0);
+		while (RegValue & BIT(15))
+			RegValue = ioread16(npcm_base + 0x0);
+		RegValue &= ~(BIT(12));
+		iowrite16(RegValue, npcm_base + 0x0);
 	}
 
 	return plat;

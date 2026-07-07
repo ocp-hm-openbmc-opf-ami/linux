@@ -22,10 +22,13 @@
 #include <linux/property.h>
 #include <linux/regmap.h>
 
+#include "../pinctrl-utils.h"
+
 /* GCR registers */
 #define NPCM8XX_GCR_SRCNT	0x068
 #define NPCM8XX_GCR_FLOCKR1	0x074
 #define NPCM8XX_GCR_DSCNT	0x078
+#define NPCM8XX_GCR_INTCR4	0x0C0
 #define NPCM8XX_GCR_I2CSEGSEL	0x0e0
 #define NPCM8XX_GCR_MFSEL1	0x260
 #define NPCM8XX_GCR_MFSEL2	0x264
@@ -34,6 +37,10 @@
 #define NPCM8XX_GCR_MFSEL5	0x270
 #define NPCM8XX_GCR_MFSEL6	0x274
 #define NPCM8XX_GCR_MFSEL7	0x278
+
+#define NPCM8XX_INTCR4_R1_EN	BIT(12)
+#define NPCM8XX_INTCR4_R2_EN	BIT(13)
+#define NPCM8XX_INTCR4_RMII3_EN	BIT(14)
 
 #define SRCNT_ESPI		BIT(3)
 
@@ -291,15 +298,27 @@ static void npcmgpio_irq_unmask(struct irq_data *d)
 
 static unsigned int npcmgpio_irq_startup(struct irq_data *d)
 {
-	struct gpio_chip *gc = irq_data_get_irq_chip_data(d);
-	unsigned int gpio = irqd_to_hwirq(d);
-
-	/* active-high, input, clear interrupt, enable interrupt */
-	npcmgpio_direction_input(gc, gpio);
 	npcmgpio_irq_ack(d);
 	npcmgpio_irq_unmask(d);
 
 	return 0;
+}
+
+static int npcmgpio_irq_request_resources(struct irq_data *d)
+{
+	struct gpio_chip *gc = irq_data_get_irq_chip_data(d);
+	unsigned int gpio = irqd_to_hwirq(d);
+
+	npcmgpio_direction_input(gc, gpio);
+
+	return gpiochip_lock_as_irq(gc, d->hwirq);
+}
+
+static void npcmgpio_irq_release_resources(struct irq_data *d)
+{
+	struct gpio_chip *gc = irq_data_get_irq_chip_data(d);
+
+	gpiochip_unlock_as_irq(gc, d->hwirq);
 }
 
 static struct irq_chip npcmgpio_irqchip = {
@@ -309,6 +328,8 @@ static struct irq_chip npcmgpio_irqchip = {
 	.irq_mask = npcmgpio_irq_mask,
 	.irq_set_type = npcmgpio_set_irq_type,
 	.irq_startup = npcmgpio_irq_startup,
+	.irq_request_resources	= npcmgpio_irq_request_resources,
+	.irq_release_resources = npcmgpio_irq_release_resources,
 	.flags =  IRQCHIP_MASK_ON_SUSPEND | IRQCHIP_IMMUTABLE,
 	GPIOCHIP_IRQ_RESOURCE_HELPERS,
 };
@@ -538,7 +559,7 @@ static const int wdog2_pins[] = { 219 };
 
 static const int bmcuart0a_pins[] = { 41, 42 };
 static const int bmcuart0b_pins[] = { 48, 49 };
-static const int bmcuart1_pins[] = { 43, 44, 62, 63 };
+static const int bmcuart1_pins[] = { 43, 63 };
 
 static const int scipme_pins[] = { 169 };
 static const int smi_pins[] = { 170 };
@@ -563,8 +584,6 @@ static const int spi3cs1_pins[] = { 187 };
 static const int spi3quad_pins[] = { 188, 189 };
 static const int spi3cs2_pins[] = { 188 };
 static const int spi3cs3_pins[] = { 189 };
-
-static const int ddc_pins[] = { 204, 205, 206, 207 };
 
 static const int lpc_pins[] = { 95, 161, 163, 164, 165, 166, 167 };
 static const int espi_pins[] = { 95, 161, 163, 164, 165, 166, 167, 168 };
@@ -782,7 +801,6 @@ static const int hgpio7_pins[] = { 60 };
 	NPCM8XX_GRP(spixcs1), \
 	NPCM8XX_GRP(spi1), \
 	NPCM8XX_GRP(pspi), \
-	NPCM8XX_GRP(ddc), \
 	NPCM8XX_GRP(clkreq), \
 	NPCM8XX_GRP(clkout), \
 	NPCM8XX_GRP(spi3), \
@@ -1020,7 +1038,6 @@ NPCM8XX_SFUNC(spix);
 NPCM8XX_SFUNC(spixcs1);
 NPCM8XX_SFUNC(spi1);
 NPCM8XX_SFUNC(pspi);
-NPCM8XX_SFUNC(ddc);
 NPCM8XX_SFUNC(clkreq);
 NPCM8XX_SFUNC(clkout);
 NPCM8XX_SFUNC(spi3);
@@ -1243,7 +1260,6 @@ static struct pinfunction npcm8xx_funcs[] = {
 	NPCM8XX_MKFUNC(spixcs1),
 	NPCM8XX_MKFUNC(spi1),
 	NPCM8XX_MKFUNC(pspi),
-	NPCM8XX_MKFUNC(ddc),
 	NPCM8XX_MKFUNC(clkreq),
 	NPCM8XX_MKFUNC(clkout),
 	NPCM8XX_MKFUNC(spi3),
@@ -1415,10 +1431,10 @@ static const struct npcm8xx_pincfg pincfg[] = {
 	NPCM8XX_PINCFG(107,	i3c5, MFSEL3, 22,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		SLEW),
 	NPCM8XX_PINCFG(108,	sg1mdio, MFSEL4, 21,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		SLEW),
 	NPCM8XX_PINCFG(109,	sg1mdio, MFSEL4, 21,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		SLEW),
-	NPCM8XX_PINCFG(110,	rg2, MFSEL4, 24,	ddr, MFSEL3, 26,	rmii3, MFSEL5, 11,	none, NONE, 0,		none, NONE, 0,		SLEW),
-	NPCM8XX_PINCFG(111,	rg2, MFSEL4, 24,	ddr, MFSEL3, 26,	rmii3, MFSEL5, 11,	none, NONE, 0,		none, NONE, 0,		SLEW),
-	NPCM8XX_PINCFG(112,	rg2, MFSEL4, 24,	ddr, MFSEL3, 26,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		SLEW),
-	NPCM8XX_PINCFG(113,	rg2, MFSEL4, 24,	ddr, MFSEL3, 26,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		SLEW),
+	NPCM8XX_PINCFG(110,	rg2, MFSEL4, 24,	ddr, MFSEL3, 26,	rmii3, MFSEL5, 11,	none, NONE, 0,		none, NONE, 0,		DSTR(8, 24) | SLEW),
+	NPCM8XX_PINCFG(111,	rg2, MFSEL4, 24,	ddr, MFSEL3, 26,	rmii3, MFSEL5, 11,	none, NONE, 0,		none, NONE, 0,		DSTR(8, 24) | SLEW),
+	NPCM8XX_PINCFG(112,	rg2, MFSEL4, 24,	ddr, MFSEL3, 26,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		DSTR(8, 24) | SLEW),
+	NPCM8XX_PINCFG(113,	rg2, MFSEL4, 24,	ddr, MFSEL3, 26,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		DSTR(8, 24) | SLEW),
 	NPCM8XX_PINCFG(114,	smb0, MFSEL1, 6,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		0),
 	NPCM8XX_PINCFG(115,	smb0, MFSEL1, 6,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		0),
 	NPCM8XX_PINCFG(116,	smb1, MFSEL1, 7,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		0),
@@ -1441,14 +1457,14 @@ static const struct npcm8xx_pincfg pincfg[] = {
 	NPCM8XX_PINCFG(133,	smb10, MFSEL4, 13,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		0),
 	NPCM8XX_PINCFG(134,	smb11, MFSEL4, 14,	smb23b, MFSEL6, 0,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		0),
 	NPCM8XX_PINCFG(135,	smb11, MFSEL4, 14,	smb23b, MFSEL6, 0,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		0),
-	NPCM8XX_PINCFG(136,	jm1, MFSEL5, 15,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		DSTR(8, 12) | SLEW),
-	NPCM8XX_PINCFG(137,	jm1, MFSEL5, 15,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		DSTR(8, 12) | SLEW),
-	NPCM8XX_PINCFG(138,	jm1, MFSEL5, 15,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		DSTR(8, 12) | SLEW),
-	NPCM8XX_PINCFG(139,	jm1, MFSEL5, 15,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		DSTR(8, 12) | SLEW),
-	NPCM8XX_PINCFG(140,	jm1, MFSEL5, 15,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		DSTR(8, 12) | SLEW),
-	NPCM8XX_PINCFG(141,	smb7b, I2CSEGSEL, 27,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		0),
-	NPCM8XX_PINCFG(142,	smb7d, I2CSEGSEL, 29,	tp_smb1, MFSEL7, 11,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		DSTR(8, 12) | SLEW),
-	NPCM8XX_PINCFG(143,	smb7d, I2CSEGSEL, 29,	tp_smb1, MFSEL7, 11,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		0),
+	NPCM8XX_PINCFG(136,	jm1, MFSEL5, 15,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		SLEW),
+	NPCM8XX_PINCFG(137,	jm1, MFSEL5, 15,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		SLEW),
+	NPCM8XX_PINCFG(138,	jm1, MFSEL5, 15,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		SLEW),
+	NPCM8XX_PINCFG(139,	jm1, MFSEL5, 15,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		SLEW),
+	NPCM8XX_PINCFG(140,	jm1, MFSEL5, 15,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		SLEW),
+	NPCM8XX_PINCFG(141,	smb7b, I2CSEGSEL, 27,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		SLEW),
+	NPCM8XX_PINCFG(142,	smb7d, I2CSEGSEL, 29,	tp_smb1, MFSEL7, 11,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		SLEW),
+	NPCM8XX_PINCFG(143,	smb7d, I2CSEGSEL, 29,	tp_smb1, MFSEL7, 11,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		SLEW),
 	NPCM8XX_PINCFG(144,	pwm4, MFSEL2, 20,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		DSTR(4, 8)),
 	NPCM8XX_PINCFG(145,	pwm5, MFSEL2, 21,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		DSTR(4, 8)),
 	NPCM8XX_PINCFG(146,	pwm6, MFSEL2, 22,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		DSTR(4, 8)),
@@ -1509,8 +1525,8 @@ static const struct npcm8xx_pincfg pincfg[] = {
 	NPCM8XX_PINCFG(201,	r1, MFSEL3, 9,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		GPO),
 	NPCM8XX_PINCFG(202,	smb0c, I2CSEGSEL, 1,	fm0, MFSEL6, 16,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		SLEW),
 	NPCM8XX_PINCFG(203,	faninx, MFSEL3, 3,	spi1cs0, MFSEL3, 4,	fm1, MFSEL6, 17,	none, NONE, 0,		none, NONE, 0,		DSTR(8, 12)),
-	NPCM8XX_PINCFG(208,	rg2, MFSEL4, 24,	ddr, MFSEL3, 26,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		SLEW), /* DSCNT */
-	NPCM8XX_PINCFG(209,	rg2, MFSEL4, 24,	ddr, MFSEL3, 26,	rmii3, MFSEL5, 11,	none, NONE, 0,		none, NONE, 0,		SLEW), /* DSCNT */
+	NPCM8XX_PINCFG(208,	rg2, MFSEL4, 24,	ddr, MFSEL3, 26,	none, NONE, 0,		none, NONE, 0,		none, NONE, 0,		DSTR(8, 24) | SLEW),
+	NPCM8XX_PINCFG(209,	rg2, MFSEL4, 24,	ddr, MFSEL3, 26,	rmii3, MFSEL5, 11,	none, NONE, 0,		none, NONE, 0,		DSTR(8, 24) | SLEW),
 	NPCM8XX_PINCFG(210,	rg2, MFSEL4, 24,	ddr, MFSEL3, 26,	rmii3, MFSEL5, 11,	none, NONE, 0,		none, NONE, 0,		DSTR(8, 12) | SLEW),
 	NPCM8XX_PINCFG(211,	rg2, MFSEL4, 24,	ddr, MFSEL3, 26,	rmii3, MFSEL5, 11,	none, NONE, 0,		none, NONE, 0,		DSTR(8, 12) | SLEW),
 	NPCM8XX_PINCFG(212,	rg2, MFSEL4, 24,	ddr, MFSEL3, 26,	r3rxer, MFSEL6, 30,	none, NONE, 0,		none, NONE, 0,		DSTR(8, 12) | SLEW),
@@ -1553,32 +1569,32 @@ static const struct npcm8xx_pincfg pincfg[] = {
 
 /* number, name, drv_data */
 static const struct pinctrl_pin_desc npcm8xx_pins[] = {
-	PINCTRL_PIN(0,	"GPIO0/IOX1_DI/SMB6C_SDA/SMB18_SDA"),
-	PINCTRL_PIN(1,	"GPIO1/IOX1_LD/SMB6C_SCL/SMB18_SCL"),
-	PINCTRL_PIN(2,	"GPIO2/IOX1_CK/SMB6B_SDA/SMB17_SDA"),
-	PINCTRL_PIN(3,	"GPIO3/IOX1_DO/SMB6B_SCL/SMB17_SCL"),
-	PINCTRL_PIN(4,	"GPIO4/IOX2_DI/SMB1D_SDA"),
-	PINCTRL_PIN(5,	"GPIO5/IOX2_LD/SMB1D_SCL"),
-	PINCTRL_PIN(6,	"GPIO6/IOX2_CK/SMB2D_SDA"),
-	PINCTRL_PIN(7,	"GPIO7/IOX2_D0/SMB2D_SCL"),
-	PINCTRL_PIN(8,	"GPIO8/LKGPO1/TP_GPIO0"),
-	PINCTRL_PIN(9,	"GPIO9/LKGPO2/TP_GPIO1"),
+	PINCTRL_PIN(0,	"GPIO00/IOX1_DI/SMB6C_SDA/SMB18_SDA"),
+	PINCTRL_PIN(1,	"GPIO01/IOX1_LD/SMB6C_SCL/SMB18_SCL"),
+	PINCTRL_PIN(2,	"GPIO02/IOX1_CK/SMB6B_SDA/SMB17_SDA"),
+	PINCTRL_PIN(3,	"GPIO03/IOX1_DO/SMB6B_SCL/SMB17_SCL"),
+	PINCTRL_PIN(4,	"GPIO04/IOX2_DI/SMB1D_SDA"),
+	PINCTRL_PIN(5,	"GPIO05/IOX2_LD/SMB1D_SCL"),
+	PINCTRL_PIN(6,	"GPIO06/IOX2_CK/SMB2D_SDA"),
+	PINCTRL_PIN(7,	"GPIO07/IOX2_DO/SMB2D_SCL"),
+	PINCTRL_PIN(8,	"GPIO08/LKGPO1/TP_GPIO0"),
+	PINCTRL_PIN(9,	"GPIO09/LKGPO2/TP_GPIO1"),
 	PINCTRL_PIN(10, "GPIO10/IOXH_LD/SMB6D_SCL/SMB16_SCL"),
 	PINCTRL_PIN(11, "GPIO11/IOXH_CK/SMB6D_SDA/SMB16_SDA"),
 	PINCTRL_PIN(12, "GPIO12/GSPI_CK/SMB5B_SCL"),
 	PINCTRL_PIN(13, "GPIO13/GSPI_DO/SMB5B_SDA"),
 	PINCTRL_PIN(14, "GPIO14/GSPI_DI/SMB5C_SCL"),
-	PINCTRL_PIN(15, "GPIO15/GSPI_CS/SMB5C_SDA"),
+	PINCTRL_PIN(15, "GPIO15/GSPI_nCS/SMB5C_SDA"),
 	PINCTRL_PIN(16, "GPIO16/SMB7B_SDA/LKGPO0/TP_GPIO2"),
 	PINCTRL_PIN(17, "GPIO17/PSPI_DI/CP1_GPIO5"),
-	PINCTRL_PIN(18, "GPIO18/PSPI_D0/SMB4B_SDA"),
+	PINCTRL_PIN(18, "GPIO18/PSPI_DO/SMB4B_SDA"),
 	PINCTRL_PIN(19, "GPIO19/PSPI_CK/SMB4B_SCL"),
 	PINCTRL_PIN(20, "GPIO20/H_GPIO0/SMB4C_SDA/SMB15_SDA"),
 	PINCTRL_PIN(21, "GPIO21/H_GPIO1/SMB4C_SCL/SMB15_SCL"),
 	PINCTRL_PIN(22, "GPIO22/H_GPIO2/SMB4D_SDA/SMB14_SDA"),
 	PINCTRL_PIN(23, "GPIO23/H_GPIO3/SMB4D_SCL/SMB14_SCL"),
-	PINCTRL_PIN(24, "GPIO24/IOXH_DO/H_GPIO4/SMB7C_SCL/TP_SMB2_SCL"),
-	PINCTRL_PIN(25, "GPIO25/IOXH_DI/H_GPIO4/SMB7C_SDA/TP_SMB2_SDA"),
+	PINCTRL_PIN(24, "GPIO24/IOXH_DO/H_GPIO4/SMB7C_SCL/TPSMB2_SCL"),
+	PINCTRL_PIN(25, "GPIO25/IOXH_DI/H_GPIO5/SMB7C_SDA/TPSMB2_SDA"),
 	PINCTRL_PIN(26, "GPIO26/SMB5_SDA"),
 	PINCTRL_PIN(27, "GPIO27/SMB5_SCL"),
 	PINCTRL_PIN(28, "GPIO28/SMB4_SDA"),
@@ -1649,12 +1665,12 @@ static const struct pinctrl_pin_desc npcm8xx_pins[] = {
 	PINCTRL_PIN(93, "GPIO93/GA20/SMB5D_SCL"),
 	PINCTRL_PIN(94, "GPIO94/nKBRST/SMB5D_SDA"),
 	PINCTRL_PIN(95, "GPIO95/nESPIRST/LPC_nLRESET"),
-	PINCTRL_PIN(96, "GPIO96/CP1_GPIO7/BU2_TXD/TP_GPIO7"),
-	PINCTRL_PIN(97, "GPIO97/CP1_GPIO6/BU2_RXD/TP_GPIO6"),
-	PINCTRL_PIN(98, "GPIO98/CP1_GPIO5/BU4_TXD/TP_GPIO5"),
-	PINCTRL_PIN(99, "GPIO99/CP1_GPIO4/BU4_RXD/TP_GPIO4"),
-	PINCTRL_PIN(100, "GPIO100/CP1_GPIO3/BU5_TXD/TP_GPIO3"),
-	PINCTRL_PIN(101, "GPIO101/CP1_GPIO2/BU5_RXD/TP_GPIO2"),
+	PINCTRL_PIN(96, "GPIO96/CP1_GPIO7/TP_GPIO7"),
+	PINCTRL_PIN(97, "GPIO97/CP1_GPIO6/TP_GPIO6"),
+	PINCTRL_PIN(98, "GPIO98/CP1_GPIO5/BU4_RXD/TP_GPIO5"),
+	PINCTRL_PIN(99, "GPIO99/CP1_GPIO4/BU4_TXD/TP_GPIO4"),
+	PINCTRL_PIN(100, "GPIO100/CP1_GPIO3/BU5_RXD/TP_GPIO3"),
+	PINCTRL_PIN(101, "GPIO101/CP1_GPIO2/BU5_TXD/TP_GPIO2"),
 	PINCTRL_PIN(102, "GPIO102/HSYNC"),
 	PINCTRL_PIN(103, "GPIO103/VSYNC"),
 	PINCTRL_PIN(104, "GPIO104/DDC_SCL"),
@@ -1713,7 +1729,7 @@ static const struct pinctrl_pin_desc npcm8xx_pins[] = {
 	PINCTRL_PIN(157, "GPIO157/MMC_DT1"),
 	PINCTRL_PIN(158, "GPIO158/MMC_DT2"),
 	PINCTRL_PIN(159, "GPIO159/MMC_DT3"),
-	PINCTRL_PIN(160, "GPIO160/CLKOUT/RNGOSCOUT/GFXBYPCK"),
+	PINCTRL_PIN(160, "GPIO160/CLKOUT"),
 	PINCTRL_PIN(161, "GPIO161/ESPI_nCS/LPC_nLFRAME"),
 	PINCTRL_PIN(162, "GPIO162/SERIRQ"),
 	PINCTRL_PIN(163, "GPIO163/ESPI_CK/LPC_LCLK"),
@@ -1836,6 +1852,30 @@ static void npcm8xx_setfunc(struct regmap *gcr_regmap, const unsigned int *pin,
 	}
 }
 
+static void npcm8xx_update_intcr4_mux(struct regmap *gcr_regmap,
+				      unsigned int group)
+{
+	switch (group) {
+	case fn_r1:
+		regmap_update_bits(gcr_regmap, NPCM8XX_GCR_INTCR4,
+				   NPCM8XX_INTCR4_R1_EN,
+				   NPCM8XX_INTCR4_R1_EN);
+		break;
+	case fn_r2:
+		regmap_update_bits(gcr_regmap, NPCM8XX_GCR_INTCR4,
+				   NPCM8XX_INTCR4_R2_EN,
+				   NPCM8XX_INTCR4_R2_EN);
+		break;
+	case fn_rmii3:
+		regmap_update_bits(gcr_regmap, NPCM8XX_GCR_INTCR4,
+				   NPCM8XX_INTCR4_RMII3_EN,
+				   NPCM8XX_INTCR4_RMII3_EN);
+		break;
+	default:
+		break;
+	}
+}
+
 static int npcm8xx_get_slew_rate(struct npcm8xx_gpio *bank,
 				 struct regmap *gcr_regmap, unsigned int pin)
 {
@@ -1908,8 +1948,30 @@ static int npcm8xx_get_drive_strength(struct pinctrl_dev *pctldev,
 	if (!(flg & DRIVE_STRENGTH_MASK))
 		return -EINVAL;
 
-	val = ioread32(bank->base + NPCM8XX_GP_N_ODSC) & pinmask;
-	ds = val ? DSHI(flg) : DSLO(flg);
+	if (((pin > 109) && (pin < 114)) || (pin == 208) || (pin == 209)) {
+		regmap_read(npcm->gcr_regmap, NPCM8XX_GCR_DSCNT, &val);
+		val &= 0xC0;
+		val = val >> 6;
+		switch (val) {
+		case 0:
+			ds = 8;
+			break;
+		case 1:
+			ds = 12;
+			break;
+		case 2:
+			ds = 16;
+			break;
+		case 3:
+			ds = 24;
+			break;
+		default:
+			ds = -ENOTSUPP;
+		}
+	} else {
+		val = ioread32(bank->base + NPCM8XX_GP_N_ODSC) & pinmask;
+		ds = val ? DSHI(flg) : DSLO(flg);
+	}
 	dev_dbg(bank->chip.gc.parent, "pin %d strength %d = %d\n", pin, val, ds);
 
 	return ds;
@@ -1921,16 +1983,38 @@ static int npcm8xx_set_drive_strength(struct npcm8xx_pinctrl *npcm,
 	struct npcm8xx_gpio *bank =
 		&npcm->gpio_bank[pin / NPCM8XX_GPIO_PER_BANK];
 	int gpio = BIT(pin % bank->chip.gc.ngpio);
-	int v;
+	int v, rgmii_ds;
 
 	v = pincfg[pin].flag & DRIVE_STRENGTH_MASK;
 
-	if (DSLO(v) == nval)
-		npcm_gpio_clr(&bank->chip, bank->base + NPCM8XX_GP_N_ODSC, gpio);
-	else if (DSHI(v) == nval)
-		npcm_gpio_set(&bank->chip, bank->base + NPCM8XX_GP_N_ODSC, gpio);
-	else
-		return -ENOTSUPP;
+	if (((pin > 109) && (pin < 114)) || (pin == 208) || (pin == 209)) {
+		switch (nval) {
+		case 8:
+			rgmii_ds = 0;
+			break;
+		case 12:
+			rgmii_ds = 0x40;
+			break;
+		case 16:
+			rgmii_ds = 0x80;
+			break;
+		case 24:
+			rgmii_ds = 0xC0;
+			break;
+		default:
+			return -ENOTSUPP;
+		}
+
+		regmap_update_bits(npcm->gcr_regmap, NPCM8XX_GCR_DSCNT, 0xC0,
+				   rgmii_ds);
+	} else {
+		if (DSLO(v) == nval)
+			npcm_gpio_clr(&bank->chip, bank->base + NPCM8XX_GP_N_ODSC, gpio);
+		else if (DSHI(v) == nval)
+			npcm_gpio_set(&bank->chip, bank->base + NPCM8XX_GP_N_ODSC, gpio);
+		else
+			return -ENOTSUPP;
+	}
 
 	return 0;
 }
@@ -1968,18 +2052,12 @@ static int npcm8xx_dt_node_to_map(struct pinctrl_dev *pctldev,
 					      PIN_MAP_TYPE_INVALID);
 }
 
-static void npcm8xx_dt_free_map(struct pinctrl_dev *pctldev,
-				struct pinctrl_map *map, u32 num_maps)
-{
-	kfree(map);
-}
-
 static const struct pinctrl_ops npcm8xx_pinctrl_ops = {
 	.get_groups_count = npcm8xx_get_groups_count,
 	.get_group_name = npcm8xx_get_group_name,
 	.get_group_pins = npcm8xx_get_group_pins,
 	.dt_node_to_map = npcm8xx_dt_node_to_map,
-	.dt_free_map = npcm8xx_dt_free_map,
+	.dt_free_map = pinctrl_utils_free_map,
 };
 
 static int npcm8xx_get_functions_count(struct pinctrl_dev *pctldev)
@@ -2012,6 +2090,7 @@ static int npcm8xx_pinmux_set_mux(struct pinctrl_dev *pctldev,
 
 	npcm8xx_setfunc(npcm->gcr_regmap, npcm8xx_pingroups[group].pins,
 			npcm8xx_pingroups[group].npins, group);
+	npcm8xx_update_intcr4_mux(npcm->gcr_regmap, group);
 
 	return 0;
 }
@@ -2074,7 +2153,7 @@ static const struct pinmux_ops npcm8xx_pinmux_ops = {
 static int debounce_timing_setting(struct npcm8xx_gpio *bank, u32 gpio,
 				   u32 nanosecs)
 {
-	void __iomem *DBNCS_offset = bank->base + NPCM8XX_GP_N_DBNCS0 + (gpio / 4);
+	void __iomem *DBNCS_offset = bank->base + NPCM8XX_GP_N_DBNCS0 + (gpio / 16) * 4;
 	int gpio_debounce = (gpio % 16) * 2, debounce_select, i;
 	u32 dbncp_val, dbncp_val_mod;
 
@@ -2348,6 +2427,10 @@ static int npcm8xx_gpio_fw(struct npcm8xx_pinctrl *pctrl)
 			return dev_err_probe(dev, ret, "gpio-ranges fail for GPIO bank %u\n", id);
 
 		ret = fwnode_irq_get(child, 0);
+		/* Clear and disable event before GPIO init */
+		iowrite32(0x0, pctrl->gpio_bank[id].base + NPCM8XX_GP_N_EVEN);
+		iowrite32(0xFFFFFFFF, pctrl->gpio_bank[id].base + NPCM8XX_GP_N_EVST);
+
 		if (ret < 0)
 			return dev_err_probe(dev, ret, "Failed to retrieve IRQ for bank %u\n", id);
 

@@ -1,0 +1,57 @@
+// SPDX-License-Identifier: GPL-2.0
+// Copyright (c) 2018 Nuvoton Technology
+
+/ {
+	pinctrl: pinctrl@f0010000 {
+		pin0_slew: pin0_slew {
+			pins = "GPIO0/IOX1_DI/SMB6C_SDA/SMB18_SDA";
+			slew-rate = <1>;
+		};
+		pin1_slew: pin1_slew {
+			pins = "GPIO1/IOX1_LD/SMB6C_SCL/SMB18_SCL";
+			slew-rate = <1>;
+		};
+		pin2_slew: pin2_slew {
+			pins = "GPIO2/IOX1_CK/SMB6B_SDA/SMB17_SDA";
+			slew-rate = <1>;
+		};
+		pin3_slew: pin3_slew {
+			pins = "GPIO3/IOX1_DO/SMB6B_SCL/SMB17_SCL";
+			slew-rate = <1>;
+		};
+		pin4_slew: pin4_slew {
+			pins = "GPIO04/IOX2_DI/SMB1D_SDA";
+			slew-rate = <1>;
+		};
+		pin5_slew: pin5_slew {
+			pins = "GPIO05/IOX2_LD/SMB1D_SCL";
+			slew-rate = <1>;
+		};
+		pin6_slew: pin6_slew {
+			pins = "GPIO06/IOX2_CK/SMB2D_SDA";
+			slew-rate = <1>;
+		};
+		pin7_slew: pin7_slew {
+			pins = "GPIO07/IOX2_DO/SMB2D_SCL";
+			slew-rate = <1>;
+		};
+		pin108_slew: pin108-slew {
+			pins = "GPIO108/SG1_MDC";
+			slew-rate = <1>;
+		};
+		pin109_slew: pin109-slew {
+			pins = "GPIO109/SG1_MDIO";
+			slew-rate = <1>;
+		};
+		gpo187ol_pins: gpo187ol-pins {
+			pins = "GPO187/SPI3_nCS1_SMB14B_SDA";
+			bias-disable;
+			output-low;
+		};
+		gpio114ol_pins: gpio114ol-pins {
+			pins = "GPIO114/SMB0_SCL";
+			bias-disable;
+			output-low;
+		};
+	};
+};

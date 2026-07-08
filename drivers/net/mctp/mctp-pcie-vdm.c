@@ -102,7 +102,7 @@ struct mctp_pcie_vdm_dev {
 
 static const struct mctp_pcie_vdm_hdr mctp_pcie_vdm_hdr_template = {
 	.fmt = MCTP_PCIE_VDM_FMT_4DW,
-	.route_type = MCTP_PCIE_VDM_TYPE_MSG | MCTP_PCIE_VDM_ROUTE_BY_ID,
+	.route_type = MCTP_PCIE_VDM_TYPE_MSG,
 	.tag_vdm_code = MCTP_PCIE_VDM_CODE,
 	.msg_code = MCTP_PCIE_VDM_MSG_CODE,
 	.pci_vendor_id = MCTP_PCIE_VDM_VENDOR_ID,

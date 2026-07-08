@@ -477,6 +477,23 @@ static void mctp_i2c_invalidate_tx_flow(struct mctp_i2c_dev *midev,
 		mctp_i2c_unlock_nest(midev);
 }
 
+#define MCTP_I2C_TX_RETRY_COUNT	5
+
+static int mctp_i2c_transfer_retry(struct i2c_adapter *adap,
+				   struct i2c_msg *msgs, int num)
+{
+	int rc, i;
+
+	for (i = 0; i < MCTP_I2C_TX_RETRY_COUNT; i++) {
+		rc = __i2c_transfer(adap, msgs, num);
+		if (rc >= 0)
+			return rc;
+		usleep_range(2000, 3000);
+	}
+
+	return rc;
+}
+
 static void mctp_i2c_xmit(struct mctp_i2c_dev *midev, struct sk_buff *skb)
 {
 	struct net_device_stats *stats = &midev->ndev->stats;
@@ -520,7 +537,7 @@ static void mctp_i2c_xmit(struct mctp_i2c_dev *midev, struct sk_buff *skb)
 		/* no flow: full lock & unlock */
 		mctp_i2c_lock_nest(midev);
 		mctp_i2c_device_select(midev->client, midev);
-		rc = __i2c_transfer(midev->adapter, &msg, 1);
+		rc = mctp_i2c_transfer_retry(midev->adapter, &msg, 1);
 		mctp_i2c_unlock_nest(midev);
 		break;
 
@@ -534,7 +551,7 @@ static void mctp_i2c_xmit(struct mctp_i2c_dev *midev, struct sk_buff *skb)
 
 	case MCTP_I2C_TX_FLOW_EXISTING:
 		/* existing flow: we already have the lock; just tx */
-		rc = __i2c_transfer(midev->adapter, &msg, 1);
+		rc = mctp_i2c_transfer_retry(midev->adapter, &msg, 1);
 
 		/* on tx errors, the flow can no longer be considered valid */
 		if (rc < 0)

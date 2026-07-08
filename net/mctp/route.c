@@ -1376,6 +1376,11 @@ static int mctp_pkttype_receive(struct sk_buff *skb, struct net_device *dev,
 	if (rc && mh->dest == MCTP_ADDR_NULL && skb->pkt_type == PACKET_HOST)
 		rc = mctp_route_lookup_null(net, dev, &dst);
 
+	/* Also forward broadcast and remaining NULL EID packets to local */
+	if (rc && (mctp_address_broadcast(mh->dest) ||
+		   mh->dest == MCTP_ADDR_NULL))
+		rc = mctp_route_lookup_null(net, dev, &dst);
+
 	if (rc)
 		goto err_drop;
 

@@ -1403,7 +1403,6 @@ static int dw_i3c_master_priv_xfers(struct i3c_dev_desc *dev,
 	struct i3c_master_controller *m = i3c_dev_get_master(dev);
 	struct dw_i3c_master *master = to_dw_i3c_master(m);
 	unsigned int nrxwords = 0, ntxwords = 0;
-	struct dw_i3c_xfer *xfer;
 	u32 sda_lvl_pre, sda_lvl_post;
 	int i, ret = 0;
 
@@ -2746,7 +2745,7 @@ int dw_i3c_common_probe(struct dw_i3c_master *master,
 	np = pdev->dev.of_node;
 	ret = dw_i3c_of_populate_bus_timing(master, np);
 	if (ret)
-		goto err_assert_rst;
+		goto err_disable_pm;
 
 	/* Information regarding the FIFOs/QUEUEs depth */
 	ret = readl(master->regs + QUEUE_STATUS_LEVEL);

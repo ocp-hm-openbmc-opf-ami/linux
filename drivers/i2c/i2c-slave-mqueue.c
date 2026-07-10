@@ -84,7 +84,7 @@ static int i2c_slave_mqueue_callback(struct i2c_client *client,
 
 static ssize_t i2c_slave_mqueue_bin_read(struct file *filp,
 					 struct kobject *kobj,
-					 struct bin_attribute *attr,
+					 const struct bin_attribute *attr,
 					 char *buf, loff_t pos, size_t count)
 {
 	struct mq_queue *mq;

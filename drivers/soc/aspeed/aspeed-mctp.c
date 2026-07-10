@@ -14,6 +14,7 @@
 #include <linux/miscdevice.h>
 #include <linux/mm.h>
 #include <linux/module.h>
+#include <linux/netdevice.h>
 #include <linux/mutex.h>
 #include <linux/of_platform.h>
 #include <linux/pci.h>
@@ -1969,6 +1970,11 @@ static int aspeed_mctp_pcie_vdm_op_send_pkt(struct device *dev,
 	if (rc) {
 		dev_dbg(priv->dev, "failed to send packet\n");
 		aspeed_mctp_packet_free(packet);
+		/* If the PCIe link is down, immediately turn off carrier so the
+		 * netdev tx path stops queuing packets until the link recovers.
+		 */
+		if (rc == -ENETDOWN && priv->ndev)
+			netif_carrier_off(priv->ndev);
 		return rc;
 	}
 	return 0;
@@ -2028,9 +2034,13 @@ static void aspeed_mctp_pcie_vdm_register(struct aspeed_mctp *priv)
 
 	snprintf(ifname, IFNAMSIZ, "mctppci%d", priv->dev_id);
 	ndev = mctp_pcie_vdm_add_dev(priv->dev, &aspeed_mctp_pcie_vdm_ops, ifname);
-	if (IS_ERR(ndev))
+	if (IS_ERR(ndev)) {
 		dev_err(priv->dev, "Failed to add mctp pcie vdm device Err %ld\n", PTR_ERR(ndev));
+		priv->ndev = NULL;
+		return;
+	}
 	priv->ndev = ndev;
+	netif_carrier_on(ndev);
 }
 
 #endif
@@ -2132,16 +2142,22 @@ static void aspeed_mctp_pcie_setup(struct aspeed_mctp *priv)
 		if (!priv->pcie_vdm_enabled) {
 			aspeed_mctp_pcie_vdm_register(priv);
 			priv->pcie_vdm_enabled = true;
+		} else if (priv->ndev) {
+			netif_carrier_on(priv->ndev);
 		}
 #endif
 		aspeed_mctp_rx_trigger(&priv->rx);
 		aspeed_mctp_send_pcie_uevent(kobj, true);
 	} else {
 #if IS_ENABLED(CONFIG_MCTP_TRANSPORT_PCIE_VDM)
-		if (priv->pcie_vdm_enabled) {
-			mctp_pcie_vdm_remove_dev(priv->ndev);
-			priv->pcie_vdm_enabled = false;
-		}
+		/* Do NOT unregister the netdev on link down — open sockets still
+		 * hold references and mctp_unregister_netdev() would stall with
+		 * "waiting for mctppci0 to become free. Usage count = N".
+		 * Just signal carrier-off so the tx path stops queuing packets.
+		 * The device is unregistered only in aspeed_mctp_remove().
+		 */
+		if (priv->pcie_vdm_enabled && priv->ndev)
+			netif_carrier_off(priv->ndev);
 #endif
 		schedule_delayed_work(&priv->pcie.rst_dwork,
 				      msecs_to_jiffies(1000));
@@ -2224,6 +2240,14 @@ static irqreturn_t aspeed_mctp_irq_handler(int irq, void *arg)
 static irqreturn_t aspeed_mctp_pcie_rst_irq_handler(int irq, void *arg)
 {
 	struct aspeed_mctp *priv = arg;
+
+	/* Immediately signal link-down so the netdev tx path stops sending
+	 * before the DMA channels are reset, preventing TX into a reset channel.
+	 */
+#if IS_ENABLED(CONFIG_MCTP_TRANSPORT_PCIE_VDM)
+	if (priv->pcie_vdm_enabled && priv->ndev)
+		netif_carrier_off(priv->ndev);
+#endif
 
 	aspeed_mctp_channels_init(priv);
 
@@ -2580,8 +2604,16 @@ static int aspeed_mctp_remove(struct platform_device *pdev)
 {
 	struct aspeed_mctp *priv = platform_get_drvdata(pdev);
 
+	/* Disable IRQs and drain pending reset work before touching the netdev
+	 * to prevent the reset work or PCIe reset IRQ from calling
+	 * netif_carrier_*() on a freed ndev.
+	 */
+	aspeed_mctp_irq_disable(priv);
+	cancel_delayed_work_sync(&priv->pcie.rst_dwork);
+
 #if IS_ENABLED(CONFIG_MCTP_TRANSPORT_PCIE_VDM)
 	if (priv->pcie_vdm_enabled) {
+		netif_carrier_off(priv->ndev);
 		mctp_pcie_vdm_remove_dev(priv->ndev);
 		priv->pcie_vdm_enabled = false;
 	}
@@ -2590,8 +2622,6 @@ static int aspeed_mctp_remove(struct platform_device *pdev)
 	platform_device_unregister(priv->peci_mctp);
 
 	misc_deregister(&priv->mctp_miscdev);
-
-	aspeed_mctp_irq_disable(priv);
 
 	aspeed_mctp_dma_fini(priv);
 

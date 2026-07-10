@@ -172,21 +172,29 @@ static netdev_tx_t mctp_pcie_vdm_start_xmit(struct sk_buff *skb,
 					    struct net_device *ndev)
 {
 	int rc;
-	netdev_tx_t ret;
 
 	pr_debug("%s: skb len %u\n", __func__, skb->len);
 
-	if (skb) {
-		rc = mctp_pcie_vdm_xmit(ndev, skb);
-		if (rc) {
-			pr_debug("%s: failed to send packet, rc %d\n", __func__, rc);
-			ret = NETDEV_TX_BUSY;
-		} else {
-			ret = NETDEV_TX_OK;
-			kfree_skb(skb);
-		}
+	if (!skb)
+		return NETDEV_TX_OK;
+
+	if (!netif_running(ndev) || !netif_carrier_ok(ndev)) {
+		pr_debug_ratelimited("%s: net device %s carrier/link down, dropping packet\n",
+				   __func__, ndev->name);
+		ndev->stats.tx_dropped++;
+		kfree_skb(skb);
+		return NETDEV_TX_OK;
 	}
-	return ret;
+
+	rc = mctp_pcie_vdm_xmit(ndev, skb);
+	if (rc) {
+		pr_debug_ratelimited("%s: failed to send packet, rc %d, dropping\n",
+				   __func__, rc);
+		ndev->stats.tx_dropped++;
+	}
+	dev_consume_skb_any(skb);
+
+	return NETDEV_TX_OK;
 }
 
 static void mctp_pcie_vdm_uninit(struct net_device *ndev)

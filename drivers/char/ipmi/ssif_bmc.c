@@ -6,7 +6,6 @@
  *
  */
 
-#include <linux/delay.h>
 #include <linux/i2c.h>
 #include <linux/miscdevice.h>
 #include <linux/module.h>
@@ -21,8 +20,7 @@
 #include <linux/ipmi_ssif_bmc.h>
 
 #define DEVICE_NAME                             "ipmi-ssif-host"
-#define SSIF_BMC_BUSY   0
-#define SSIF_BMC_READY  1
+
 #define GET_8BIT_ADDR(addr_7bit)                (((addr_7bit) << 1) & 0xff)
 
 /* A standard SMBus Transaction is limited to 32 data bytes */
@@ -41,8 +39,12 @@
 #define SSIF_IPMI_MULTIPART_READ_START          0x3
 #define SSIF_IPMI_MULTIPART_READ_MIDDLE         0x9
 
-/* Max timeout is 15 seconds */
-#define RESPONSE_TIMEOUT                        15000 /*ms*/
+/*
+ * IPMI 2.0 Spec, section 12.7 SSIF Timing,
+ * Request-to-Response Time is T6max(250ms) - T1max(20ms) - 3ms = 227ms
+ * Recover ssif_bmc from busy state if it takes up to 500ms
+ */
+#define RESPONSE_TIMEOUT                        500 /* ms */
 
 struct ssif_part_buffer {
 	u8 address;
@@ -100,21 +102,7 @@ struct ssif_bmc_ctx {
 	struct ssif_part_buffer part_buf;
 	struct ipmi_ssif_msg    response;
 	struct ipmi_ssif_msg    request;
-	void			*priv;
-	void (*set_ssif_bmc_status)(struct i2c_client *, bool );
 };
-
-void npcm_i2c_client_slave_enable(struct i2c_client *client, bool enable);
-
-static void npcm_ssif_enable(struct ssif_bmc_ctx *ssif_bmc)
-{
-	if(ssif_bmc->busy) {
-		if (ssif_bmc->set_ssif_bmc_status)
-			ssif_bmc->set_ssif_bmc_status(ssif_bmc->client, SSIF_BMC_BUSY);
-	} else
-		if (ssif_bmc->set_ssif_bmc_status)
-			ssif_bmc->set_ssif_bmc_status(ssif_bmc->client, SSIF_BMC_READY);
-}
 
 static inline struct ssif_bmc_ctx *to_ssif_bmc(struct file *file)
 {
@@ -237,7 +225,6 @@ static ssize_t ssif_bmc_write(struct file *file, const char __user *buf, size_t 
 	/* Clean old request buffer */
 	memset(&ssif_bmc->request, 0, sizeof(struct ipmi_ssif_msg));
 exit:
-	npcm_ssif_enable(ssif_bmc);
 	spin_unlock_irqrestore(&ssif_bmc->lock, flags);
 
 	return (ret < 0) ? ret : count;
@@ -269,9 +256,6 @@ static __poll_t ssif_bmc_poll(struct file *file, poll_table *wait)
 	/* The request is available, userspace application can get the request */
 	if (ssif_bmc->request_available)
 		mask |= EPOLLIN;
-
-	if(!ssif_bmc->response_in_progress)
-		mask |= EPOLLOUT;
 
 	spin_unlock_irq(&ssif_bmc->lock);
 
@@ -324,15 +308,12 @@ static void response_timeout(struct timer_list *t)
 	/* Do nothing if the response is in progress */
 	if (!ssif_bmc->response_in_progress) {
 		/* Recover ssif_bmc from busy */
+		ssif_bmc->busy = false;
 		ssif_bmc->response_timer_inited = false;
-		dev_warn(&ssif_bmc->client->dev,
-			 "%s: No response from userspace, abort current request\n", __func__);
 		/* Set aborting flag */
 		ssif_bmc->aborting = true;
 	}
 
-	ssif_bmc->busy = false;
-	npcm_ssif_enable(ssif_bmc);
 	spin_unlock_irqrestore(&ssif_bmc->lock, flags);
 }
 
@@ -341,8 +322,6 @@ static void handle_request(struct ssif_bmc_ctx *ssif_bmc)
 {
 	/* set ssif_bmc to busy waiting for response */
 	ssif_bmc->busy = true;
-	npcm_ssif_enable(ssif_bmc);
-
 	/* Request message is available to process */
 	ssif_bmc->request_available = true;
 	/* Clean old response buffer */
@@ -757,13 +736,11 @@ static void on_stop_event(struct ssif_bmc_ctx *ssif_bmc, u8 *val)
 {
 	if (ssif_bmc->state == SSIF_READY ||
 	    ssif_bmc->state == SSIF_START ||
-	    ssif_bmc->state == SSIF_SMBUS_CMD) {
-		dev_warn(&ssif_bmc->client->dev,
+	    ssif_bmc->state == SSIF_SMBUS_CMD ||
+	    ssif_bmc->state == SSIF_ABORTING) {
+		dev_dbg(&ssif_bmc->client->dev,
 			 "Warn: %s unexpected SLAVE STOP in state=%s\n",
 			 __func__, state_to_string(ssif_bmc->state));
-		ssif_bmc->state = SSIF_READY;
-
-	} else if (ssif_bmc->state == SSIF_ABORTING) {
 		ssif_bmc->state = SSIF_READY;
 
 	} else if (ssif_bmc->state == SSIF_REQ_RECVING) {
@@ -868,9 +845,6 @@ static int ssif_bmc_probe(struct i2c_client *client)
 
 	ssif_bmc->client = client;
 	ssif_bmc->client->flags |= I2C_CLIENT_SLAVE;
-	ssif_bmc->priv = i2c_get_adapdata(client->adapter);
-	ssif_bmc->set_ssif_bmc_status = npcm_i2c_client_slave_enable;
-	npcm_ssif_enable(ssif_bmc);
 
 	/* Register I2C slave */
 	i2c_set_clientdata(client, ssif_bmc);

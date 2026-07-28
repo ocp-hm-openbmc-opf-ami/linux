@@ -1970,11 +1970,6 @@ static int aspeed_mctp_pcie_vdm_op_send_pkt(struct device *dev,
 	if (rc) {
 		dev_dbg(priv->dev, "failed to send packet\n");
 		aspeed_mctp_packet_free(packet);
-		/* If the PCIe link is down, immediately turn off carrier so the
-		 * netdev tx path stops queuing packets until the link recovers.
-		 */
-		if (rc == -ENETDOWN && priv->ndev)
-			netif_carrier_off(priv->ndev);
 		return rc;
 	}
 	return 0;

@@ -831,7 +831,7 @@ void rndis_borrow_net(struct usb_function_instance *f, struct net_device *net)
 		gether_cleanup(netdev_priv(opts->net));
 	else
 		free_netdev(opts->net);
-	opts->borrowed_net = true;
+	opts->borrowed_net = opts->bound = true;
 	opts->net = net;
 }
 EXPORT_SYMBOL_GPL(rndis_borrow_net);

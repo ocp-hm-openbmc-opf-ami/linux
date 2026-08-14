@@ -187,6 +187,7 @@ struct aspeed_spi {
 	dma_addr_t		 dma_addr_phy;
 	void __iomem		*op_buf;
 	u32			 flag;
+	struct spi_controller	*ctlr;
 };
 
 static inline ssize_t _access_primary_show(void __iomem *regs,
@@ -1893,21 +1894,21 @@ static int aspeed_spi_probe(struct platform_device *pdev)
 	}
 
 	if (aspi->data == &ast2600_fmc_data) {
-	if (device_add_groups(dev, bcurrent_boot_groups))
+		if (device_add_groups(dev, bcurrent_boot_groups))
 			dev_warn(dev, "Could not add current_boot\n");
-	/* if boot from alt source, show access_primary, otherwise show access_backup */
-	if (readl(aspi->regs + OFFSET_ABR_CTRL_STATUS) &
-	    ABR_BOOT_SRC_INDICATE) {
-
-		if (device_add_groups(dev, bswitch_primary_groups))
-			dev_warn(dev, "Could not add access_primary\n");
+		/* if boot from alt source, show access_primary, otherwise show access_backup */
+		if (readl(aspi->regs + OFFSET_ABR_CTRL_STATUS) &
+		    ABR_BOOT_SRC_INDICATE) {
+			if (device_add_groups(dev, bswitch_primary_groups))
+				dev_warn(dev, "Could not add access_primary\n");
 		} else {
-		if (device_add_groups(dev, bswitch_backup_groups))
-			dev_warn(dev, "Could not add access_backup\n");
+			if (device_add_groups(dev, bswitch_backup_groups))
+				dev_warn(dev, "Could not add access_backup\n");
 		}
 	}
 
-	ret = devm_spi_register_controller(dev, ctlr);
+	aspi->ctlr = ctlr;
+	ret = spi_register_controller(ctlr);
 	if (ret) {
 		dev_err(&pdev->dev, "spi_register_controller failed\n");
 		goto end;
@@ -1922,7 +1923,7 @@ static void aspeed_spi_remove(struct platform_device *pdev)
 	struct spi_controller *ctlr = platform_get_drvdata(pdev);
 	struct aspeed_spi *aspi = spi_controller_get_devdata(ctlr);
 
-	spi_unregister_controller(ctlr);
+	spi_unregister_controller(aspi->ctlr);
 
 	if (aspi->op_buf) {
 		dma_free_coherent(aspi->dev,

@@ -691,7 +691,7 @@ rndis_bind(struct usb_configuration *c, struct usb_function *f)
 	 * RNDIS netdev is cleared. To ensure proper functionality, the
 	 * RNDIS netdev must now be reassigned.
 	 */
-	if (rndis_opts->borrowed_net && rndis_opts->bound) {
+	if (rndis_opts->borrowed_net && device_is_registered(&rndis_opts->net->dev)) {
 		/* Retrieve the host MAC address and assign it to the RNDIS structure */
 		gether_get_host_addr_u8(rndis_opts->net, rndis->ethaddr);
 
@@ -831,7 +831,7 @@ void rndis_borrow_net(struct usb_function_instance *f, struct net_device *net)
 		gether_cleanup(netdev_priv(opts->net));
 	else
 		free_netdev(opts->net);
-	opts->borrowed_net = opts->bound = true;
+	opts->borrowed_net = true;
 	opts->net = net;
 }
 EXPORT_SYMBOL_GPL(rndis_borrow_net);

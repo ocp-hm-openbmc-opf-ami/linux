@@ -99,7 +99,7 @@ void ami_bind_ecm_rndis_shared(struct usb_gadget *gadget,
 	 * To share the ECM network device to RNDIS, the original RNDIS
 	 * device must be released. This only works during first UDC binding.
 	 */
-	if (!rndis_opts->borrowed_net && !rndis_opts->bound) {
+	if (!rndis_opts->borrowed_net && !device_is_registered(&rndis_opts->net->dev)) {
 		rndis_borrow_net(rndis_fi, ecm_opts->net);
 	}
 }

@@ -12,6 +12,7 @@
 #include <linux/usb/gadget.h>
 #include <linux/platform_device.h>
 #include <linux/of.h>
+#include <linux/of_address.h>
 #include <linux/slab.h>
 
 #include "vhub.h"
@@ -27,31 +28,34 @@ struct vhub_sysfs_data {
 static struct class *vhub_class;
 static DEFINE_MUTEX(sysfs_lock);
 
-/* Device tree compatible to sysfs node mapping */
+/* Reg base address to sysfs node mapping */
 static const struct {
-	const char *compatible;
+	resource_size_t base_addr;
 	int node_index;
 } vhub_node_map[] = {
-	{ "aspeed,ast2600-usb-vhub",   0 },
-	{ "aspeed,ast2700-usb-vhuba0", 0 },
-	{ "aspeed,ast2700-usb-vhuba1", 0 },
-	{ "aspeed,ast2700-usb-vhubb0", 1 },
-	{ "aspeed,ast2700-usb-vhubb1", 1 },
-	{ "aspeed,ast2700-usb-vhubc", 2 },
-	{ "aspeed,ast2700-usb-vhubd", 3 },
-	{ NULL, -1 }
+	{ 0x1e6a0000, 0 },	/* ast2600 vhub */
+	{ 0x12011000, 0 },	/* ast2700 vhuba1 */
+	{ 0x12060000, 0 },	/* ast2700 vhuba0 */
+	{ 0x12021000, 1 },	/* ast2700 vhubb1 */
+	{ 0x12062000, 1 },	/* ast2700 vhubb0 */
+	{ 0x14120000, 2 },	/* ast2700 vhubc */
+	{ 0x14122000, 3 },	/* ast2700 vhubd */
 };
 
 static int get_vhub_name(struct device *dev, char *buf, size_t size)
 {
 	struct device_node *np = dev->of_node;
+	struct resource res;
 	int i;
 
 	if (!np || !buf || size == 0)
 		return -EINVAL;
 
-	for (i = 0; vhub_node_map[i].compatible; i++) {
-		if (of_device_is_compatible(np, vhub_node_map[i].compatible)) {
+	if (of_address_to_resource(np, 0, &res))
+		return -ENODEV;
+
+	for (i = 0; i < ARRAY_SIZE(vhub_node_map); i++) {
+		if (res.start == vhub_node_map[i].base_addr) {
 			snprintf(buf, size, "vhub%d", vhub_node_map[i].node_index);
 			return 0;
 		}

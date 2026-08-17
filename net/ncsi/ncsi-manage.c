@@ -1928,7 +1928,7 @@ EXPORT_SYMBOL_GPL(ncsi_register_dev);
 int ncsi_start_dev(struct ncsi_dev *nd)
 {
 	struct ncsi_dev_priv *ndp = TO_NCSI_DEV_PRIV(nd);
-#if CONFIG_NCSI_AMI_MANUAL_DETECT
+#ifdef CONFIG_NCSI_AMI_MANUAL_DETECT
 	if (!ncsi_enabled) {
 		return 0;
 	}

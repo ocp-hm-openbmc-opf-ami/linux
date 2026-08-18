@@ -14,6 +14,7 @@
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/slab.h>
+#include <linux/debugfs.h>
 
 #include "vhub.h"
 
@@ -23,6 +24,7 @@ struct vhub_sysfs_data {
 	struct ast_vhub *vhub;
 	bool force_disable;
 	struct mutex lock;
+	struct dentry *debugfs_dir;
 };
 
 static struct class *vhub_class;
@@ -122,38 +124,36 @@ static ssize_t power_save_mode_store(struct device *dev, struct device_attribute
 }
 static DEVICE_ATTR_RW(power_save_mode);
 
-/* Sysfs: force_disable attribute */
-static ssize_t force_disable_show(struct device *dev, struct device_attribute *attr, char *buf)
+/* Debugfs: force_disable attribute*/
+static int force_disable_get(void *priv, u64 *value)
 {
-	struct vhub_sysfs_data *data = dev_get_drvdata(dev);
-	bool state;
+	struct vhub_sysfs_data *data = priv;
 
 	if (!data || !data->vhub)
 		return -EINVAL;
 
 	mutex_lock(&data->lock);
-	state = data->force_disable;
+	*value = data->force_disable;
 	mutex_unlock(&data->lock);
 
-	return sysfs_emit(buf, "%d\n", state ? 1 : 0);
+	return 0;
 }
 
-static ssize_t force_disable_store(struct device *dev, struct device_attribute *attr,
-				   const char *buf, size_t count)
+static int force_disable_set(void *priv, u64 value)
 {
-	struct vhub_sysfs_data *data = dev_get_drvdata(dev);
-	int value;
+	struct vhub_sysfs_data *data = priv;
 
 	if (!data || !data->vhub)
 		return -EINVAL;
 
-	if (kstrtoint(buf, 10, &value) || value < 0 || value > 1)
+	if (value > 1)
 		return -EINVAL;
 
 	mutex_lock(&data->lock);
 
 	if (value == 1) {
-		dev_info(dev, "Force disabling power save mode (vHub always connected)\n");
+		dev_info(&data->vhub->pdev->dev,
+			"Force disabling power save mode (vHub always connected)\n");
 		(void)ami_vhub_upstream_connect(data->vhub);
 		data->force_disable = true;
 	} else {
@@ -161,13 +161,13 @@ static ssize_t force_disable_store(struct device *dev, struct device_attribute *
 	}
 
 	mutex_unlock(&data->lock);
-	return count;
+	return 0;
 }
-static DEVICE_ATTR_RW(force_disable);
+DEFINE_DEBUGFS_ATTRIBUTE(force_disable_fops, force_disable_get,
+			 force_disable_set, "%llu\n");
 
 static struct attribute *vhub_attrs[] = {
 	&dev_attr_power_save_mode.attr,
-	&dev_attr_force_disable.attr,
 	NULL,
 };
 
@@ -221,6 +221,10 @@ int ami_core_sysfs_register(struct device *dev, struct ast_vhub *vhub)
 
 	mutex_unlock(&sysfs_lock);
 
+	data->debugfs_dir = debugfs_create_dir(device_name, usb_debug_root);
+	debugfs_create_file("force_disable", 0644, data->debugfs_dir, data,
+			    &force_disable_fops);
+
 	dev_info(dev, "Registered sysfs device: %s\n", device_name);
 	return 0;
 }
@@ -249,6 +253,7 @@ void ami_core_sysfs_unregister(struct device *dev, struct ast_vhub *vhub)
 	mutex_unlock(&sysfs_lock);
 
 	if (data) {
+		debugfs_remove_recursive(data->debugfs_dir);
 		mutex_destroy(&data->lock);
 		kfree(data);
 	}

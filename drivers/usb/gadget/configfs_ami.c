@@ -16,6 +16,9 @@
 #include "function/u_ether.h"
 #include "function/u_rndis.h"
 
+void ami_bind_ecm_rndis_shared(struct usb_gadget *gadget,
+			       struct list_head *available_func);
+
 /**
  * find_ecm_rndis_pair - Locate ECM and RNDIS function instances
  * @available_func: pointer to the list of available function instances

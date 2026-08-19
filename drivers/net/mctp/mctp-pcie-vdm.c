@@ -172,21 +172,21 @@ static netdev_tx_t mctp_pcie_vdm_start_xmit(struct sk_buff *skb,
 					    struct net_device *ndev)
 {
 	int rc;
-	netdev_tx_t ret;
 
 	pr_debug("%s: skb len %u\n", __func__, skb->len);
 
 	if (skb) {
 		rc = mctp_pcie_vdm_xmit(ndev, skb);
-		if (rc) {
-			pr_err("%s: failed to send packet, rc %d\n", __func__, rc);
-			ret = NETDEV_TX_BUSY;
-		} else {
-			ret = NETDEV_TX_OK;
-			kfree_skb(skb);
-		}
+		if (rc)
+			pr_debug("%s: failed to send packet, rc %d\n", __func__, rc);
+		/*
+		 * Always drop the skb instead of returning NETDEV_TX_BUSY on
+		 * failure, since returning BUSY causes the qdisc to requeue
+		 * and retry the same packet indefinitely.
+		 */
+		kfree_skb(skb);
 	}
-	return ret;
+	return NETDEV_TX_OK;
 }
 
 static void mctp_pcie_vdm_uninit(struct net_device *ndev)

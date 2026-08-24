@@ -11,6 +11,7 @@ struct aspeed_gfx {
 	struct reset_control		*rst_crt;
 	struct reset_control		*rst_engine;
 	struct regmap			*scu;
+	struct regmap			*scu1;
 	struct regmap			*dp;
 	struct regmap			*dpmcu;
 	struct regmap			*pcie_ep;
@@ -99,6 +100,10 @@ int aspeed_gfx_create_output(struct drm_device *drm);
 #define CRT_CTRL_DAC_EN			BIT(0)
 #define CRT_CTRL_VBLANK_LINE(x)		(((x) << 20) & CRT_CTRL_VBLANK_LINE_MASK)
 #define CRT_CTRL_VBLANK_LINE_MASK	GENMASK(31, 20)
+
+/* CURSOR define */
+#define CRT_CTRL_CURSOR0		0x3f3f
+#define CRT_CTRL_CURSOR1		0xfff1fff
 
 /* CRT_HORIZ0 */
 #define CRT_H_TOTAL(x)			(x)

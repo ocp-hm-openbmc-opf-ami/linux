@@ -286,7 +286,7 @@ static void aspeed_i3c_of_populate_bus_timing(struct i3c_hci *hci, struct device
 			if (od_high && od_low)
 				cas_lcnt = DIV_ROUND_CLOSEST(od_low, core_period) - 1;
 			else
-				cas_lcnt = DIV_ROUND_CLOSEST(PHY_I2C_FMP_DEFAULT_SCL_L_NS,
+				cas_lcnt = DIV_ROUND_CLOSEST(PHY_I3C_OD_DEFAULT_SCL_L_NS,
 							     core_period) - 1;
 		} else if (hci->master.bus.mode == I3C_BUS_MODE_PURE) {
 			cas_lcnt = lcnt;

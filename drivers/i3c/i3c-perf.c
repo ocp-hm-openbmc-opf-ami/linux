@@ -354,6 +354,9 @@ MODULE_DEVICE_TABLE(i3c, i3c_perf_ids);
 static struct i3c_driver i3c_perf_driver = {
 	.driver = {
 		.name = "i3c-perf",
+		/* Keep bind/unbind sysfs attrs visible (this is the
+		 * default, stated here to make the intent explicit). */
+		.suppress_bind_attrs = false,
 	},
 	.probe		= i3c_perf_probe,
 	.remove		= i3c_perf_remove,

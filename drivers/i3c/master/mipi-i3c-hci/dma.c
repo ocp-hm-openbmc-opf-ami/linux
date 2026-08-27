@@ -738,6 +738,8 @@ static void hci_dma_process_ibi(struct i3c_hci *hci, struct hci_rh_data *rh)
 				ibi_size += (chunks - 1) * rh->ibi_chunk_sz;
 				ibi_size += FIELD_GET(IBI_DATA_LENGTH, ibi_status);
 			}
+			dev_dbg(&hci->master.dev, "IBI: addr=0x%02x size=%zu chunks=%u\n",
+				ibi_addr, ibi_size, chunks);
 			last_ptr = ptr;
 			break;
 		}

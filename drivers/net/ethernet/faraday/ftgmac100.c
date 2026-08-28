@@ -1587,10 +1587,6 @@ mutex_unlock(&netdev->phydev->lock);
 
 	mutex_lock(&netdev->phydev->lock);
 
-	ftgmac100_reset(priv);
-
-	mutex_lock(&netdev->phydev->lock);
-
 }
 
 static int ftgmac100_mii_probe(struct net_device *netdev)

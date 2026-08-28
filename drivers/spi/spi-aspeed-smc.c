@@ -273,7 +273,8 @@ static inline ssize_t _current_boot_show(void __iomem *regs,
 static ssize_t access_primary_show(struct device *dev,
 				   struct device_attribute *attr, char *buf)
 {
-	struct aspeed_spi *aspi = dev_get_drvdata(dev);
+	struct spi_controller *ctlr = dev_get_drvdata(dev);
+	struct aspeed_spi *aspi = spi_controller_get_devdata(ctlr);
 
 	return _access_primary_show(aspi->regs, attr, buf);
 }
@@ -282,7 +283,8 @@ static ssize_t access_primary_store(struct device *dev,
 				    struct device_attribute *attr,
 				    const char *buf, size_t size)
 {
-	struct aspeed_spi *aspi = dev_get_drvdata(dev);
+	struct spi_controller *ctlr = dev_get_drvdata(dev);
+	struct aspeed_spi *aspi = spi_controller_get_devdata(ctlr);
 
 	return _access_primary_store(aspi->regs, attr, buf, size);
 }
@@ -290,7 +292,8 @@ static ssize_t access_primary_store(struct device *dev,
 static ssize_t access_backup_show(struct device *dev,
 				  struct device_attribute *attr, char *buf)
 {
-	struct aspeed_spi *aspi = dev_get_drvdata(dev);
+	struct spi_controller *ctlr = dev_get_drvdata(dev);
+	struct aspeed_spi *aspi = spi_controller_get_devdata(ctlr);
 
 	return _access_backup_show(aspi->regs, attr, buf);
 }
@@ -299,7 +302,8 @@ static ssize_t access_backup_store(struct device *dev,
 				   struct device_attribute *attr,
 				   const char *buf, size_t size)
 {
-	struct aspeed_spi *aspi = dev_get_drvdata(dev);
+	struct spi_controller *ctlr = dev_get_drvdata(dev);
+	struct aspeed_spi *aspi = spi_controller_get_devdata(ctlr);
 
 	return _access_backup_store(aspi->regs, attr, buf, size);
 }
@@ -307,7 +311,8 @@ static ssize_t access_backup_store(struct device *dev,
 static ssize_t current_boot_show(struct device *dev,
 				  struct device_attribute *attr, char *buf)
 {
-	struct aspeed_spi *aspi = dev_get_drvdata(dev);
+	struct spi_controller *ctlr = dev_get_drvdata(dev);
+	struct aspeed_spi *aspi = spi_controller_get_devdata(ctlr);
 
 	return _current_boot_show(aspi->regs, attr, buf);
 }

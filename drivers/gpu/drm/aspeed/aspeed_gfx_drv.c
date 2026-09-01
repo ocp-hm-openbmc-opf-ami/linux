@@ -343,7 +343,7 @@ static int aspeed_adaptor_detect(struct drm_device *drm)
 		/* get the scu1 for DAC setting */
 		priv->scu1 = syscon_regmap_lookup_by_phandle(np, "syscon_io");
 		if (IS_ERR(priv->scu1)) {
-			priv->scu = syscon_regmap_lookup_by_compatible("aspeed,ast2700-scu1");
+			priv->scu1 = syscon_regmap_lookup_by_compatible("aspeed,ast2700-scu1");
 			if (IS_ERR(priv->scu1)) {
 				dev_err(drm->dev, "failed to find SCU1 regmap\n");
 				return PTR_ERR(priv->scu1);

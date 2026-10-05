@@ -482,7 +482,13 @@ static int ast8250_probe(struct platform_device *pdev)
 	port->startup = ast8250_startup;
 	port->shutdown = ast8250_shutdown;
 	port->private_data = data;
-	uart.bugs |= UART_BUG_TXRACE;
+	if (IS_ENABLED(CONFIG_SERIAL_8250_ASPEED_RS485)) {
+		/* TXRACE is a VUART-only workaround; restrict it when RS-485 is built in. */
+		if (data->is_vuart)
+			uart.bugs |= UART_BUG_TXRACE;
+	} else {
+		uart.bugs |= UART_BUG_TXRACE;
+	}
 
 	rc = uart_read_port_properties(port);
 	if (rc)
@@ -493,6 +499,15 @@ static int ast8250_probe(struct platform_device *pdev)
 	port->uartclk = clk_get_rate(data->clk);
 
 	uart.capabilities = UART_CAP_FIFO | UART_CAP_AFE;
+
+	if (IS_ENABLED(CONFIG_SERIAL_8250_ASPEED_RS485)) {
+		/* NOTEMT lets __stop_tx() drain the shift register so em485 releases DIR. */
+		uart.capabilities |= UART_CAP_NOTEMT;
+		port->rs485_config    = serial8250_em485_config;
+		port->rs485_supported = serial8250_em485_supported;
+		uart.rs485_start_tx   = serial8250_em485_start_tx;
+		uart.rs485_stop_tx    = serial8250_em485_stop_tx;
+	}
 
 	data->line = serial8250_register_8250_port(&uart);
 	if (data->line < 0) {

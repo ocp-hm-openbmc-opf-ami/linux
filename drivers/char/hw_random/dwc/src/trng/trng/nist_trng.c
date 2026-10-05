@@ -576,7 +576,7 @@ ERR:
 } /* nisttrng_reseed */
 EXPORT_SYMBOL(nisttrng_reseed);
 
-int nisttrng_vtrng_wait_on_busy(struct nist_trng_state *state, int priv, int vtrng)
+static int nisttrng_vtrng_wait_on_busy(struct nist_trng_state *state, int priv, int vtrng)
 {
 	u32 tmp, t;
 
@@ -629,11 +629,13 @@ int nisttrng_generate_public_vtrng(struct nist_trng_state *state, void *random_b
 		goto ERR;
 	}
 
-	if (state->status.edu_vstat.rnc_enabled == 0)
+	if (state->status.edu_vstat.rnc_enabled == 0) {
 		DEBUG("rnc_disabled\n");
+	}
 
-	if (state->status.edu_vstat.seed_enum == 0)
+	if (state->status.edu_vstat.seed_enum == 0) {
 		DEBUG("not seed_enum\n");
+	}
 
 	/* loop on generate to get the requested number of bits. Each generate gives NIST_TRNG_RAND_BLK_SIZE_BITS bits. */
 	req_num_blks = ((req_num_bytes * 8) % NIST_TRNG_RAND_BLK_SIZE_BITS) ?
@@ -655,8 +657,9 @@ int nisttrng_generate_public_vtrng(struct nist_trng_state *state, void *random_b
 		// check for error
 		tmp = pdu_io_read32(state->base + NIST_TRNG_EDU_VTRNG_VISTAT0 +
 				    (vtrng * 8));
-		if (NIST_TRNG_REG_EDU_VSTAT_ANY_RW1(tmp))
+		if (NIST_TRNG_REG_EDU_VSTAT_ANY_RW1(tmp)) {
 			DEBUG("EDU_VSTAT_ANY_RW1 set 0x%x\n", tmp);
+		}
 
 		// check that all valid
 		tmp = pdu_io_read32(state->base + NIST_TRNG_EDU_VTRNG_VSTAT0 +
@@ -716,8 +719,8 @@ ERR:
 	return err;
 }
 
-int nisttrng_generate_private_vtrng(struct nist_trng_state *state, void *random_bits,
-				    unsigned long req_num_bytes)
+static int nisttrng_generate_private_vtrng(struct nist_trng_state *state, void *random_bits,
+					   unsigned long req_num_bytes)
 {
 	int err;
 	u32 tmp;
@@ -743,11 +746,13 @@ int nisttrng_generate_private_vtrng(struct nist_trng_state *state, void *random_
 		goto ERR;
 	}
 
-	if (state->status.edu_vstat.rnc_enabled == 0)
+	if (state->status.edu_vstat.rnc_enabled == 0) {
 		DEBUG("rnc_disabled\n");
+	}
 
-	if (state->status.edu_vstat.seed_enum == 0)
+	if (state->status.edu_vstat.seed_enum == 0) {
 		DEBUG("not seed_enum\n");
+	}
 
 	/* loop on generate to get the requested number of bits. Each generate gives NIST_TRNG_RAND_BLK_SIZE_BITS bits. */
 	req_num_blks = ((req_num_bytes * 8) % NIST_TRNG_RAND_BLK_SIZE_BITS) ?
@@ -766,8 +771,9 @@ int nisttrng_generate_private_vtrng(struct nist_trng_state *state, void *random_
 
 		// check for error
 		tmp = pdu_io_read32(state->base + NIST_TRNG_EDU_VISTAT);
-		if (NIST_TRNG_REG_EDU_VSTAT_ANY_RW1(tmp))
+		if (NIST_TRNG_REG_EDU_VSTAT_ANY_RW1(tmp)) {
 			DEBUG("EDU_VSTAT_ANY_RW1 set 0x%x\n", tmp);
+		}
 
 		//check that all valid
 		tmp = pdu_io_read32(state->base + NIST_TRNG_EDU_VSTAT);

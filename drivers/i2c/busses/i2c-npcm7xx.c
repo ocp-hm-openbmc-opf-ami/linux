@@ -263,7 +263,7 @@ static const int npcm_i2caddr[I2C_NUM_OWN_ADDR] = {
 #define I2C_FREQ_MIN_HZ			10000
 #define I2C_FREQ_MAX_HZ			I2C_MAX_FAST_MODE_PLUS_FREQ
 
-struct SMB_TIMING_T {
+struct smb_timing_t {
 	u32 core_clk;
 	u8 hldt;
 	u8 dbcnt;
@@ -273,109 +273,253 @@ struct SMB_TIMING_T {
 	bool fast_mode;
 };
 
-static struct SMB_TIMING_T SMB_TIMING_100KHZ[] = {
-	{.core_clk = 100000000, .hldt = 0x2A, .dbcnt = 0x4, .sclfrq = 0xFB, .scllt = 0x0,
-	.sclht  = 0x0, .fast_mode = false },
-	{.core_clk = 62500000,  .hldt = 0x2A, .dbcnt = 0x1, .sclfrq = 0x9D, .scllt = 0x0,
-	.sclht  = 0x0, .fast_mode = false },
-	{.core_clk = 50000000,  .hldt = 0x2A, .dbcnt = 0x1, .sclfrq = 0x7E, .scllt = 0x0,
-	.sclht  = 0x0, .fast_mode = false },
-	{.core_clk = 48000000,  .hldt = 0x2A, .dbcnt = 0x1, .sclfrq = 0x79, .scllt = 0x0,
-	.sclht  = 0x0, .fast_mode = false },
-	{.core_clk = 40000000,  .hldt = 0x2A, .dbcnt = 0x1, .sclfrq = 0x65, .scllt = 0x0,
-	.sclht  = 0x0, .fast_mode = false },
-	{.core_clk = 30000000,  .hldt = 0x2A, .dbcnt = 0x1, .sclfrq = 0x4C, .scllt = 0x0,
-	.sclht  = 0x0, .fast_mode = false },
-	{.core_clk = 29000000,  .hldt = 0x2A, .dbcnt = 0x1, .sclfrq = 0x49, .scllt = 0x0,
-	.sclht  = 0x0, .fast_mode = false },
-	{.core_clk = 26000000,  .hldt = 0x2A, .dbcnt = 0x1, .sclfrq = 0x42, .scllt = 0x0,
-	.sclht  = 0x0, .fast_mode = false },
-	{.core_clk = 25000000,  .hldt = 0x2A, .dbcnt = 0x1, .sclfrq = 0x3F, .scllt = 0x0,
-	.sclht  = 0x0, .fast_mode = false },
-	{.core_clk = 24000000,  .hldt = 0x2A, .dbcnt = 0x1, .sclfrq = 0x3D, .scllt = 0x0,
-	.sclht  = 0x0, .fast_mode = false },
-	{.core_clk = 20000000,  .hldt = 0x2A, .dbcnt = 0x1, .sclfrq = 0x33, .scllt = 0x0,
-	.sclht  = 0x0, .fast_mode = false },
-	{.core_clk = 16180000,  .hldt = 0x2A, .dbcnt = 0x1, .sclfrq = 0x29, .scllt = 0x0,
-	.sclht  = 0x0, .fast_mode = false },
-	{.core_clk = 15000000,  .hldt = 0x23, .dbcnt = 0x1, .sclfrq = 0x26, .scllt = 0x0,
-	.sclht  = 0x0, .fast_mode = false },
-	{.core_clk = 13000000,  .hldt = 0x1D, .dbcnt = 0x1, .sclfrq = 0x21, .scllt = 0x0,
-	.sclht  = 0x0, .fast_mode = false },
-	{.core_clk = 12000000,  .hldt = 0x1B, .dbcnt = 0x1, .sclfrq = 0x1F, .scllt = 0x0,
-	.sclht  = 0x0, .fast_mode = false },
-	{.core_clk = 10000000,  .hldt = 0x18, .dbcnt = 0x1, .sclfrq = 0x1A, .scllt = 0x0,
-	.sclht  = 0x0, .fast_mode = false },
-	{.core_clk = 9000000,   .hldt = 0x16, .dbcnt = 0x1, .sclfrq = 0x17, .scllt = 0x0,
-	.sclht  = 0x0, .fast_mode = false },
-	{.core_clk = 8090000,   .hldt = 0x14, .dbcnt = 0x1, .sclfrq = 0x15, .scllt = 0x0,
-	.sclht  = 0x0, .fast_mode = false },
-	{.core_clk = 7500000,   .hldt = 0x7,  .dbcnt = 0x1, .sclfrq = 0x13, .scllt = 0x0,
-	.sclht  = 0x0, .fast_mode = false },
-	{.core_clk = 6500000,   .hldt = 0xE,  .dbcnt = 0x1, .sclfrq = 0x11, .scllt = 0x0,
-	.sclht  = 0x0, .fast_mode = false },
-	{.core_clk = 4000000,   .hldt = 0x9,  .dbcnt = 0x1, .sclfrq = 0xB,  .scllt = 0x0,
-	.sclht  = 0x0, .fast_mode = false }
+static struct smb_timing_t smb_timing_100khz[] = {
+	{
+		.core_clk = 100000000, .hldt = 0x2A, .dbcnt = 0x4,
+		.sclfrq = 0xFB, .scllt = 0x0, .sclht = 0x0,
+		.fast_mode = false,
+	},
+	{
+		.core_clk = 62500000, .hldt = 0x2A, .dbcnt = 0x1,
+		.sclfrq = 0x9D, .scllt = 0x0, .sclht = 0x0,
+		.fast_mode = false,
+	},
+	{
+		.core_clk = 50000000, .hldt = 0x2A, .dbcnt = 0x1,
+		.sclfrq = 0x7E, .scllt = 0x0, .sclht = 0x0,
+		.fast_mode = false,
+	},
+	{
+		.core_clk = 48000000, .hldt = 0x2A, .dbcnt = 0x1,
+		.sclfrq = 0x79, .scllt = 0x0, .sclht = 0x0,
+		.fast_mode = false,
+	},
+	{
+		.core_clk = 40000000, .hldt = 0x2A, .dbcnt = 0x1,
+		.sclfrq = 0x65, .scllt = 0x0, .sclht = 0x0,
+		.fast_mode = false,
+	},
+	{
+		.core_clk = 30000000, .hldt = 0x2A, .dbcnt = 0x1,
+		.sclfrq = 0x4C, .scllt = 0x0, .sclht = 0x0,
+		.fast_mode = false,
+	},
+	{
+		.core_clk = 29000000, .hldt = 0x2A, .dbcnt = 0x1,
+		.sclfrq = 0x49, .scllt = 0x0, .sclht = 0x0,
+		.fast_mode = false,
+	},
+	{
+		.core_clk = 26000000, .hldt = 0x2A, .dbcnt = 0x1,
+		.sclfrq = 0x42, .scllt = 0x0, .sclht = 0x0,
+		.fast_mode = false,
+	},
+	{
+		.core_clk = 25000000, .hldt = 0x2A, .dbcnt = 0x1,
+		.sclfrq = 0x3F, .scllt = 0x0, .sclht = 0x0,
+		.fast_mode = false,
+	},
+	{
+		.core_clk = 24000000, .hldt = 0x2A, .dbcnt = 0x1,
+		.sclfrq = 0x3D, .scllt = 0x0, .sclht = 0x0,
+		.fast_mode = false,
+	},
+	{
+		.core_clk = 20000000, .hldt = 0x2A, .dbcnt = 0x1,
+		.sclfrq = 0x33, .scllt = 0x0, .sclht = 0x0,
+		.fast_mode = false,
+	},
+	{
+		.core_clk = 16180000, .hldt = 0x2A, .dbcnt = 0x1,
+		.sclfrq = 0x29, .scllt = 0x0, .sclht = 0x0,
+		.fast_mode = false,
+	},
+	{
+		.core_clk = 15000000, .hldt = 0x23, .dbcnt = 0x1,
+		.sclfrq = 0x26, .scllt = 0x0, .sclht = 0x0,
+		.fast_mode = false,
+	},
+	{
+		.core_clk = 13000000, .hldt = 0x1D, .dbcnt = 0x1,
+		.sclfrq = 0x21, .scllt = 0x0, .sclht = 0x0,
+		.fast_mode = false,
+	},
+	{
+		.core_clk = 12000000, .hldt = 0x1B, .dbcnt = 0x1,
+		.sclfrq = 0x1F, .scllt = 0x0, .sclht = 0x0,
+		.fast_mode = false,
+	},
+	{
+		.core_clk = 10000000, .hldt = 0x18, .dbcnt = 0x1,
+		.sclfrq = 0x1A, .scllt = 0x0, .sclht = 0x0,
+		.fast_mode = false,
+	},
+	{
+		.core_clk = 9000000, .hldt = 0x16, .dbcnt = 0x1,
+		.sclfrq = 0x17, .scllt = 0x0, .sclht = 0x0,
+		.fast_mode = false,
+	},
+	{
+		.core_clk = 8090000, .hldt = 0x14, .dbcnt = 0x1,
+		.sclfrq = 0x15, .scllt = 0x0, .sclht = 0x0,
+		.fast_mode = false,
+	},
+	{
+		.core_clk = 7500000, .hldt = 0x7, .dbcnt = 0x1,
+		.sclfrq = 0x13, .scllt = 0x0, .sclht = 0x0,
+		.fast_mode = false,
+	},
+	{
+		.core_clk = 6500000, .hldt = 0xE, .dbcnt = 0x1,
+		.sclfrq = 0x11, .scllt = 0x0, .sclht = 0x0,
+		.fast_mode = false,
+	},
+	{
+		.core_clk = 4000000, .hldt = 0x9, .dbcnt = 0x1,
+		.sclfrq = 0xB, .scllt = 0x0, .sclht = 0x0,
+		.fast_mode = false,
+	},
 };
 
-static struct SMB_TIMING_T SMB_TIMING_400KHZ[] = {
-	{.core_clk = 100000000, .hldt = 0x2A, .dbcnt = 0x3, .sclfrq = 0x0, .scllt = 0x47,
-	.sclht  = 0x35, .fast_mode = true },
-	{.core_clk = 62500000,  .hldt = 0x2A, .dbcnt = 0x2, .sclfrq = 0x0, .scllt = 0x2C,
-	.sclht  = 0x22, .fast_mode = true },
-	{.core_clk = 50000000,  .hldt = 0x21, .dbcnt = 0x1, .sclfrq = 0x0, .scllt = 0x24,
-	.sclht  = 0x1B, .fast_mode = true },
-	{.core_clk = 48000000,  .hldt = 0x1E, .dbcnt = 0x1, .sclfrq = 0x0, .scllt = 0x24,
-	.sclht  = 0x19, .fast_mode = true },
-	{.core_clk = 40000000,  .hldt = 0x1B, .dbcnt = 0x1, .sclfrq = 0x0, .scllt = 0x1E,
-	.sclht  = 0x14, .fast_mode = true },
-	{.core_clk = 33000000,  .hldt = 0x15, .dbcnt = 0x1, .sclfrq = 0x0, .scllt = 0x19,
-	.sclht  = 0x11, .fast_mode = true },
-	{.core_clk = 30000000,  .hldt = 0x15, .dbcnt = 0x1, .sclfrq = 0x0, .scllt = 0x19,
-	.sclht  = 0xD,  .fast_mode = true },
-	{.core_clk = 29000000,  .hldt = 0x11, .dbcnt = 0x1, .sclfrq = 0x0, .scllt = 0x15,
-	.sclht  = 0x10, .fast_mode = true },
-	{.core_clk = 26000000,  .hldt = 0x10, .dbcnt = 0x1, .sclfrq = 0x0, .scllt = 0x13,
-	.sclht  = 0xE,  .fast_mode = true },
-	{.core_clk = 25000000,  .hldt = 0xF,  .dbcnt = 0x1, .sclfrq = 0x0, .scllt = 0x13,
-	.sclht  = 0xD,  .fast_mode = true },
-	{.core_clk = 24000000,  .hldt = 0xD,  .dbcnt = 0x1, .sclfrq = 0x0, .scllt = 0x12,
-	.sclht  = 0xD,  .fast_mode = true },
-	{.core_clk = 20000000,  .hldt = 0xB,  .dbcnt = 0x1, .sclfrq = 0x0, .scllt = 0xF,
-	.sclht  = 0xA,  .fast_mode = true },
-	{.core_clk = 16180000,  .hldt = 0xA,  .dbcnt = 0x1, .sclfrq = 0x0, .scllt = 0xC,
-	.sclht  = 0x9,  .fast_mode = true },
-	{.core_clk = 15000000,  .hldt = 0x9,  .dbcnt = 0x1, .sclfrq = 0x0, .scllt = 0xB,
-	.sclht  = 0x8,  .fast_mode = true },
-	{.core_clk = 13000000,  .hldt = 0x7,  .dbcnt = 0x1, .sclfrq = 0x0, .scllt = 0xA,
-	.sclht  = 0x7,  .fast_mode = true },
-	{.core_clk = 12000000,  .hldt = 0x7,  .dbcnt = 0x1, .sclfrq = 0x0, .scllt = 0xA,
-	.sclht  = 0x6,  .fast_mode = true },
-	{.core_clk = 10000000,  .hldt = 0x6,  .dbcnt = 0x1, .sclfrq = 0x0, .scllt = 0x8,
-	.sclht  = 0x5,  .fast_mode = true },
+static struct smb_timing_t smb_timing_400khz[] = {
+	{
+		.core_clk = 100000000, .hldt = 0x2A, .dbcnt = 0x3,
+		.sclfrq = 0x0, .scllt = 0x47, .sclht = 0x35,
+		.fast_mode = true,
+	},
+	{
+		.core_clk = 62500000, .hldt = 0x2A, .dbcnt = 0x2,
+		.sclfrq = 0x0, .scllt = 0x2C, .sclht = 0x22,
+		.fast_mode = true,
+	},
+	{
+		.core_clk = 50000000, .hldt = 0x21, .dbcnt = 0x1,
+		.sclfrq = 0x0, .scllt = 0x24, .sclht = 0x1B,
+		.fast_mode = true,
+	},
+	{
+		.core_clk = 48000000, .hldt = 0x1E, .dbcnt = 0x1,
+		.sclfrq = 0x0, .scllt = 0x24, .sclht = 0x19,
+		.fast_mode = true,
+	},
+	{
+		.core_clk = 40000000, .hldt = 0x1B, .dbcnt = 0x1,
+		.sclfrq = 0x0, .scllt = 0x1E, .sclht = 0x14,
+		.fast_mode = true,
+	},
+	{
+		.core_clk = 33000000, .hldt = 0x15, .dbcnt = 0x1,
+		.sclfrq = 0x0, .scllt = 0x19, .sclht = 0x11,
+		.fast_mode = true,
+	},
+	{
+		.core_clk = 30000000, .hldt = 0x15, .dbcnt = 0x1,
+		.sclfrq = 0x0, .scllt = 0x19, .sclht = 0xD,
+		.fast_mode = true,
+	},
+	{
+		.core_clk = 29000000, .hldt = 0x11, .dbcnt = 0x1,
+		.sclfrq = 0x0, .scllt = 0x15, .sclht = 0x10,
+		.fast_mode = true,
+	},
+	{
+		.core_clk = 26000000, .hldt = 0x10, .dbcnt = 0x1,
+		.sclfrq = 0x0, .scllt = 0x13, .sclht = 0xE,
+		.fast_mode = true,
+	},
+	{
+		.core_clk = 25000000, .hldt = 0xF, .dbcnt = 0x1,
+		.sclfrq = 0x0, .scllt = 0x13, .sclht = 0xD,
+		.fast_mode = true,
+	},
+	{
+		.core_clk = 24000000, .hldt = 0xD, .dbcnt = 0x1,
+		.sclfrq = 0x0, .scllt = 0x12, .sclht = 0xD,
+		.fast_mode = true,
+	},
+	{
+		.core_clk = 20000000, .hldt = 0xB, .dbcnt = 0x1,
+		.sclfrq = 0x0, .scllt = 0xF, .sclht = 0xA,
+		.fast_mode = true,
+	},
+	{
+		.core_clk = 16180000, .hldt = 0xA, .dbcnt = 0x1,
+		.sclfrq = 0x0, .scllt = 0xC, .sclht = 0x9,
+		.fast_mode = true,
+	},
+	{
+		.core_clk = 15000000, .hldt = 0x9, .dbcnt = 0x1,
+		.sclfrq = 0x0, .scllt = 0xB, .sclht = 0x8,
+		.fast_mode = true,
+	},
+	{
+		.core_clk = 13000000, .hldt = 0x7, .dbcnt = 0x1,
+		.sclfrq = 0x0, .scllt = 0xA, .sclht = 0x7,
+		.fast_mode = true,
+	},
+	{
+		.core_clk = 12000000, .hldt = 0x7, .dbcnt = 0x1,
+		.sclfrq = 0x0, .scllt = 0xA, .sclht = 0x6,
+		.fast_mode = true,
+	},
+	{
+		.core_clk = 10000000, .hldt = 0x6, .dbcnt = 0x1,
+		.sclfrq = 0x0, .scllt = 0x8, .sclht = 0x5,
+		.fast_mode = true,
+	},
 };
 
-static struct SMB_TIMING_T SMB_TIMING_1000KHZ[] = {
-	{.core_clk = 100000000, .hldt = 0x15, .dbcnt = 0x4, .sclfrq = 0x0, .scllt = 0x1C,
-	.sclht  = 0x15, .fast_mode = true },
-	{.core_clk = 62500000,  .hldt = 0xF,  .dbcnt = 0x3, .sclfrq = 0x0, .scllt = 0x11,
-	.sclht  = 0xE,  .fast_mode = true },
-	{.core_clk = 50000000,  .hldt = 0xA,  .dbcnt = 0x2, .sclfrq = 0x0, .scllt = 0xE,
-	.sclht  = 0xB,  .fast_mode = true },
-	{.core_clk = 48000000,  .hldt = 0x9,  .dbcnt = 0x2, .sclfrq = 0x0, .scllt = 0xD,
-	.sclht  = 0xB,  .fast_mode = true },
-	{.core_clk = 41000000,  .hldt = 0x9,  .dbcnt = 0x2, .sclfrq = 0x0, .scllt = 0xC,
-	.sclht  = 0x9,  .fast_mode = true },
-	{.core_clk = 40000000,  .hldt = 0x8,  .dbcnt = 0x2, .sclfrq = 0x0, .scllt = 0xB,
-	.sclht  = 0x9,  .fast_mode = true },
-	{.core_clk = 33000000,  .hldt = 0x7,  .dbcnt = 0x1, .sclfrq = 0x0, .scllt = 0xA,
-	.sclht  = 0x7,  .fast_mode = true },
-	{.core_clk = 25000000,  .hldt = 0x4,  .dbcnt = 0x1, .sclfrq = 0x0, .scllt = 0x7,
-	.sclht  = 0x6,  .fast_mode = true },
-	{.core_clk = 24000000,  .hldt = 0x7,  .dbcnt = 0x1, .sclfrq = 0x0, .scllt = 0x8,
-	.sclht  = 0x5,  .fast_mode = true },
-	{.core_clk = 20000000,  .hldt = 0x4,  .dbcnt = 0x1, .sclfrq = 0x0, .scllt = 0x6,
-	.sclht  = 0x4,  .fast_mode = true },
+static struct smb_timing_t smb_timing_1000khz[] = {
+	{
+		.core_clk = 100000000, .hldt = 0x15, .dbcnt = 0x4,
+		.sclfrq = 0x0, .scllt = 0x1C, .sclht = 0x15,
+		.fast_mode = true,
+	},
+	{
+		.core_clk = 62500000, .hldt = 0xF, .dbcnt = 0x3,
+		.sclfrq = 0x0, .scllt = 0x11, .sclht = 0xE,
+		.fast_mode = true,
+	},
+	{
+		.core_clk = 50000000, .hldt = 0xA, .dbcnt = 0x2,
+		.sclfrq = 0x0, .scllt = 0xE, .sclht = 0xB,
+		.fast_mode = true,
+	},
+	{
+		.core_clk = 48000000, .hldt = 0x9, .dbcnt = 0x2,
+		.sclfrq = 0x0, .scllt = 0xD, .sclht = 0xB,
+		.fast_mode = true,
+	},
+	{
+		.core_clk = 41000000, .hldt = 0x9, .dbcnt = 0x2,
+		.sclfrq = 0x0, .scllt = 0xC, .sclht = 0x9,
+		.fast_mode = true,
+	},
+	{
+		.core_clk = 40000000, .hldt = 0x8, .dbcnt = 0x2,
+		.sclfrq = 0x0, .scllt = 0xB, .sclht = 0x9,
+		.fast_mode = true,
+	},
+	{
+		.core_clk = 33000000, .hldt = 0x7, .dbcnt = 0x1,
+		.sclfrq = 0x0, .scllt = 0xA, .sclht = 0x7,
+		.fast_mode = true,
+	},
+	{
+		.core_clk = 25000000, .hldt = 0x4, .dbcnt = 0x1,
+		.sclfrq = 0x0, .scllt = 0x7, .sclht = 0x6,
+		.fast_mode = true,
+	},
+	{
+		.core_clk = 24000000, .hldt = 0x7, .dbcnt = 0x1,
+		.sclfrq = 0x0, .scllt = 0x8, .sclht = 0x5,
+		.fast_mode = true,
+	},
+	{
+		.core_clk = 20000000, .hldt = 0x4, .dbcnt = 0x1,
+		.sclfrq = 0x0, .scllt = 0x6, .sclht = 0x4,
+		.fast_mode = true,
+	},
 };
 
 struct npcm_i2c_data {
@@ -443,14 +587,14 @@ struct npcm_i2c {
 	u8 slv_rd_buf[MAX_I2C_HW_FIFO_SIZE];
 	u8 slv_wr_buf[MAX_I2C_HW_FIFO_SIZE];
 #endif
-	struct dentry *debugfs; /* debugfs device directory */
 	u64 ber_cnt;
 	u64 rec_succ_cnt;
 	u64 rec_fail_cnt;
 	u64 nack_cnt;
 	u64 timeout_cnt;
 	u64 tx_complete_cnt;
-	bool ber_state;
+	u64 ab_slvrstr_cnt;
+	bool ber_state; /* Indicate the bus error state */
 };
 
 static inline void npcm_i2c_select_bank(struct npcm_i2c *bus,
@@ -972,14 +1116,10 @@ static void npcm_i2c_master_abort(struct npcm_i2c *bus)
 #if IS_ENABLED(CONFIG_I2C_SLAVE)
 static u8 npcm_i2c_get_slave_addr(struct npcm_i2c *bus, enum i2c_addr addr_type)
 {
-	u8 slave_add;
-
 	if (addr_type > I2C_SLAVE_ADDR2 && addr_type <= I2C_SLAVE_ADDR10)
 		dev_err(bus->dev, "get slave: try to use more than 2 SA not supported\n");
 
-	slave_add = ioread8(bus->reg + npcm_i2caddr[(int)addr_type]);
-
-	return slave_add;
+	return ioread8(bus->reg + npcm_i2caddr[addr_type]);
 }
 
 static int npcm_i2c_remove_slave_addr(struct npcm_i2c *bus, u8 slave_add)
@@ -1369,6 +1509,16 @@ static irqreturn_t npcm_i2c_int_slave_handler(struct npcm_i2c *bus)
 	 * status bits are cleared.
 	 */
 	if (ret == IRQ_NONE) {
+		dev_err(bus->dev, "%s: I2C%d ST: %x, CST: %x, CST2: %x,"
+			" CST3: %x, FIF_CTS: %x, TXF_STS: %x, RXF_STS: %x\n",
+			__func__, bus->num,
+			ioread8(bus->reg + NPCM_I2CST),
+			ioread8(bus->reg + NPCM_I2CCST),
+			ioread8(bus->reg + NPCM_I2CCST2),
+			ioread8(bus->reg + NPCM_I2CCST3),
+			ioread8(bus->reg + NPCM_I2CFIF_CTS),
+			ioread8(bus->reg + NPCM_I2CTXF_STS),
+			ioread8(bus->reg + NPCM_I2CRXF_STS));
 		npcm_i2c_eob_int(bus, false);
 		npcm_i2c_clear_master_status(bus);
 	}
@@ -1570,6 +1720,24 @@ static void npcm_i2c_irq_master_handler_read(struct npcm_i2c *bus)
 	}
 }
 
+static void npcm_i2c_irq_handle_ab_slvrstr(struct npcm_i2c *bus)
+{
+	u8 val;
+
+	if (bus->ab_slvrstr_cnt < ULLONG_MAX)
+		bus->ab_slvrstr_cnt++;
+	npcm_i2c_clear_tx_fifo(bus);
+	npcm_i2c_clear_rx_fifo(bus);
+	iowrite8(0, bus->reg + NPCM_I2CRXF_CTL);
+	iowrite8(0, bus->reg + NPCM_I2CTXF_CTL);
+	val = NPCM_I2CFIF_CTS_CLR_FIFO | NPCM_I2CFIF_CTS_SLVRSTR |
+	      NPCM_I2CFIF_CTS_RXF_TXE;
+	iowrite8(val, bus->reg + NPCM_I2CFIF_CTS);
+	bus->stop_ind = I2C_BUS_ERR_IND;
+	npcm_i2c_callback(bus, bus->stop_ind, npcm_i2c_get_index(bus));
+	bus->state = I2C_IDLE;
+}
+
 static void npcm_i2c_irq_handle_nmatch(struct npcm_i2c *bus)
 {
 	iowrite8(NPCM_I2CST_NMATCH, bus->reg + NPCM_I2CST);
@@ -1618,6 +1786,15 @@ static void npcm_i2c_irq_handle_nack(struct npcm_i2c *bus)
 					  !(val & NPCM_I2CCST_BUSY), 10, 200);
 		/* Verify no status bits are still set after bus is released */
 		npcm_i2c_clear_master_status(bus);
+
+		/*
+		 * The previous dummy-byte read advances the hardware FIFO index. If
+		 * the FIFO is not cleared, the next slave read/write transaction may
+		 * access stale or misaligned FIFO entries, causing data corruption.
+		 * Clearing the FIFO resets the index and ensures subsequent slave
+		 * operations behave correctly.
+		 */
+		iowrite8(NPCM_I2CFIF_CTS_CLR_FIFO, bus->reg + NPCM_I2CFIF_CTS);
 	}
 	bus->state = I2C_IDLE;
 
@@ -1638,6 +1815,8 @@ static void npcm_i2c_irq_handle_ber(struct npcm_i2c *bus)
 	if (npcm_i2c_is_master(bus)) {
 		npcm_i2c_master_abort(bus);
 	} else {
+		/* Clear the FIFO */
+		iowrite8(NPCM_I2CFIF_CTS_CLR_FIFO, bus->reg + NPCM_I2CFIF_CTS);
 		bus->ber_state = true;
 		npcm_i2c_clear_master_status(bus);
 
@@ -1785,8 +1964,8 @@ static int npcm_i2c_int_master_handler(struct npcm_i2c *bus)
 #if IS_ENABLED(CONFIG_I2C_SLAVE)
 		/* reenable slave if it was enabled */
 		if (bus->slave)
-			iowrite8((bus->slave->addr & 0x7F) | NPCM_I2CADDR_SAEN,
-				bus->reg + NPCM_I2CADDR1);
+			iowrite8(bus->slave->addr | NPCM_I2CADDR_SAEN,
+				 bus->reg + NPCM_I2CADDR1);
 #endif
 		return 0;
 	}
@@ -1927,48 +2106,46 @@ static void npcm_i2c_recovery_init(struct i2c_adapter *_adap)
  */
 static int npcm_i2c_init_clk(struct npcm_i2c *bus, u32 bus_freq_hz)
 {
-	struct  SMB_TIMING_T *smb_timing;
+	struct  smb_timing_t *smb_timing;
 	u8   scl_table_cnt = 0, table_size = 0;
-
 	u8   scl_ht, scl_lt;
 	u8   fast_mode = 0;
-	u32  src_clk_khz;
-	u32  bus_freq_khz;
 
-	src_clk_khz = bus->apb_clk / 1000;
-	bus_freq_khz = bus_freq_hz / 1000;
 	bus->bus_freq = bus_freq_hz;
 
 	switch (bus_freq_hz) {
 	case I2C_MAX_STANDARD_MODE_FREQ:
-		smb_timing = SMB_TIMING_100KHZ;
-		table_size = ARRAY_SIZE(SMB_TIMING_100KHZ);
+		smb_timing = smb_timing_100khz;
+		table_size = ARRAY_SIZE(smb_timing_100khz);
 		break;
 	case I2C_MAX_FAST_MODE_FREQ:
-		smb_timing = SMB_TIMING_400KHZ;
-		table_size = ARRAY_SIZE(SMB_TIMING_400KHZ);
+		smb_timing = smb_timing_400khz;
+		table_size = ARRAY_SIZE(smb_timing_400khz);
 		fast_mode = I2CCTL3_400K_MODE;
 		break;
 	case I2C_MAX_FAST_MODE_PLUS_FREQ:
-		smb_timing = SMB_TIMING_1000KHZ;
-		table_size = ARRAY_SIZE(SMB_TIMING_1000KHZ);
+		smb_timing = smb_timing_1000khz;
+		table_size = ARRAY_SIZE(smb_timing_1000khz);
 		fast_mode = I2CCTL3_400K_MODE;
 		break;
 	default:
 		return -EINVAL;
 	}
 
-	for (scl_table_cnt = 0 ; scl_table_cnt < table_size ; scl_table_cnt++)
+	for (scl_table_cnt = 0; scl_table_cnt < table_size; scl_table_cnt++)
 		if (bus->apb_clk >= smb_timing[scl_table_cnt].core_clk)
 			break;
+
+	if (scl_table_cnt == table_size)
+		return -EINVAL;
 
 	/* write sclfrq value. bits [6:0] are in I2CCTL2 reg */
 	iowrite8(FIELD_PREP(I2CCTL2_SCLFRQ6_0, smb_timing[scl_table_cnt].sclfrq & 0x7F),
 		 bus->reg + NPCM_I2CCTL2);
 
 	/* bits [8:7] are in I2CCTL3 reg */
-	iowrite8(fast_mode | FIELD_PREP(I2CCTL3_SCLFRQ8_7, (smb_timing[scl_table_cnt].sclfrq >> 7)
-		 & 0x3),
+	iowrite8(FIELD_PREP(I2CCTL3_SCLFRQ8_7, (smb_timing[scl_table_cnt].sclfrq >> 7) & 0x3) |
+		 fast_mode,
 		 bus->reg + NPCM_I2CCTL3);
 
 	/* Select Bank 0 to access NPCM_I2CCTL4/NPCM_I2CCTL5 */
@@ -2106,6 +2283,21 @@ static irqreturn_t npcm_i2c_bus_irq(int irq, void *dev_id)
 	}
 #endif
 	/* Clear status bits for spurious interrupts */
+	if (bus->fifo_use && FIELD_GET(NPCM_I2CFIF_CTS_SLVRSTR,
+				       ioread8(bus->reg + NPCM_I2CFIF_CTS))) {
+		npcm_i2c_irq_handle_ab_slvrstr(bus);
+	}
+
+	dev_err(bus->dev, "%s: I2C%d ST: %x, CST: %x, CST2: %x,"
+		" CST3: %x, FIF_CTS: %x, TXF_STS: %x, RXF_STS: %x\n",
+		__func__, bus->num,
+		ioread8(bus->reg + NPCM_I2CST),
+		ioread8(bus->reg + NPCM_I2CCST),
+		ioread8(bus->reg + NPCM_I2CCST2),
+		ioread8(bus->reg + NPCM_I2CCST3),
+		ioread8(bus->reg + NPCM_I2CFIF_CTS),
+		ioread8(bus->reg + NPCM_I2CTXF_STS),
+		ioread8(bus->reg + NPCM_I2CRXF_STS));
 	npcm_i2c_clear_master_status(bus);
 
 	return IRQ_HANDLED;
@@ -2117,6 +2309,8 @@ static bool npcm_i2c_master_start_xmit(struct npcm_i2c *bus,
 				       bool use_PEC, bool use_read_block)
 {
 	if (bus->state != I2C_IDLE) {
+		dev_dbg(bus->dev, "I2C%d module not idle, state: %d\n",
+			bus->num, bus->state);
 		bus->cmd_err = -EBUSY;
 		return false;
 	}
@@ -2254,6 +2448,8 @@ static int npcm_i2c_master_xfer(struct i2c_adapter *adap, struct i2c_msg *msgs,
 	 * bus is busy.
 	 */
 	if (bus_busy || bus->ber_state) {
+		dev_dbg(bus->dev, "I2C%d module BB: %d, ber_state: %d\n",
+			bus->num, bus_busy, bus->ber_state);
 		iowrite8(NPCM_I2CCST_BB, bus->reg + NPCM_I2CCST);
 		npcm_i2c_reset(bus);
 		i2c_recover_bus(adap);
@@ -2339,37 +2535,64 @@ static const struct i2c_adapter_quirks npcm_i2c_quirks = {
 };
 
 static const struct i2c_algorithm npcm_i2c_algo = {
-	.master_xfer = npcm_i2c_master_xfer,
+	.xfer = npcm_i2c_master_xfer,
 	.functionality = npcm_i2c_functionality,
 #if IS_ENABLED(CONFIG_I2C_SLAVE)
-	.reg_slave	= npcm_i2c_reg_slave,
-	.unreg_slave	= npcm_i2c_unreg_slave,
+	.reg_slave = npcm_i2c_reg_slave,
+	.unreg_slave = npcm_i2c_unreg_slave,
 #endif
 };
 
-/* i2c debugfs directory: used to keep health monitor of i2c devices */
-static struct dentry *npcm_i2c_debugfs_dir;
+static int i2c_speed_get(void *data, u64 *val)
+{
+	struct npcm_i2c *bus = data;
+
+	*val = bus->bus_freq;
+	return 0;
+}
+
+static int i2c_speed_set(void *data, u64 val)
+{
+	struct npcm_i2c *bus = data;
+	int ret;
+
+	if (val < I2C_FREQ_MIN_HZ || val > I2C_FREQ_MAX_HZ)
+		return -EINVAL;
+
+	if (val == bus->bus_freq)
+		return 0;
+
+	i2c_lock_bus(&bus->adap, I2C_LOCK_ROOT_ADAPTER);
+
+	npcm_i2c_int_enable(bus, false);
+
+	ret = npcm_i2c_init_module(bus, I2C_MASTER, (u32)val);
+
+	i2c_unlock_bus(&bus->adap, I2C_LOCK_ROOT_ADAPTER);
+
+	if (ret)
+		return -EAGAIN;
+
+	npcm_i2c_int_enable(bus, true);
+
+	return 0;
+}
+DEFINE_DEBUGFS_ATTRIBUTE(i2c_clock_ops, i2c_speed_get, i2c_speed_set, "%llu\n");
 
 static void npcm_i2c_init_debugfs(struct platform_device *pdev,
 				  struct npcm_i2c *bus)
 {
-	struct dentry *d;
-
-	if (!npcm_i2c_debugfs_dir)
-		return;
-	d = debugfs_create_dir(dev_name(&pdev->dev), npcm_i2c_debugfs_dir);
-	if (IS_ERR_OR_NULL(d))
-		return;
-	debugfs_create_u64("ber_cnt", 0444, d, &bus->ber_cnt);
-	debugfs_create_u64("nack_cnt", 0444, d, &bus->nack_cnt);
-	debugfs_create_u64("rec_succ_cnt", 0444, d, &bus->rec_succ_cnt);
-	debugfs_create_u64("rec_fail_cnt", 0444, d, &bus->rec_fail_cnt);
-	debugfs_create_u64("timeout_cnt", 0444, d, &bus->timeout_cnt);
-	debugfs_create_u64("tx_complete_cnt", 0444, d, &bus->tx_complete_cnt);
-
-	bus->debugfs = d;
+	debugfs_create_u64("ber_cnt", 0444, bus->adap.debugfs, &bus->ber_cnt);
+	debugfs_create_u64("nack_cnt", 0444, bus->adap.debugfs, &bus->nack_cnt);
+	debugfs_create_u64("rec_succ_cnt", 0444, bus->adap.debugfs, &bus->rec_succ_cnt);
+	debugfs_create_u64("rec_fail_cnt", 0444, bus->adap.debugfs, &bus->rec_fail_cnt);
+	debugfs_create_u64("timeout_cnt", 0444, bus->adap.debugfs, &bus->timeout_cnt);
+	debugfs_create_u64("tx_complete_cnt", 0444, bus->adap.debugfs, &bus->tx_complete_cnt);
+	debugfs_create_u64("ab_slvrstr_cnt", 0444, bus->adap.debugfs, &bus->ab_slvrstr_cnt);
+	debugfs_create_file("i2c_speed", 0644, bus->adap.debugfs, bus, &i2c_clock_ops);
 }
 
+#if IS_ENABLED(CONFIG_I2C_SLAVE)
 void npcm_i2c_client_slave_enable(struct i2c_client *client, bool enable)
 {
 	struct npcm_i2c *bus = i2c_get_adapdata(client->adapter);
@@ -2382,6 +2605,7 @@ void npcm_i2c_client_slave_enable(struct i2c_client *client, bool enable)
 	spin_unlock_irqrestore(&bus->lock, flags);
 }
 EXPORT_SYMBOL(npcm_i2c_client_slave_enable);
+#endif
 
 static int npcm_i2c_probe_bus(struct platform_device *pdev)
 {
@@ -2431,6 +2655,11 @@ static int npcm_i2c_probe_bus(struct platform_device *pdev)
 	adap = &bus->adap;
 	adap->owner = THIS_MODULE;
 	adap->retries = 3;
+	/*
+	 * The users want to connect a lot of masters on the same bus.
+	 * This timeout is used to determine the time it takes to take bus ownership.
+	 * The transactions are very long, so waiting 35ms is not enough.
+	 */
 	adap->timeout = 2 * HZ;
 	adap->algo = &npcm_i2c_algo;
 	adap->quirks = &npcm_i2c_quirks;
@@ -2443,6 +2672,11 @@ static int npcm_i2c_probe_bus(struct platform_device *pdev)
 	if (irq < 0)
 		return irq;
 
+	/*
+	 * Disable the interrupt to avoid the interrupt handler being triggered
+	 * incorrectly by the asynchronous interrupt status since the machine
+	 * might do a warm reset during the last smbus/i2c transfer session.
+	 */
 	npcm_i2c_int_enable(bus, false);
 
 	ret = devm_request_irq(bus->dev, irq, npcm_i2c_bus_irq, 0,
@@ -2474,7 +2708,6 @@ static void npcm_i2c_remove_bus(struct platform_device *pdev)
 	unsigned long lock_flags;
 	struct npcm_i2c *bus = platform_get_drvdata(pdev);
 
-	debugfs_remove_recursive(bus->debugfs);
 	spin_lock_irqsave(&bus->lock, lock_flags);
 	npcm_i2c_disable(bus);
 	spin_unlock_irqrestore(&bus->lock, lock_flags);
@@ -2490,35 +2723,14 @@ MODULE_DEVICE_TABLE(of, npcm_i2c_bus_of_table);
 
 static struct platform_driver npcm_i2c_bus_driver = {
 	.probe = npcm_i2c_probe_bus,
-	.remove_new = npcm_i2c_remove_bus,
+	.remove = npcm_i2c_remove_bus,
 	.driver = {
 		.name = "nuvoton-i2c",
 		.of_match_table = npcm_i2c_bus_of_table,
 	}
 };
 
-static int __init npcm_i2c_init(void)
-{
-	int ret;
-
-	npcm_i2c_debugfs_dir = debugfs_create_dir("npcm_i2c", NULL);
-
-	ret = platform_driver_register(&npcm_i2c_bus_driver);
-	if (ret) {
-		debugfs_remove_recursive(npcm_i2c_debugfs_dir);
-		return ret;
-	}
-
-	return 0;
-}
-module_init(npcm_i2c_init);
-
-static void __exit npcm_i2c_exit(void)
-{
-	platform_driver_unregister(&npcm_i2c_bus_driver);
-	debugfs_remove_recursive(npcm_i2c_debugfs_dir);
-}
-module_exit(npcm_i2c_exit);
+module_platform_driver(npcm_i2c_bus_driver);
 
 MODULE_AUTHOR("Avi Fishman <avi.fishman@gmail.com>");
 MODULE_AUTHOR("Tali Perry <tali.perry@nuvoton.com>");

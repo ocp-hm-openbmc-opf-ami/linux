@@ -1740,7 +1740,7 @@ static int aspeed_spi_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	aspi = spi_controller_get_devdata(ctlr);
-	platform_set_drvdata(pdev, aspi);
+	platform_set_drvdata(pdev, ctlr);
 	aspi->data = data;
 	aspi->dev = dev;
 
@@ -1893,21 +1893,20 @@ static int aspeed_spi_probe(struct platform_device *pdev)
 	}
 
 	if (aspi->data == &ast2600_fmc_data) {
-	if (devm_device_add_groups(dev, bcurrent_boot_groups))
+		if (device_add_groups(dev, bcurrent_boot_groups))
 			dev_warn(dev, "Could not add current_boot\n");
-	/* if boot from alt source, show access_primary, otherwise show access_backup */
-	if (readl(aspi->regs + OFFSET_ABR_CTRL_STATUS) &
-	    ABR_BOOT_SRC_INDICATE) {
-
-		if (devm_device_add_groups(dev, bswitch_primary_groups))
-			dev_warn(dev, "Could not add access_primary\n");
+		/* if boot from alt source, show access_primary, otherwise show access_backup */
+		if (readl(aspi->regs + OFFSET_ABR_CTRL_STATUS) &
+		    ABR_BOOT_SRC_INDICATE) {
+			if (device_add_groups(dev, bswitch_primary_groups))
+				dev_warn(dev, "Could not add access_primary\n");
 		} else {
-		if (devm_device_add_groups(dev, bswitch_backup_groups))
-			dev_warn(dev, "Could not add access_backup\n");
+			if (device_add_groups(dev, bswitch_backup_groups))
+				dev_warn(dev, "Could not add access_backup\n");
 		}
 	}
 
-	ret = devm_spi_register_controller(dev, ctlr);
+	ret = spi_register_controller(ctlr);
 	if (ret) {
 		dev_err(&pdev->dev, "spi_register_controller failed\n");
 		goto end;
@@ -1919,7 +1918,10 @@ end:
 
 static void aspeed_spi_remove(struct platform_device *pdev)
 {
-	struct aspeed_spi *aspi = platform_get_drvdata(pdev);
+	struct spi_controller *ctlr = platform_get_drvdata(pdev);
+	struct aspeed_spi *aspi = spi_controller_get_devdata(ctlr);
+
+	spi_unregister_controller(ctlr);
 
 	if (aspi->op_buf) {
 		dma_free_coherent(aspi->dev,
@@ -2449,7 +2451,7 @@ static int aspeed_spi_ast2600_calibrate(struct aspeed_spi_chip *chip, u32 hdiv,
 	return 0;
 }
 
-void aspeed_spi_ast2600_fill_safs_cmd(struct aspeed_spi *aspi,
+static void aspeed_spi_ast2600_fill_safs_cmd(struct aspeed_spi *aspi,
 				      struct spi_mem_op *op)
 {
 	u32 tmp_val;
@@ -2483,7 +2485,7 @@ void aspeed_spi_ast2600_fill_safs_cmd(struct aspeed_spi *aspi,
 	}
 }
 
-void aspeed_spi_ast2700_safs_init(struct aspeed_spi *aspi,
+static void aspeed_spi_ast2700_safs_init(struct aspeed_spi *aspi,
 				  struct spi_mem_op *op)
 {
 	u32 val;
@@ -2496,7 +2498,7 @@ void aspeed_spi_ast2700_safs_init(struct aspeed_spi *aspi,
 	writel(val, aspi->regs + MISC_CTRL_REG);
 }
 
-void aspeed_spi_ast2700_safs_start(struct aspeed_spi *aspi)
+static void aspeed_spi_ast2700_safs_start(struct aspeed_spi *aspi)
 {
 	u32 val;
 
@@ -2506,7 +2508,7 @@ void aspeed_spi_ast2700_safs_start(struct aspeed_spi *aspi)
 	writel(val, aspi->regs + MISC_CTRL_REG);
 }
 
-void aspeed_spi_ast2700_safs_stop(struct aspeed_spi *aspi)
+static void aspeed_spi_ast2700_safs_stop(struct aspeed_spi *aspi)
 {
 	u32 val;
 
@@ -2679,7 +2681,7 @@ MODULE_DEVICE_TABLE(of, aspeed_spi_matches);
 
 static struct platform_driver aspeed_spi_driver = {
 	.probe			= aspeed_spi_probe,
-	.remove_new		= aspeed_spi_remove,
+	.remove			= aspeed_spi_remove,
 	.driver	= {
 		.name		= DEVICE_NAME,
 		.of_match_table = aspeed_spi_matches,

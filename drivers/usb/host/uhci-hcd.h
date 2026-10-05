@@ -354,7 +354,7 @@ struct uhci_td {
  * To prevent "bouncing" in the presence of electrical noise,
  * when there are no devices attached we delay for 1 second in the
  * RUNNING_NODEVS state before switching to the AUTO_STOPPED state.
- *
+ * 
  * (Note that the AUTO_STOPPED state won't be necessary once the hub
  * driver learns to autosuspend.)
  */
@@ -720,5 +720,7 @@ static inline u32 hc32_to_cpu(const struct uhci_hcd *uhci, const __hc32 x)
 	return le32_to_cpu(x);
 }
 #endif
+
+void uhci_bounce_pool_destroy(struct uhci_hcd *uhci);
 
 #endif

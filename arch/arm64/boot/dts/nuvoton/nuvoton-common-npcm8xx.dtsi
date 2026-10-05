@@ -23,11 +23,6 @@
 			reg = <0x0 0xf0800000 0x0 0x1000>;
 		};
 
-		rst: system-controller@f0801000 {
-			compatible = "nuvoton,npcm845-rst", "syscon";
-			reg = <0x0 0xf0801000 0x0 0xC4>;
-		};
-
 		fuse:fuse@f0189000 {
 			compatible = "nuvoton,npcm845-fuse", "syscon",
 				"simple-mfd";
@@ -44,11 +39,6 @@
 			#interrupt-cells = <3>;
 			interrupt-controller;
 			#address-cells = <0>;
-			ppi-partitions {
-				ppi_cluster0: interrupt-partition-0 {
-					affinity = <&cpu0 &cpu1 &cpu2 &cpu3>;
-				};
-			};
 		};
 
 		spswc: spswc@f0800038 {
@@ -67,9 +57,9 @@
 
 		clk: rstc: reset-controller@f0801000 {
 			compatible = "nuvoton,npcm845-reset";
-			reg = <0x0 0xf0801000 0x0 0x78>;
-			#reset-cells = <2>;
+			reg = <0x0 0xf0801000 0x0 0xC4>;
 			nuvoton,sysgcr = <&gcr>;
+			#reset-cells = <2>;
 			clocks = <&refclk>;
 			#clock-cells = <1>;
 		};
@@ -190,6 +180,23 @@
 			nuvoton,sysgcr = <&gcr>;
 		};
 
+		aes: aes@f0858000 {
+			compatible = "nuvoton,npcm845-aes";
+			reg = <0x0 0xf0858000 0x0 0x1000>,
+			<0x0 0xf0851000 0x0 0x1000>;
+			status = "disabled";
+			clocks = <&clk NPCM8XX_CLK_AHB>;
+			clock-names = "clk_ahb";
+		};
+
+		sha:sha@f085a000 {
+			compatible = "nuvoton,npcm845-sha";
+			reg = <0x0 0xf085a000 0x0 0x1000>;
+			status = "disabled";
+			clocks = <&clk NPCM8XX_CLK_AHB>;
+			clock-names = "clk_ahb";
+		};
+
 		fiu0: spi@fb000000 {
 			compatible = "nuvoton,npcm845-fiu";
 			#address-cells = <1>;
@@ -245,12 +252,27 @@
 			status = "disabled";
 		};
 
-		pcimbox: pcimbox@f0848000 {
+		vdma: vdma@e0800000 {
+			compatible = "nuvoton,npcm845-vdm";
+			reg = <0x0 0xe0800000 0x0 0x1000
+				   0x0 0xf0822000 0x0 0x1000>;
+			interrupts = <GIC_SPI 29 IRQ_TYPE_LEVEL_HIGH>;
+		};
+
+		pcimbox1: pcimbox@f0848000 {
 			compatible = "nuvoton,npcm845-pci-mbox", "nuvoton,npcm750-pci-mbox",
 					"simple-mfd", "syscon";
-			reg = <0x0 0xf084C000 0x0 0x8
+			reg = <0x0 0xf084C000 0x0 0xC
 				0x0 0xf0848000 0x0 0x3F00>;
 			interrupts = <GIC_SPI 105 IRQ_TYPE_LEVEL_HIGH>;
+		};
+
+		pcimbox2: pcimbox@f0868000 {
+			compatible = "nuvoton,npcm845-pci-mbox", "nuvoton,npcm750-pci-mbox",
+					"simple-mfd", "syscon";
+			reg = <0x0 0xf086C000 0x0 0xC
+				0x0 0xf0868000 0x0 0x3F00>;
+			interrupts = <GIC_SPI 106 IRQ_TYPE_LEVEL_HIGH>;
 		};
 
 		vcd: vcd@f0810000 {
@@ -355,6 +377,24 @@
 					reg = <0x0 0x40>;
 					interrupts = <GIC_SPI 9 IRQ_TYPE_LEVEL_HIGH>;
 					kcs_chan = <3>;
+					status = "disabled";
+				};
+			};
+
+			lpc_bt: lpc_bt@3000 {
+				compatible = "nuvoton,npcm845-lpc-bt",
+						"simple-mfd", "syscon";
+				reg = <0x30000 0xc>;
+				reg-io-width = <4>;
+
+				#address-cells = <1>;
+				#size-cells = <1>;
+				ranges = <0x0 0x30000 0xc>;
+
+				bt1: bt1@0 {
+					compatible = "nuvoton,npcm845-bt-bmc";
+					reg = <0x0 0xc>;
+					interrupts = <GIC_SPI 12 IRQ_TYPE_LEVEL_HIGH>;
 					status = "disabled";
 				};
 			};
@@ -553,7 +593,6 @@
 				reg = <0x801c 0x4>;
 				status = "disabled";
 				clocks = <&refclk>;
-				syscon = <&gcr>;
 			};
 
 			watchdog1: watchdog@901c {
@@ -562,7 +601,6 @@
 				reg = <0x901c 0x4>;
 				status = "disabled";
 				clocks = <&refclk>;
-				syscon = <&gcr>;
 			};
 
 			watchdog2: watchdog@a01c {
@@ -571,7 +609,6 @@
 				reg = <0xa01c 0x4>;
 				status = "disabled";
 				clocks = <&refclk>;
-				syscon = <&gcr>;
 			};
 
 			tmps: tmps@188000 {
@@ -645,14 +682,14 @@
 			};
 
 			i3c0: i3c@fff10000 {
-				compatible = "silvaco,i3c-master";
+				compatible = "nuvoton,npcm845-i3c";
 				reg = <0xfff10000 0x1000>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&i3c0_pins
 						&i3c0_scl_slew
 						&i3c0_sda_slew>;
-				clocks = <&clk NPCM8XX_CLK_AHB>, <&clk NPCM8XX_CLK_RCP>;
-				clock-names = "pclk", "fast_clk";
+				clocks = <&clk NPCM8XX_CLK_AHB>, <&clk NPCM8XX_CLK_RCP>, <&refclk>;
+				clock-names = "pclk", "fast_clk", "slow_clk";
 				interrupts = <GIC_SPI 224 IRQ_TYPE_LEVEL_HIGH>;
 				resets = <&rstc 0x74 8>;
 				#address-cells = <3>;
@@ -661,14 +698,14 @@
 			};
 
 			i3c1: i3c@fff11000 {
-				compatible = "silvaco,i3c-master";
+				compatible = "nuvoton,npcm845-i3c";
 				reg = <0xfff11000 0x1000>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&i3c1_pins
 						&i3c1_scl_slew
 						&i3c1_sda_slew>;
-				clocks = <&clk NPCM8XX_CLK_AHB>, <&clk NPCM8XX_CLK_RCP>;
-				clock-names = "pclk", "fast_clk";
+				clocks = <&clk NPCM8XX_CLK_AHB>, <&clk NPCM8XX_CLK_RCP>, <&refclk>;
+				clock-names = "pclk", "fast_clk", "slow_clk";
 				interrupts = <GIC_SPI 225 IRQ_TYPE_LEVEL_HIGH>;
 				resets = <&rstc 0x74 9>;
 				#address-cells = <3>;
@@ -677,14 +714,14 @@
 			};
 
 			i3c2: i3c@fff12000 {
-				compatible = "silvaco,i3c-master";
+				compatible = "nuvoton,npcm845-i3c";
 				reg = <0xfff12000 0x1000>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&i3c2_pins
 						&i3c2_scl_slew
 						&i3c2_sda_slew>;
-				clocks = <&clk NPCM8XX_CLK_AHB>, <&clk NPCM8XX_CLK_RCP>;
-				clock-names = "pclk", "fast_clk";
+				clocks = <&clk NPCM8XX_CLK_AHB>, <&clk NPCM8XX_CLK_RCP>, <&refclk>;
+				clock-names = "pclk", "fast_clk", "slow_clk";
 				interrupts = <GIC_SPI 226 IRQ_TYPE_LEVEL_HIGH>;
 				resets = <&rstc 0x74 10>;
 				#address-cells = <3>;
@@ -693,14 +730,14 @@
 			};
 
 			i3c3: i3c@fff13000 {
-				compatible = "silvaco,i3c-master";
+				compatible = "nuvoton,npcm845-i3c";
 				reg = <0xfff13000 0x1000>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&i3c3_pins
 						&i3c3_scl_slew
 						&i3c3_sda_slew>;
-				clocks = <&clk NPCM8XX_CLK_AHB>, <&clk NPCM8XX_CLK_RCP>;
-				clock-names = "pclk", "fast_clk";
+				clocks = <&clk NPCM8XX_CLK_AHB>, <&clk NPCM8XX_CLK_RCP>, <&refclk>;
+				clock-names = "pclk", "fast_clk", "slow_clk";
 				interrupts = <GIC_SPI 227 IRQ_TYPE_LEVEL_HIGH>;
 				resets = <&rstc 0x74 11>;
 				#address-cells = <3>;
@@ -709,14 +746,14 @@
 			};
 
 			i3c4: i3c@fff14000 {
-				compatible = "silvaco,i3c-master";
+				compatible = "nuvoton,npcm845-i3c";
 				reg = <0xfff14000 0x1000>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&i3c4_pins
 						&i3c4_scl_slew
 						&i3c4_sda_slew>;
-				clocks = <&clk NPCM8XX_CLK_AHB>, <&clk NPCM8XX_CLK_RCP>;
-				clock-names = "pclk", "fast_clk";
+				clocks = <&clk NPCM8XX_CLK_AHB>, <&clk NPCM8XX_CLK_RCP>, <&refclk>;
+				clock-names = "pclk", "fast_clk", "slow_clk";
 				interrupts = <GIC_SPI 228 IRQ_TYPE_LEVEL_HIGH>;
 				resets = <&rstc 0x74 12>;
 				#address-cells = <3>;
@@ -725,14 +762,14 @@
 			};
 
 			i3c5: i3c@fff15000 {
-				compatible = "silvaco,i3c-master";
+				compatible = "nuvoton,npcm845-i3c";
 				reg = <0xfff15000 0x1000>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&i3c5_pins
 						&i3c5_scl_slew
 						&i3c5_sda_slew>;
-				clocks = <&clk NPCM8XX_CLK_AHB>, <&clk NPCM8XX_CLK_RCP>;
-				clock-names = "pclk", "fast_clk";
+				clocks = <&clk NPCM8XX_CLK_AHB>, <&clk NPCM8XX_CLK_RCP>, <&refclk>;
+				clock-names = "pclk", "fast_clk", "slow_clk";
 				interrupts = <GIC_SPI 229 IRQ_TYPE_LEVEL_HIGH>;
 				resets = <&rstc 0x74 13>;
 				#address-cells = <3>;
@@ -1787,6 +1824,26 @@
 			groups = "spi1";
 			function = "spi1";
 		};
+		spi1cs0_pins: spi1cs0-pins {
+			groups = "spi1cs0";
+			function = "spi1cs0";
+		};
+		spi1cs1_pins: spi1cs1-pins {
+			groups = "spi1cs1";
+			function = "spi1cs1";
+		};
+		spi1cs2_pins: spi1cs2-pins {
+			groups = "spi1cs2";
+			function = "spi1cs2";
+		};
+		spi1cs3_pins: spi1cs3-pins {
+			groups = "spi1cs3";
+			function = "spi1cs3";
+		};
+		spi1d23_pins: spi1d23-pins {
+			groups = "spi1d23";
+			function = "spi1d23";
+		};
 		faninx_pins: faninx-pins {
 			groups = "faninx";
 			function = "faninx";
@@ -1922,6 +1979,30 @@
 		bu6_pins: bu6-pins {
 			groups = "bu6";
 			function = "bu6";
+		};
+		hsi1a_pins: hsi1a-pins {
+			groups = "hsi1a";
+			function = "hsi1a";
+		};
+		hsi2a_pins: hsi2a-pins {
+			groups = "hsi2a";
+			function = "hsi2a";
+		};
+		hsi1b_pins: hsi1b-pins {
+			groups = "hsi1b";
+			function = "hsi1b";
+		};
+		hsi2b_pins: hsi2b-pins {
+			groups = "hsi2b";
+			function = "hsi2b";
+		};
+		hsi1c_pins: hsi1c-pins {
+			groups = "hsi1c";
+			function = "hsi1c";
+		};
+		hsi2c_pins: hsi2c-pins {
+			groups = "hsi2c";
+			function = "hsi2c";
 		};
 		gpo187_pins: gpo187-pins {
 			groups = "gpo187";

@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 /dts-v1/;
-
 #include "aspeed-g7.dtsi"
 #include <dt-bindings/gpio/aspeed-gpio.h>
+#include <dt-bindings/i2c/i2c.h>
 #include <dt-bindings/net/ti-dp83867.h>
+#include <dt-bindings/mmbi/protocols.h>
 
 #define DUAL_NODE 0	// 1: DUAL_NODE, 0: SINGLE_NODE
 #define PCIE0_EP 1	// 1: EP, 0: RC
@@ -230,6 +231,10 @@
 	fan-15 {
 		tach-ch = /bits/ 8 <0xF>;
 	};
+};
+
+&edac {
+	status = "okay";
 };
 
 &mctp0 {
@@ -739,29 +744,13 @@
 #endif
 #endif
 
-&syscon1 {
-	mac0-clk-delay = <0x18 0x16
-			  0x10 0x10
-			  0x10 0x10>;
-	mac1-clk-delay = <0x18 0x17
-			  0x10 0x10
-			  0x10 0x10>;
-	assigned-clocks = <&syscon1 SCU1_CLK_MACHCLK>,
-			  <&syscon1 SCU1_CLK_RGMII>,
-			  <&syscon1 SCU1_CLK_RMII>;
-	assigned-clock-rates = <200000000>, <125000000>, <50000000>;
-};
-
 &espi0 {
 	status = "okay";
 	perif-dma-mode;
-	perif-mmbi-enable;
-	perif-mmbi-src-addr = <0x0 0xa8000000>;
-	perif-mmbi-tgt-memory = <&espi0_mmbi_memory>;
-	perif-mmbi-instance-num = <0x1>;
 	perif-mcyc-enable;
 	perif-mcyc-src-addr = <0x0 0x98000000>;
 	perif-mcyc-size = <0x0 0x10000>;
+	memory-region = <&espi0_mcyc_memory>;
 	perif-rtc-enable;
 	vw-pltrst-monitor;
 	oob-dma-mode;
@@ -772,7 +761,33 @@
 #endif
 };
 
+&espi0_mmbi {
+	status = "okay";
+
+	host-map-addr = <0x0 0xEC000000>;
+	memory-region = <&espi0_mmbi_memory>;
+	instances = <1>;
+
+	instance@0 {
+		channel = <0>; // channel should start from 0
+		protocols = /bits/ 8 <MMBI_PROTOCOL_MCTP>;
+	};
+};
+
 &rtc_over_espi0 {
+	status = "okay";
+};
+
+/* Enable UART2 and UART9 for obmc-console. */
+&uart2 {
+	/delete-property/ pinctrl-names;
+	/delete-property/ pinctrl-0;
+	status = "okay";
+};
+
+&uart9 {
+	/delete-property/ pinctrl-names;
+	/delete-property/ pinctrl-0;
 	status = "okay";
 };
 
@@ -780,10 +795,6 @@
 &espi1 {
 	status = "okay";
 	perif-dma-mode;
-	perif-mmbi-enable;
-	perif-mmbi-src-addr = <0x0 0xa8000000>;
-	perif-mmbi-tgt-memory = <&espi1_mmbi_memory>;
-	perif-mmbi-instance-num = <0x1>;
 	perif-mcyc-enable;
 	perif-mcyc-src-addr = <0x0 0x98000000>;
 	perif-mcyc-size = <0x0 0x10000>;
@@ -796,7 +807,37 @@
 	flash-edaf-tgt-addr = <&edaf1>;
 #endif
 };
-#endif
+
+&espi1_mmbi {
+	status = "okay";
+
+	host-map-addr = <0x0 0xEC000000>;
+	memory-region = <&espi1_mmbi_memory>;
+	instances = <1>;
+
+	instance@0 {
+		channel = <0>; // channel should start from 0
+		protocols = /bits/ 8 <MMBI_PROTOCOL_MCTP>;
+	};
+};
+
+&rtc_over_espi1 {
+	status = "okay";
+};
+
+/* Enable UART7 and UART10 for obmc-console. */
+&uart7 {
+	/delete-property/ pinctrl-names;
+	/delete-property/ pinctrl-0;
+	status = "okay";
+};
+
+&uart10 {
+	/delete-property/ pinctrl-names;
+	/delete-property/ pinctrl-0;
+	status = "okay";
+};
+#endif /* DUAL_NODE */
 
 &lpc0_kcs0 {
 	status = "okay";
@@ -830,10 +871,17 @@
 	status = "okay";
 };
 
+#if 1
 &lpc0_snoop {
 	status = "okay";
 	snoop-ports = <0x80>, <0x81>;
 };
+#else
+&lpc0_pcc {
+	status = "okay";
+	pcc-ports = <0x80>;
+};
+#endif
 
 &lpc0_uart_routing {
 	status = "okay";
@@ -871,10 +919,17 @@
 	status = "okay";
 };
 
+#if 1
 &lpc1_snoop {
 	status = "okay";
 	snoop-ports = <0x80>, <0x81>;
 };
+#else
+&lpc1_pcc {
+	status = "okay";
+	pcc-ports = <0x80>;
+};
+#endif
 
 &lpc1_uart_routing {
 	status = "okay";
@@ -919,6 +974,22 @@
 };
 
 &hace {
+	dummy-key0 = <
+	    0x89878915 0x1DA242FA 0x1A7885CE 0x5BD7FA39
+	    0xC53265FD 0xCC346B25 0x230370EE 0xD0570629
+	>;
+	dummy-key1 = <
+	    0x89878902 0x1DA242FA 0x1A7885CE 0x5BD7FA39
+	    0xC53265FD 0xCC346B25 0x230370EE 0xD0570629
+	>;
+	dummy-key2 = <
+	    0x2C914FA3 0x1056D87B 0xC13D6AE2 0x5E44AF98
+	    0x0DB97321 0xCA378CF6 0x62EE115D 0x3FA74B90
+	>;
+	dummy-key3 = <
+	    0x9E18D25C 0x6FB17A43 0x348DE520 0x1269FAC7
+	    0xAC5503DE 0x2DB61F88 0xEF9AC074 0xB84E6731
+	>;
 	status = "okay";
 };
 
@@ -982,14 +1053,20 @@
 	status = "okay";
 	memory-region = <&pcie0_mmbi0_memory>;
 
-	bmc-int-value = /bits/ 8 <0x00>;
-	bmc-int-location = <0>;
+	noi = <7>;
+	aspeed,mmbi-interface = "mctp-netdev", /* ch0 */
+				"ioctl",       /* ch1 */
+				"ioctl",       /* ch2 */
+				"ioctl",       /* ch3 */
+				"ioctl",       /* ch4 */
+				"ioctl",       /* ch5 */
+				"ioctl";       /* ch6 */
 };
-#else
+#else /* !PCIE0_EP */
 &pcie0 {
 	status = "okay";
 };
-#endif
+#endif /* PCIE0_EP */
 
 #if PCIE1_EP
 &bmc_dev1 {
@@ -1051,24 +1128,20 @@
 	status = "okay";
 	memory-region = <&pcie1_mmbi4_memory>;
 
-	bmc-int-value = /bits/ 8 <0x00>;
-	bmc-int-location = <0>;
+	noi = <7>;
+	aspeed,mmbi-interface = "mctp-netdev", /* ch0 */
+				"ioctl",       /* ch1 */
+				"ioctl",       /* ch2 */
+				"ioctl",       /* ch3 */
+				"ioctl",       /* ch4 */
+				"ioctl",       /* ch5 */
+				"ioctl";       /* ch6 */
 };
-#else
+#else /* !PCIE1_EP */
 &pcie1 {
 	status = "okay";
 };
-#endif
-
-#if 0
-&i3c0 {
-	status = "okay";
-};
-
-&jtag0 {
-	status = "okay";
-};
-#endif
+#endif /* PCIE1_EP */
 
 &sdio_controller {
 	status = "okay";
@@ -1093,13 +1166,12 @@
 		states = <3300000 1>,
 			 <1800000 0>;
 	};
-
 };
 
 &sdhci {
 	status = "okay";
 	bus-width = <4>;
-	max-frequency = <100000000>;
+	max-frequency = <125000000>;
 	/* DDR50 bits in CAPA2 are not supported */
 	sdhci-caps-mask = <0x6 0x0>;
 	sdhci-drive-type = /bits/ 8 <3>;
@@ -1171,7 +1243,6 @@
 
 &uhci0 {
 	status = "okay";
-	memory-region = <&uhci0_reserved>;
 };
 
 #endif
@@ -1206,6 +1277,10 @@
 
 &vhubc {
 	status = "okay";
+#if 0
+	pinctrl-0 = <&pinctrl_usb2cud_default>;
+	aspeed,uart-ports = <12>;
+#endif
 };
 
 &ehci3 {
@@ -1214,7 +1289,6 @@
 
 &uhci1 {
 	status = "okay";
-	memory-region = <&uhci1_reserved>;
 };
 
 &wdt0 {
@@ -1229,6 +1303,10 @@
 	status = "okay";
 };
 
+&otp {
+	status = "okay";
+};
+
 #if 0
 &soc0 {
 	mbox-ssp-0 {
@@ -1236,6 +1314,17 @@
 		reg = <0x4 0x31480000 0x0 0x200000>, <0x0 0x10001000 0x0 0x1000>;
 		mboxes = <&mbox0 0>;
 		aspeed,tx-timeout = <100>;
+	};
+};
+#endif
+
+#if 1
+&soc0 {
+	mbox-bootmcu-1 {
+		compatible = "aspeed,aspeed-mbox";
+		reg = <0x4 0x31880000 0x0 0x100000>, <0x4 0x31980000 0x0 0x100000>;
+		mboxes = <&mbox2 1>;
+		aspeed,tx-timeout = <10000>;
 	};
 };
 #endif

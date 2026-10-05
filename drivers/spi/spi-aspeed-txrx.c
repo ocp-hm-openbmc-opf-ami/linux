@@ -50,8 +50,9 @@ struct aspeed_spi_host {
 	u32				 ahb_clk;
 	u32				 ctrl_val[5];
 	void __iomem			*chip_ahb_base[5];
-	u8				 cs_change;
+	struct spi_device		*cs_change_spi;
 	const struct aspeed_spi_info	*info;
+	u32				 saved_host_cmd_ctrl;
 };
 
 struct aspeed_spi_info {
@@ -278,21 +279,20 @@ static int aspeed_spi_setup(struct spi_device *spi)
 		(struct aspeed_spi_host *)spi_controller_get_devdata(spi->controller);
 	struct device *dev = host->dev;
 	u32 clk_div;
-	void __iomem *ctrl_reg = host->ctrl_reg + SPI_CE0_CTRL +
-				 spi->chip_select * 4;
+	u8 cs = spi_get_chipselect(spi, 0);
+	void __iomem *ctrl_reg = host->ctrl_reg + SPI_CE0_CTRL + cs * 4;
 	u32 unsupport_mode = (u32)(~(SPI_MODE_0 | SPI_RX_DUAL | SPI_TX_DUAL |
 				     SPI_RX_QUAD | SPI_TX_QUAD | SPI_LSB_FIRST));
 
 	dev_dbg(dev, "cs: %d, mode: %d, max_speed: %d, bits_per_word: %d\n",
-		spi->chip_select, spi->mode,
-		spi->max_speed_hz, spi->bits_per_word);
+		cs, spi->mode, spi->max_speed_hz, spi->bits_per_word);
 
 	if (spi->mode & unsupport_mode) {
 		dev_dbg(dev, "unsupported mode bits: %x\n", spi->mode);
 		return -EINVAL;
 	}
 
-	host->ctrl_val[spi->chip_select] = SPI_CE_INACTIVE | SPI_CMD_USER_MODE;
+	host->ctrl_val[cs] = SPI_CE_INACTIVE | SPI_CMD_USER_MODE;
 
 	if (spi->max_speed_hz) {
 		clk_div = host->info->get_clk_div(host, spi->max_speed_hz);
@@ -301,15 +301,14 @@ static int aspeed_spi_setup(struct spi_device *spi)
 		clk_div = ~(host->info->hclk_mask);
 	}
 
-	host->ctrl_val[spi->chip_select] |= clk_div;
+	host->ctrl_val[cs] |= clk_div;
 
 	if (spi->mode & SPI_LSB_FIRST)
-		host->ctrl_val[spi->chip_select] |= SPI_LSB_FIRST_CTRL;
+		host->ctrl_val[cs] |= SPI_LSB_FIRST_CTRL;
 
-	writel(host->ctrl_val[spi->chip_select], ctrl_reg);
+	writel(host->ctrl_val[cs], ctrl_reg);
 
-	dev_info(dev, "cs: %d, ctrl_val: 0x%08x\n",
-		 spi->chip_select, host->ctrl_val[spi->chip_select]);
+	dev_info(dev, "cs: %d, ctrl_val: 0x%08x\n", cs, host->ctrl_val[cs]);
 
 	return 0;
 }
@@ -318,9 +317,9 @@ static void aspeed_spi_start_user(struct spi_device *spi)
 {
 	struct aspeed_spi_host *host =
 		(struct aspeed_spi_host *)spi_controller_get_devdata(spi->controller);
-	u32 ctrl_val = host->ctrl_val[spi->chip_select];
-	void __iomem *ctrl_reg = host->ctrl_reg + SPI_CE0_CTRL +
-				 spi->chip_select * 4;
+	u8 cs = spi_get_chipselect(spi, 0);
+	u32 ctrl_val = host->ctrl_val[cs];
+	void __iomem *ctrl_reg = host->ctrl_reg + SPI_CE0_CTRL + cs * 4;
 
 	ctrl_val |= SPI_CE_INACTIVE;
 	writel(ctrl_val, ctrl_reg);
@@ -333,11 +332,16 @@ static void aspeed_spi_stop_user(struct spi_device *spi)
 {
 	struct aspeed_spi_host *host =
 		(struct aspeed_spi_host *)spi_controller_get_devdata(spi->controller);
-	u32 ctrl_val = host->ctrl_val[spi->chip_select] | SPI_CE_INACTIVE;
-	void __iomem *ctrl_reg = host->ctrl_reg + SPI_CE0_CTRL +
-				 spi->chip_select * 4;
+	u8 cs = spi_get_chipselect(spi, 0);
+	u32 ctrl_val = host->ctrl_val[cs] | SPI_CE_INACTIVE;
+	void __iomem *ctrl_reg = host->ctrl_reg + SPI_CE0_CTRL + cs * 4;
 
 	writel(ctrl_val, ctrl_reg);
+}
+
+static void aspeed_spi_restore_host_cmd_ctrl(struct aspeed_spi_host *host)
+{
+	writel(host->saved_host_cmd_ctrl, host->ctrl_reg + SPI_MISC_CTRL);
 }
 
 static void aspeed_spi_transfer_tx(struct aspeed_spi_host *host, const u8 *tx_buf,
@@ -353,11 +357,23 @@ static void aspeed_spi_transfer_tx(struct aspeed_spi_host *host, const u8 *tx_bu
 	}
 }
 
+/*
+ * aspeed_spi_transfer - transfer_one_message callback
+ *
+ * SPI_MISC_CTRL holds the host command configuration and must be cleared
+ * before entering user mode; it is saved here and restored only when CS
+ * is finally deasserted.
+ *
+ * cs_change on the last transfer keeps CS active across messages
+ * (cs_change_spi tracks the owning device).  cs_change on any earlier
+ * transfer toggles CS in place.  A stale CS held by another device is
+ * force-released before the new message begins.
+ */
 static int aspeed_spi_transfer(struct spi_controller *ctlr,
 			       struct spi_message *msg)
 {
 	struct aspeed_spi_host *host =
-		(struct aspeed_spi_host *)spi_master_get_devdata(ctlr);
+		(struct aspeed_spi_host *)spi_controller_get_devdata(ctlr);
 	struct device *dev = host->dev;
 	struct spi_device *spi = msg->spi;
 	struct spi_transfer *xfer;
@@ -365,22 +381,38 @@ static int aspeed_spi_transfer(struct spi_controller *ctlr,
 	u8 *rx_buf;
 	u32 cs;
 	u32 j = 0;
-	u32 ctrl_val, normal_mode;
+	u32 ctrl_val;
 	void __iomem *ctrl_reg;
+	bool is_last;
+	bool keep_cs = false;
 
-	if (host->cs_change == 0)
+	/* Drop a CS held by another device before starting this message. */
+	if (host->cs_change_spi && host->cs_change_spi != spi) {
+		dev_warn(dev, "CS was kept active for another SPI device, releasing it\n");
+
+		aspeed_spi_stop_user(host->cs_change_spi);
+		aspeed_spi_restore_host_cmd_ctrl(host);
+
+		host->cs_change_spi = NULL;
+	}
+
+	/* Backup host command mode information from MISC_CTRL register before activating CS */
+	if (!host->cs_change_spi) {
+		host->saved_host_cmd_ctrl = readl(host->ctrl_reg + SPI_MISC_CTRL);
+
+		writel(0x0, host->ctrl_reg + SPI_MISC_CTRL);
 		aspeed_spi_start_user(spi);
+	}
 
-	cs = spi->chip_select;
+	cs = spi_get_chipselect(spi, 0);
 	ctrl_reg = host->ctrl_reg + SPI_CE0_CTRL + cs * 4;
 	ctrl_val = readl(ctrl_reg);
-
-	normal_mode = readl(host->ctrl_reg + SPI_MISC_CTRL);
-	writel(0x0, host->ctrl_reg + SPI_MISC_CTRL);
 
 	dev_dbg(dev, "cs: %d\n", cs);
 
 	list_for_each_entry(xfer, &msg->transfers, transfer_list) {
+		is_last = list_is_last(&xfer->transfer_list, &msg->transfers);
+
 		dev_dbg(dev,
 			"xfer[%d]: width %d, len %u, tx %p, rx %p\n",
 			j,
@@ -392,9 +424,9 @@ static int aspeed_spi_transfer(struct spi_controller *ctlr,
 
 		if (tx_buf) {
 			ctrl_val &= ~SPI_IO_MASK;
-			if (spi->mode & SPI_TX_DUAL)
+			if (xfer->tx_nbits == SPI_NBITS_DUAL)
 				ctrl_val |= SPI_DUAL_IO_MODE;
-			else if (spi->mode & SPI_TX_QUAD)
+			else if (xfer->tx_nbits == SPI_NBITS_QUAD)
 				ctrl_val |= SPI_QUAD_IO_MODE;
 			writel(ctrl_val, ctrl_reg);
 
@@ -410,9 +442,9 @@ static int aspeed_spi_transfer(struct spi_controller *ctlr,
 
 		if (rx_buf && rx_buf != tx_buf) {
 			ctrl_val &= ~SPI_IO_MASK;
-			if (spi->mode & SPI_RX_DUAL)
+			if (xfer->rx_nbits == SPI_NBITS_DUAL)
 				ctrl_val |= SPI_DUAL_IO_MODE;
-			else if (spi->mode & SPI_RX_QUAD)
+			else if (xfer->rx_nbits == SPI_NBITS_QUAD)
 				ctrl_val |= SPI_QUAD_IO_MODE;
 			writel(ctrl_val, ctrl_reg);
 
@@ -425,16 +457,32 @@ static int aspeed_spi_transfer(struct spi_controller *ctlr,
 		}
 
 		msg->actual_length += xfer->len;
-		host->cs_change = xfer->cs_change;
+
+		/* Non-final cs_change toggles CS; final cs_change keeps it active. */
+		if (xfer->cs_change) {
+			if (is_last) {
+				keep_cs = true;
+			} else {
+				aspeed_spi_stop_user(spi);
+				/* CS deassert-to-reassert delay; uses xfer->cs_change_delay if set, else 10us */
+				spi_transfer_cs_change_delay_exec(msg, xfer);
+				aspeed_spi_start_user(spi);
+			}
+		}
+
 		j++;
 	}
 
-	if (host->cs_change == 0)
+	if (!keep_cs) {
 		aspeed_spi_stop_user(spi);
+		aspeed_spi_restore_host_cmd_ctrl(host);
+
+		host->cs_change_spi = NULL;
+	} else {
+		host->cs_change_spi = spi;
+	}
 
 	msg->status = 0;
-
-	writel(normal_mode, host->ctrl_reg + SPI_MISC_CTRL);
 
 	spi_finalize_current_message(ctlr);
 
@@ -450,7 +498,7 @@ static int aspeed_spi_probe(struct platform_device *pdev)
 	struct reset_control *rst;
 	int err = 0;
 
-	ctrl = devm_spi_alloc_master(dev, sizeof(struct aspeed_spi_host));
+	ctrl = devm_spi_alloc_host(dev, sizeof(struct aspeed_spi_host));
 	if (!ctrl) {
 		dev_err(dev, "No memory for spi controller\n");
 		return -ENOMEM;
@@ -540,14 +588,12 @@ disable_clk:
 	return err;
 }
 
-static int aspeed_spi_remove(struct platform_device *pdev)
+static void aspeed_spi_remove(struct platform_device *pdev)
 {
 	struct aspeed_spi_host *host = platform_get_drvdata(pdev);
 
 	aspeed_spi_enable(host, false);
 	clk_disable_unprepare(host->clk);
-
-	return 0;
 }
 
 struct aspeed_spi_info ast2500_fmc_info = {
@@ -623,4 +669,3 @@ MODULE_DESCRIPTION("ASPEED Pure SPI Driver");
 MODULE_AUTHOR("Ryan Chen");
 MODULE_AUTHOR("Chin-Ting Kuo");
 MODULE_LICENSE("GPL");
-

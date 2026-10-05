@@ -446,13 +446,11 @@ static int npcm_fiu_tip_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int npcm_fiu_tip_remove(struct platform_device *pdev)
+static void npcm_fiu_tip_remove(struct platform_device *pdev)
 {
 	struct npcm_fiu_tip *flash = platform_get_drvdata(pdev);
 
 	mbox_free_channel(flash->head->chan);
-
-	return 0;
 }
 
 static const struct of_device_id npcm_fiu_tip_of_table[] = {
@@ -463,7 +461,7 @@ MODULE_DEVICE_TABLE(of, npcm_fiu_tip_of_table);
 
 static struct platform_driver npcm_fiu_tip_driver = {
 	.probe    =  npcm_fiu_tip_probe,
-	.remove   =  npcm_fiu_tip_remove,
+	.remove =  npcm_fiu_tip_remove,
 	.driver   = {
 	    .name  = "npcm_fiu_tip",
 	    .of_match_table = npcm_fiu_tip_of_table,

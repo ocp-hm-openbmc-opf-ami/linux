@@ -442,7 +442,7 @@ err_free_kfifo:
 	return rc;
 }
 
-static int aspeed_pcc_remove(struct platform_device *pdev)
+static void aspeed_pcc_remove(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct aspeed_pcc_ctrl *pcc = dev_get_drvdata(dev);
@@ -450,8 +450,6 @@ static int aspeed_pcc_remove(struct platform_device *pdev)
 	kfifo_free(&pcc->fifo);
 	ida_free(&aspeed_pcc_ida, pcc->mdev_id);
 	misc_deregister(&pcc->mdev);
-
-	return 0;
 }
 
 static const struct of_device_id aspeed_pcc_table[] = {

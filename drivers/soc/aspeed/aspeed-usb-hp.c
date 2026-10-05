@@ -138,11 +138,9 @@ err:
 	return rc;
 }
 
-static int aspeed_usb_hp_remove(struct platform_device *pdev)
+static void aspeed_usb_hp_remove(struct platform_device *pdev)
 {
 	dev_info(&pdev->dev, "Remove USB Host PCIe\n");
-
-	return 0;
 }
 
 static struct platform_driver aspeed_usb_hp_driver = {

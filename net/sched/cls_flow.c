@@ -345,7 +345,7 @@ TC_INDIRECT_SCOPE int flow_classify(struct sk_buff *skb,
 
 static void flow_perturbation(struct timer_list *t)
 {
-	struct flow_filter *f = from_timer(f, t, perturb_timer);
+	struct flow_filter *f = timer_container_of(f, t, perturb_timer);
 
 	get_random_bytes(&f->hashrnd, 4);
 	if (f->perturb_period)
@@ -503,8 +503,16 @@ static int flow_change(struct net *net, struct sk_buff *in_skb,
 		}
 
 		if (TC_H_MAJ(baseclass) == 0) {
-			struct Qdisc *q = tcf_block_q(tp->chain->block);
+			struct tcf_block *block = tp->chain->block;
+			struct Qdisc *q;
 
+			if (tcf_block_shared(block)) {
+				NL_SET_ERR_MSG(extack,
+					       "Must specify baseclass when attaching flow filter to block");
+				goto err2;
+			}
+
+			q = tcf_block_q(block);
 			baseclass = TC_H_MAKE(q->handle, baseclass);
 		}
 		if (TC_H_MIN(baseclass) == 0)
@@ -703,6 +711,7 @@ static struct tcf_proto_ops cls_flow_ops __read_mostly = {
 	.walk		= flow_walk,
 	.owner		= THIS_MODULE,
 };
+MODULE_ALIAS_NET_CLS("flow");
 
 static int __init cls_flow_init(void)
 {

@@ -35,7 +35,7 @@ struct aspeed_wdt_config {
 	u32 irq_shift;
 	u32 irq_mask;
 	struct aspeed_wdt_scu scu;
-	u32 reset_mask_num;
+	u32 num_reset_masks;
 	void (*wdt_writel)(u32 val, void __iomem *addr);
 };
 
@@ -59,7 +59,6 @@ static const struct aspeed_wdt_config ast2400_config = {
 		.wdt_reset_mask = 0x1,
 		.wdt_reset_mask_shift = 1,
 	},
-	.reset_mask_num = 1,
 	.wdt_writel = wdt_writel_normal,
 };
 
@@ -73,7 +72,7 @@ static const struct aspeed_wdt_config ast2500_config = {
 		.wdt_reset_mask = 0x1,
 		.wdt_reset_mask_shift = 2,
 	},
-	.reset_mask_num = 1,
+	.num_reset_masks = 1,
 	.wdt_writel = wdt_writel_normal,
 };
 
@@ -87,22 +86,8 @@ static const struct aspeed_wdt_config ast2600_config = {
 		.wdt_reset_mask = 0xf,
 		.wdt_reset_mask_shift = 16,
 	},
-	.reset_mask_num = 2,
+	.num_reset_masks = 2,
 	.wdt_writel = wdt_writel_normal,
-};
-
-static const struct aspeed_wdt_config ast2700a0_config = {
-	.ext_pulse_width_mask = 0xfffff,
-	.irq_shift = 0,
-	.irq_mask = GENMASK(31, 10),
-	.scu = {
-		.compatible = "aspeed,ast2700a0-scu0",
-		.reset_status_reg = 0x70,
-		.wdt_reset_mask = 0xf,
-		.wdt_reset_mask_shift = 0,
-	},
-	.reset_mask_num = 5,
-	.wdt_writel = wdt_writel_delay,
 };
 
 static const struct aspeed_wdt_config ast2700_config = {
@@ -115,7 +100,7 @@ static const struct aspeed_wdt_config ast2700_config = {
 		.wdt_reset_mask = 0xf,
 		.wdt_reset_mask_shift = 0,
 	},
-	.reset_mask_num = 5,
+	.num_reset_masks = 5,
 	.wdt_writel = wdt_writel_delay,
 };
 
@@ -123,7 +108,6 @@ static const struct of_device_id aspeed_wdt_of_table[] = {
 	{ .compatible = "aspeed,ast2400-wdt", .data = &ast2400_config },
 	{ .compatible = "aspeed,ast2500-wdt", .data = &ast2500_config },
 	{ .compatible = "aspeed,ast2600-wdt", .data = &ast2600_config },
-	{ .compatible = "aspeed,ast2700a0-wdt", .data = &ast2700a0_config },
 	{ .compatible = "aspeed,ast2700-wdt", .data = &ast2700_config },
 	{ },
 };
@@ -307,7 +291,7 @@ static void aspeed_wdt_update_bootstatus(struct platform_device *pdev,
 
 	if (!of_device_is_compatible(pdev->dev.of_node, "aspeed,ast2400-wdt")) {
 		res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-		idx = ((intptr_t)wdt->base & 0x00000fff) / resource_size(res);
+		idx = ((intptr_t)wdt->base & 0x00000fff) / (uintptr_t)resource_size(res);
 	}
 
 	scu_base = syscon_regmap_lookup_by_compatible(scu.compatible);
@@ -537,11 +521,9 @@ static int aspeed_wdt_probe(struct platform_device *pdev)
 		set_bit(WDOG_HW_RUNNING, &wdt->wdd.status);
 	}
 
-	if ((of_device_is_compatible(np, "aspeed,ast2500-wdt")) ||
-		(of_device_is_compatible(np, "aspeed,ast2600-wdt")) ||
-		(of_device_is_compatible(np, "aspeed,ast2700-wdt"))) {
-		u32 reset_mask[6];
-		size_t nrstmask = wdt->cfg->reset_mask_num;
+	if (!of_device_is_compatible(np, "aspeed,ast2400-wdt")) {
+		u32 reset_mask[5];
+		size_t nrstmask = wdt->cfg->num_reset_masks;
 		u32 reg = readl(wdt->base + WDT_RESET_WIDTH);
 		int i;
 

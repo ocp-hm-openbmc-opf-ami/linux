@@ -4,6 +4,7 @@
 
 #include <linux/atomic.h>
 #include <linux/bitfield.h>
+#include <linux/cleanup.h>
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/device.h>
@@ -185,9 +186,6 @@
 
 #define VE_H_TOTAL_PIXELS		0x0A0
 
-#define AST2600_VE_BOUNDING_X		0x0D4
-#define AST2600_VE_BOUNDING_Y		0x0D8
-
 #define VE_INTERRUPT_CTRL		0x304
 #define VE_INTERRUPT_STATUS		0x308
 #define  VE_INTERRUPT_MODE_DETECT_WD	BIT(0)
@@ -212,14 +210,12 @@
 #define VE_MEM_RESTRICT_START		0x310
 #define VE_MEM_RESTRICT_END		0x314
 
-// SCU's registers
-#define  SCU_HW_REVISION_ID		GENMASK(23, 16)
-
+/* SCU's registers */
 #define SCU_MISC_CTRL			0xC0
 #define  SCU_DPLL_SOURCE		BIT(20)
 
 #define SCU_CLK_SEL			0x288
-#define  SCU_SOC_DISPLAY_SEL           BIT(15)
+#define  SCU_SOC_DISPLAY_SEL		BIT(15)
 
 #define SCU_CLK_SEL2			0x304
 #define  SCU_VIDEO_OUTPUT_DELAY		GENMASK(5, 0)
@@ -233,7 +229,7 @@
 #define SCU_MULTI_FUNC_15		0x454
 #define  SCU_MULTI_FUNC_IO_SLI_DIR	BIT(21)
 
-// GFX's registers
+/* GFX's registers */
 #define GFX_CTRL			0x60
 #define  GFX_CTRL_ENABLE		BIT(0)
 #define  GFX_CTRL_FMT			GENMASK(9, 7)
@@ -323,18 +319,17 @@ struct aspeed_video_perf {
 #define to_aspeed_video_buffer(x) \
 	container_of((x), struct aspeed_video_buffer, vb)
 
-/**
+/*
  * struct aspeed_video - driver data
  *
- * base:               holds the base address of video engine
- * vga_base:           holds the base address of VGA engine. For 2700-A0 workaround
- * dvi_base:           holds the base address of DVI engine. For 2700 dvi support.
- *
+ * version:		holds the version of aspeed SoC
+ * base:		holds the base address of video engine
+ * dvi_base:		holds the base address of DVI engine. For 2700 dvi support.
  * res_work:		holds the delayed_work for res-detection if unlock
  * buffers:		holds the list of buffer queued from user
  * flags:		holds the state of video
  * sequence:		holds the last number of frame completed
- * max_compressed_size:holds max compressed stream's size
+ * max_compressed_size:	holds max compressed stream's size
  * srcs:		holds the buffer information for srcs
  * jpeg:		holds the buffer information for jpeg header
  * bcd:			holds the buffer information for bcd work
@@ -348,7 +343,7 @@ struct aspeed_video_perf {
  * jpeg_hq_quality:	holds hq's quality (1~12) only if hq_mode enabled
  * frame_bottom:	end position of video data in vertical direction
  * frame_left:		start position of video data in horizontal direction
- * frame_right:	end position of video data in horizontal direction
+ * frame_right:		end position of video data in horizontal direction
  * frame_top:		start position of video data in vertical direction
  * perf:		holds the statistics primary for debugfs
  * bounding_box:	holds the video rect for partial-jpeg
@@ -356,7 +351,6 @@ struct aspeed_video_perf {
  */
 struct aspeed_video {
 	void __iomem *base;
-	void __iomem *vga_base;
 	void __iomem *dvi_base;
 	struct clk *eclk;
 	struct clk *vclk;
@@ -378,9 +372,6 @@ struct aspeed_video {
 
 	struct regmap *scu;
 	struct regmap *gfx;
-	struct regmap *video0;
-
-	u32 hw_revision;
 	u32 version;
 	u32 jpeg_mode;
 	u32 comp_size_read;
@@ -592,7 +583,7 @@ static const struct v4l2_dv_timings_cap aspeed_video_timings_cap = {
 
 static const char * const format_str[] = {"Standard JPEG",
 	"Aspeed JPEG", "Partial JPEG"};
-static const char * const input_str[] = {"GFX", "BMC GFX", "MEMORY", "DVI"};
+static const char * const input_str[] = {"HOST VGA", "BMC GFX", "MEMORY", "DVI"};
 
 static unsigned int debug;
 static unsigned int dual_flag;
@@ -773,7 +764,7 @@ static void aspeed_video_partial_jpeg_update_regs(struct aspeed_video *v)
 				   v->bounding_box.height);
 
 		offset = (scan_lines * v->bounding_box.top) +
-			 ((256 * v->bounding_box.left) >> (v->yuv420 ? 4:3));
+			 ((256 * v->bounding_box.left) >> (v->yuv420 ? 4 : 3));
 		aspeed_video_write(v, new_src_addr, addr + offset);
 		v4l2_dbg(1, debug, &v->v4l2_dev,
 			 "%s: BCD disabled, frame#(%d) offset(0x%x)\n", __func__, frame_count, offset);
@@ -806,25 +797,6 @@ static int aspeed_video_start_frame(struct aspeed_video *video)
 		aspeed_video_write(video, VE_TGS_0, val);
 	} else if (video->input == VIDEO_INPUT_MEM) {
 		aspeed_video_write(video, VE_TGS_0, _make_addr(video->dbg_src.dma));
-	} else if (video->version == 7 && !IS_ERR(video->vga_base)) {
-		// 2700-A0 VE1 auto NG. Manually setup registers.
-		u32 val, offset;
-		u64 addr;
-
-		regmap_read(video->scu, 0xa8c, &val);
-		addr = (val & ~0xf);
-		addr <<= 4;
-
-		val = readl(video->vga_base + 0x6c);
-		offset |= (val >> 8) & 0xff;
-		offset |= (val & 0xff) << 8;
-
-		val = readl(video->vga_base + 0xac);
-		offset |= (val >> 8) & 0x00ff0000;
-		offset <<= 2;
-		addr |= offset;
-
-		aspeed_video_write(video, VE_TGS_0, _make_addr(addr));
 	}
 
 	spin_lock_irqsave(&video->lock, flags);
@@ -1025,7 +997,7 @@ static void aspeed_video_get_bounding_box(struct aspeed_video *v,
 	u8 mb_shift = v->yuv420 ? 4 : 3;
 	u8 *bcd_buf = v->bcd.virt;
 
-	if (bcd_buf == NULL) {
+	if (!bcd_buf) {
 		box->left = 0;
 		box->top = 0;
 		box->width = v->pix_fmt.width;
@@ -1102,7 +1074,7 @@ static void aspeed_video_swap_src_buf(struct aspeed_video *v)
 
 	// 2700's new design will automatically swap src at each operation
 	if (v->version > 6 && v->format == VIDEO_FMT_ASPEED)
-	    return;
+		return;
 
 	if (v->sequence & 0x01) {
 		aspeed_video_write(v, VE_SRC0_ADDR, _make_addr(v->srcs[1].dma));
@@ -1138,7 +1110,7 @@ static void aspeed_video_frame_done_handler(struct aspeed_video *video,
 		 * On the contrary, standard jpeg can keep last buffer
 		 * to always have the latest result.
 		 */
-		if ((video->format != VIDEO_FMT_ASPEED) &&
+		if (video->format != VIDEO_FMT_ASPEED &&
 		    list_is_last(&buf->link, &video->buffers)) {
 			empty = false;
 			v4l2_dbg(1, debug, &video->v4l2_dev, "skip to keep last frame updated\n");
@@ -1165,7 +1137,7 @@ static void aspeed_video_frame_done_handler(struct aspeed_video *video,
 	aspeed_video_swap_src_buf(video);
 
 	if (test_bit(VIDEO_STREAMING, &video->flags) && !empty &&
-	    (video->input != VIDEO_INPUT_MEM)) {
+	    video->input != VIDEO_INPUT_MEM) {
 		set_bit(VIDEO_BOUNDING_BOX, &video->flags);
 		aspeed_video_start_frame(video);
 	}
@@ -1259,45 +1231,45 @@ static irqreturn_t aspeed_video_irq(int irq, void *arg)
 
 static irqreturn_t aspeed_video_md_irq(int irq, void *arg)
 {
-       struct aspeed_video *video = arg;
-       u32 sts;
+	struct aspeed_video *video = arg;
+	u32 sts;
 
-       sts = readl(video->dvi_base + VE_INTERRUPT_STATUS);
-       writel(sts, video->dvi_base + VE_INTERRUPT_STATUS);
-       sts &= readl(video->dvi_base + VE_INTERRUPT_CTRL);
+	sts = readl(video->dvi_base + VE_INTERRUPT_STATUS);
+	writel(sts, video->dvi_base + VE_INTERRUPT_STATUS);
+	sts &= readl(video->dvi_base + VE_INTERRUPT_CTRL);
 
-       v4l2_dbg(2, debug, &video->v4l2_dev, "dvi irq sts=%#x %s%s\n", sts,
-                sts & VE_INTERRUPT_MODE_DETECT_WD ? ", unlock" : "",
-                sts & VE_INTERRUPT_MODE_DETECT ? ", lock" : "");
+	v4l2_dbg(2, debug, &video->v4l2_dev, "dvi irq sts=%#x %s%s\n", sts,
+		 sts & VE_INTERRUPT_MODE_DETECT_WD ? ", unlock" : "",
+		 sts & VE_INTERRUPT_MODE_DETECT ? ", lock" : "");
 
-       if (sts & VE_INTERRUPT_MODE_DETECT_WD) {
-               writel(0, video->dvi_base + VE_INTERRUPT_CTRL);
-               writel(0xffffffff, video->dvi_base + VE_INTERRUPT_STATUS);
-               aspeed_video_irq_res_change(video, 0);
-               return IRQ_HANDLED;
-       }
+	if (sts & VE_INTERRUPT_MODE_DETECT_WD) {
+		writel(0, video->dvi_base + VE_INTERRUPT_CTRL);
+		writel(0xffffffff, video->dvi_base + VE_INTERRUPT_STATUS);
+		aspeed_video_irq_res_change(video, 0);
+		return IRQ_HANDLED;
+	}
 
-       if (sts & VE_INTERRUPT_MODE_DETECT) {
-               if (test_bit(VIDEO_RES_DETECT, &video->flags)) {
-                       aspeed_video_update(video, VE_INTERRUPT_CTRL,
-                                           VE_INTERRUPT_MODE_DETECT, 0);
-                       sts &= ~VE_INTERRUPT_MODE_DETECT;
-                       set_bit(VIDEO_MODE_DETECT_DONE, &video->flags);
-                       wake_up_interruptible_all(&video->wait);
-               } else {
-                       /*
-                        * Signal acquired while NOT doing resolution
-                        * detection; reset the engine and re-initialize
-                        */
-                       writel(0, video->dvi_base + VE_INTERRUPT_CTRL);
-                       writel(0xffffffff, video->dvi_base + VE_INTERRUPT_STATUS);
-                       aspeed_video_irq_res_change(video,
-                                                   RESOLUTION_CHANGE_DELAY);
-                       return IRQ_HANDLED;
-               }
-       }
+	if (sts & VE_INTERRUPT_MODE_DETECT) {
+		if (test_bit(VIDEO_RES_DETECT, &video->flags)) {
+			aspeed_video_update(video, VE_INTERRUPT_CTRL,
+					    VE_INTERRUPT_MODE_DETECT, 0);
+			sts &= ~VE_INTERRUPT_MODE_DETECT;
+			set_bit(VIDEO_MODE_DETECT_DONE, &video->flags);
+			wake_up_interruptible_all(&video->wait);
+		} else {
+			/*
+			 * Signal acquired while NOT doing resolution
+			 * detection; reset the engine and re-initialize
+			 */
+			writel(0, video->dvi_base + VE_INTERRUPT_CTRL);
+			writel(0xffffffff, video->dvi_base + VE_INTERRUPT_STATUS);
+			aspeed_video_irq_res_change(video,
+						    RESOLUTION_CHANGE_DELAY);
+			return IRQ_HANDLED;
+		}
+	}
 
-       return IRQ_HANDLED;
+	return IRQ_HANDLED;
 }
 
 static void aspeed_video_check_and_set_polarity(struct aspeed_video *video)
@@ -1385,15 +1357,15 @@ static void aspeed_video_calc_compressed_size(struct aspeed_video *video,
 
 	video->max_compressed_size = UINT_MAX;
 
-	for (i = 0; i < 8; ++i) {
-		for (j = 0; j < 6; ++j) {
-			size = (num_compression_packets << j) *
-				(compression_packet_size << i);
+	for (i = 0; i < 6; ++i) {
+		for (j = 0; j < 8; ++j) {
+			size = (num_compression_packets << i) *
+				(compression_packet_size << j);
 			if (size < max_compressed_size)
 				continue;
 
 			if (size < video->max_compressed_size) {
-				compression_buffer_size_reg = (j << 3) | i;
+				compression_buffer_size_reg = (i << 3) | j;
 				video->max_compressed_size = size;
 			}
 		}
@@ -1498,13 +1470,6 @@ static void aspeed_video_get_timings(struct aspeed_video *v,
 		det->hfrontporch = hsync - v->frame_right;
 		det->hsync = htotal - hsync;
 	}
-
-	v4l2_dbg(1, debug, &v->v4l2_dev, "Vertical sync(%s) lines(%d %d %d %d)\n",
-		 (det->polarities & V4L2_DV_VSYNC_POS_POL) ? "+" : "-",
-		 det->vfrontporch, det->vsync, det->vbackporch, det->height);
-	v4l2_dbg(1, debug, &v->v4l2_dev, "Horizontal sync(%s) pixels(%d %d %d %d)\n",
-		 (det->polarities & V4L2_DV_HSYNC_POS_POL) ? "+" : "-",
-		 det->hfrontporch, det->hsync, det->hbackporch, det->width);
 }
 
 static void aspeed_video_get_resolution_gfx(struct aspeed_video *video,
@@ -1562,11 +1527,8 @@ static void aspeed_video_get_resolution_vga(struct aspeed_video *video,
 		// try detection again if current signal isn't stable
 		if (!(mds & VE_MODE_DETECT_H_STABLE) ||
 		    !(mds & VE_MODE_DETECT_V_STABLE) ||
-		    (mds & VE_MODE_DETECT_EXTSRC_ADC)) {
-			v4l2_dbg(1, debug, &video->v4l2_dev, "detect status(%#x) unstable, try again\n",
-				 mds);
+		    (mds & VE_MODE_DETECT_EXTSRC_ADC))
 			continue;
-		}
 
 		aspeed_video_check_and_set_polarity(video);
 
@@ -1624,13 +1586,13 @@ static void aspeed_video_get_resolution_vga(struct aspeed_video *video,
  * in io-die. Thus, we need to use another hw to do this job.
  */
 static void aspeed_video_get_resolution_dvi(struct aspeed_video *video,
-                                           struct v4l2_bt_timings *det)
+					    struct v4l2_bt_timings *det)
 {
-       void *base = video->base;
+	void *base = video->base;
 
-       video->base = video->dvi_base;
-       aspeed_video_get_resolution_vga(video, det);
-       video->base = base;
+	video->base = video->dvi_base;
+	aspeed_video_get_resolution_vga(video, det);
+	video->base = base;
 }
 
 static void aspeed_video_get_resolution(struct aspeed_video *video)
@@ -1658,15 +1620,16 @@ static void aspeed_video_set_resolution(struct aspeed_video *video)
 {
 	struct v4l2_bt_timings *act = &video->active_timings;
 	unsigned int size = act->width * ALIGN(act->height, 8);
-	bool is_sync_mode_ok = (video->version != 7);
+	bool is_sync_mode_ok = (video->version != 7) ||
+			       (video->version == 7 && video->id == 0);
 
 	/* Set capture/compression frame sizes */
 	aspeed_video_calc_compressed_size(video, size);
 
 	if (!IS_ALIGNED(act->width, 64)) {
 		/*
-		 * This is a workaround to fix a silicon bug on A1 and A2
-		 * revisions. Since it doesn't break capturing operation of
+		 * This is a workaround to fix a AST2500 silicon bug on A1 and
+		 * A2 revisions. Since it doesn't break capturing operation of
 		 * other revisions, use it for all revisions without checking
 		 * the revision ID. It picked new width which is a very next
 		 * 64-pixels aligned value to minimize memory bandwidth
@@ -1775,11 +1738,20 @@ static void aspeed_video_update_regs(struct aspeed_video *video)
 	else
 		aspeed_video_update(video, VE_BCD_CTRL, VE_BCD_CTRL_EN_BCD, 0);
 
-	if (video->input == VIDEO_INPUT_VGA && IS_ERR(video->vga_base))
+	if (video->input == VIDEO_INPUT_VGA)
 		ctrl |= VE_CTRL_AUTO_OR_CURSOR;
 
 	if (video->input == VIDEO_INPUT_DVI)
 		ctrl |= VE_CTRL_SOURCE;
+
+	if (video->version == 7) {
+		if (video->input == VIDEO_INPUT_DVI)
+			ctrl |= FIELD_PREP(VE_CTRL_CLK_DELAY, VIDEO_CLK_CRT2);
+		else if (video->input == VIDEO_INPUT_VGA && video->id == 0)
+			ctrl |= FIELD_PREP(VE_CTRL_CLK_DELAY, VIDEO_CLK_D1);
+		else
+			ctrl |= FIELD_PREP(VE_CTRL_CLK_DELAY, VIDEO_CLK_48MHz);
+	}
 
 	if (video->frame_rate)
 		ctrl |= FIELD_PREP(VE_CTRL_FRC, video->frame_rate);
@@ -1807,7 +1779,7 @@ static void aspeed_video_update_regs(struct aspeed_video *video)
 			    seq_ctrl);
 	aspeed_video_update(video, VE_CTRL,
 			    VE_CTRL_FRC | VE_CTRL_AUTO_OR_CURSOR |
-			    VE_CTRL_SOURCE, ctrl);
+			    VE_CTRL_SOURCE | VE_CTRL_CLK_DELAY, ctrl);
 	aspeed_video_update(video, VE_COMP_CTRL,
 			    VE_COMP_CTRL_DCT_LUM | VE_COMP_CTRL_DCT_CHR |
 			    VE_COMP_CTRL_EN_HQ | VE_COMP_CTRL_HQ_DCT_LUM |
@@ -1818,7 +1790,8 @@ static void aspeed_video_update_regs(struct aspeed_video *video)
 
 static void aspeed_video_init_regs(struct aspeed_video *video)
 {
-	u32 val;
+	u32 ctrl = VE_CTRL_AUTO_OR_CURSOR |
+		FIELD_PREP(VE_CTRL_CAPTURE_FMT, VIDEO_CAP_FMT_YUV_FULL_SWING);
 
 	/* Unlock VE registers */
 	aspeed_video_write(video, VE_PROTECTION_KEY, VE_PROTECTION_KEY_UNLOCK);
@@ -1836,17 +1809,15 @@ static void aspeed_video_init_regs(struct aspeed_video *video)
 
 	/* Set control registers */
 	aspeed_video_write(video, VE_SEQ_CTRL, VE_SEQ_CTRL_AUTO_COMP);
-	val = VE_CTRL_AUTO_OR_CURSOR |
-	      FIELD_PREP(VE_CTRL_CAPTURE_FMT, VIDEO_CAP_FMT_YUV_FULL_SWING);
 	if (video->version == 7) {
-		if (video->input == VIDEO_INPUT_VGA)
-			val |= FIELD_PREP(VE_CTRL_CLK_DELAY, VIDEO_CLK_48MHz);
-		else if (video->input == VIDEO_INPUT_DVI)
-			val |= FIELD_PREP(VE_CTRL_CLK_DELAY, VIDEO_CLK_CRT2);
+		if (video->input == VIDEO_INPUT_DVI)
+			ctrl |= FIELD_PREP(VE_CTRL_CLK_DELAY, VIDEO_CLK_CRT2);
+		else if (video->input == VIDEO_INPUT_VGA && video->id == 0)
+			ctrl |= FIELD_PREP(VE_CTRL_CLK_DELAY, VIDEO_CLK_D1);
 		else
-			val |= FIELD_PREP(VE_CTRL_CLK_DELAY, VIDEO_CLK_48MHz);
+			ctrl |= FIELD_PREP(VE_CTRL_CLK_DELAY, VIDEO_CLK_48MHz);
 	}
-	aspeed_video_write(video, VE_CTRL, val);
+	aspeed_video_write(video, VE_CTRL, ctrl);
 	aspeed_video_write(video, VE_COMP_CTRL, VE_COMP_CTRL_RSVD);
 
 	/* Don't downscale */
@@ -1857,37 +1828,20 @@ static void aspeed_video_init_regs(struct aspeed_video *video)
 	aspeed_video_write(video, VE_SCALING_FILTER3, 0x00200000);
 
 	/* Set mode detection defaults */
-	// 2700-A0 VE1 needs larger threshold to avoid constant res-chg
-	if (video->version == 7 && video->hw_revision == 0)
-		aspeed_video_write(video, VE_MODE_DETECT,
-				   FIELD_PREP(VE_MODE_DT_HOR_TOLER, 7) |
-				   FIELD_PREP(VE_MODE_DT_VER_TOLER, 7) |
-				   FIELD_PREP(VE_MODE_DT_HOR_STABLE, 6) |
-				   FIELD_PREP(VE_MODE_DT_VER_STABLE, 6) |
-				   FIELD_PREP(VE_MODE_DT_EDG_THROD, 0x65));
-	else
-		aspeed_video_write(video, VE_MODE_DETECT,
-				   FIELD_PREP(VE_MODE_DT_HOR_TOLER, 2) |
-				   FIELD_PREP(VE_MODE_DT_VER_TOLER, 2) |
-				   FIELD_PREP(VE_MODE_DT_HOR_STABLE, 6) |
-				   FIELD_PREP(VE_MODE_DT_VER_STABLE, 6) |
-				   FIELD_PREP(VE_MODE_DT_EDG_THROD, 0x65));
-
-	// 2700-A0 VE1 need VE0's registers, 04 and 08, setup to work
-	if (video->version == 7 && !IS_ERR(video->video0)) {
-		regmap_read(video->video0, VE_PROTECTION_KEY, &val);
-		if (val == 0) {
-			regmap_write(video->video0, VE_PROTECTION_KEY, VE_PROTECTION_KEY_UNLOCK);
-			regmap_write(video->video0, VE_SEQ_CTRL, 0x2020);
-			regmap_write(video->video0, VE_CTRL, 0x1e0040);
-		}
-	}
+	aspeed_video_write(video, VE_MODE_DETECT,
+			   FIELD_PREP(VE_MODE_DT_HOR_TOLER, 2) |
+			   FIELD_PREP(VE_MODE_DT_VER_TOLER, 2) |
+			   FIELD_PREP(VE_MODE_DT_HOR_STABLE, 6) |
+			   FIELD_PREP(VE_MODE_DT_VER_STABLE, 6) |
+			   FIELD_PREP(VE_MODE_DT_EDG_THROD, 0x65));
 
 	aspeed_video_write(video, VE_BCD_CTRL, 0);
 }
 
 static void aspeed_video_start(struct aspeed_video *video)
 {
+	aspeed_video_set_vga_on(video, true);
+
 	aspeed_video_on(video);
 
 	aspeed_video_init_regs(video);
@@ -1901,6 +1855,8 @@ static void aspeed_video_start(struct aspeed_video *video)
 
 static void aspeed_video_stop(struct aspeed_video *video)
 {
+	aspeed_video_set_vga_on(video, false);
+
 	set_bit(VIDEO_STOPPED, &video->flags);
 	cancel_delayed_work_sync(&video->res_work);
 
@@ -2005,17 +1961,19 @@ static int aspeed_video_set_input(struct file *file, void *fh, unsigned int i)
 		return -EINVAL;
 
 	if (IS_ERR(video->scu)) {
-		v4l2_err(&video->v4l2_dev, "%s: scu isn't ready for input-control\n", __func__);
+		v4l2_dbg(1, debug, &video->v4l2_dev,
+			 "%s: scu isn't ready for input-control\n", __func__);
 		return -EINVAL;
 	}
 
 	if (IS_ERR(video->gfx) && i == VIDEO_INPUT_GFX) {
-		v4l2_err(&video->v4l2_dev, "%s: gfx isn't ready for GFX input\n", __func__);
+		v4l2_dbg(1, debug, &video->v4l2_dev,
+			 "%s: gfx isn't ready for GFX input\n", __func__);
 		return -EINVAL;
 	}
 
 	// prepare memory space for user to put test batch
-	if ((i == VIDEO_INPUT_MEM) && !video->dbg_src.size) {
+	if (i == VIDEO_INPUT_MEM && !video->dbg_src.size) {
 		if (!aspeed_video_alloc_buf(video, &video->dbg_src, VE_MAX_SRC_BUFFER_SIZE)) {
 			v4l2_err(&video->v4l2_dev, "Failed to allocate buffer for debug input\n");
 			return -EINVAL;
@@ -2023,32 +1981,34 @@ static int aspeed_video_set_input(struct file *file, void *fh, unsigned int i)
 		v4l2_dbg(1, debug, &video->v4l2_dev, "dbg src addr(%pad) size(%d)\n",
 			 &video->dbg_src.dma, video->dbg_src.size);
 	}
-	if ((i != VIDEO_INPUT_MEM) && video->dbg_src.size)
+	if (i != VIDEO_INPUT_MEM && video->dbg_src.size)
 		aspeed_video_free_buf(video, &video->dbg_src);
 
-       if (i == VIDEO_INPUT_DVI && video->version == 7) {
-               if (IS_ERR(video->dvi_base)) {
-                       v4l2_err(&video->v4l2_dev, "%s: dvi isn't ready for DVI input\n", __func__);
-                       return -EINVAL;
-               }
+	if (i == VIDEO_INPUT_DVI && video->version == 7) {
+		if (IS_ERR(video->dvi_base)) {
+			v4l2_err(&video->v4l2_dev, "%s: dvi isn't ready for DVI input\n", __func__);
+			return -EINVAL;
+		}
 
-               /* Set DVI mode detection defaults */
-               writel(FIELD_PREP(VE_MODE_DT_HOR_TOLER, 2) |
-                      FIELD_PREP(VE_MODE_DT_VER_TOLER, 2) |
-                      FIELD_PREP(VE_MODE_DT_HOR_STABLE, 6) |
-                      FIELD_PREP(VE_MODE_DT_VER_STABLE, 6) |
-                      FIELD_PREP(VE_MODE_DT_EDG_THROD, 0x65),
-                      video->dvi_base + VE_MODE_DETECT);
-       }
+		/* Set DVI mode detection defaults */
+		writel(FIELD_PREP(VE_MODE_DT_HOR_TOLER, 2) |
+		       FIELD_PREP(VE_MODE_DT_VER_TOLER, 2) |
+		       FIELD_PREP(VE_MODE_DT_HOR_STABLE, 6) |
+		       FIELD_PREP(VE_MODE_DT_VER_STABLE, 6) |
+		       FIELD_PREP(VE_MODE_DT_EDG_THROD, 0x65),
+		       video->dvi_base + VE_MODE_DETECT);
+	}
 
 	video->input = i;
 
 	if (video->version == 6) {
-		// modify dpll source per current input
+		/* modify dpll source per current input */
 		if (video->input == VIDEO_INPUT_VGA)
-			regmap_update_bits(video->scu, SCU_MISC_CTRL, SCU_DPLL_SOURCE, 0);
+			regmap_update_bits(video->scu, SCU_MISC_CTRL,
+					   SCU_DPLL_SOURCE, 0);
 		else
-			regmap_update_bits(video->scu, SCU_MISC_CTRL, SCU_DPLL_SOURCE, SCU_DPLL_SOURCE);
+			regmap_update_bits(video->scu, SCU_MISC_CTRL,
+					   SCU_DPLL_SOURCE, SCU_DPLL_SOURCE);
 
 		// SLI direction: inverse if DVI
 		if (video->input == VIDEO_INPUT_DVI) {
@@ -2267,8 +2227,8 @@ static int aspeed_video_g_selection(struct file *file, void *fh,
 	struct aspeed_video_box *box;
 	unsigned long flags;
 
-	if ((s->type != V4L2_BUF_TYPE_VIDEO_CAPTURE) &&
-	    (s->type != V4L2_BUF_TYPE_VIDEO_OUTPUT))
+	if (s->type != V4L2_BUF_TYPE_VIDEO_CAPTURE &&
+	    s->type != V4L2_BUF_TYPE_VIDEO_OUTPUT)
 		return -EINVAL;
 
 	switch (s->target) {
@@ -2566,8 +2526,6 @@ static int aspeed_video_start_streaming(struct vb2_queue *q,
 	int rc;
 	struct aspeed_video *video = vb2_get_drv_priv(q);
 
-	aspeed_video_set_vga_on(video, true);
-
 	video->sequence = 0;
 	video->perf.duration_max = 0;
 	video->perf.duration_min = 0xffffffff;
@@ -2592,8 +2550,6 @@ static void aspeed_video_stop_streaming(struct vb2_queue *q)
 {
 	int rc;
 	struct aspeed_video *video = vb2_get_drv_priv(q);
-
-	aspeed_video_set_vga_on(video, false);
 
 	clear_bit(VIDEO_STREAMING, &video->flags);
 
@@ -2638,8 +2594,6 @@ static void aspeed_video_buf_queue(struct vb2_buffer *vb)
 
 static const struct vb2_ops aspeed_video_vb2_ops = {
 	.queue_setup = aspeed_video_queue_setup,
-	.wait_prepare = vb2_ops_wait_prepare,
-	.wait_finish = vb2_ops_wait_finish,
 	.buf_prepare = aspeed_video_buf_prepare,
 	.start_streaming = aspeed_video_start_streaming,
 	.stop_streaming = aspeed_video_stop_streaming,
@@ -2764,8 +2718,11 @@ static int aspeed_video_setup_video(struct aspeed_video *video)
 
 	rc = hdl->error;
 	if (rc) {
+		v4l2_ctrl_handler_free(&video->ctrl_handler);
+		v4l2_device_unregister(v4l2_dev);
+
 		dev_err(video->dev, "Failed to init controls: %d\n", rc);
-		goto err_ctrl_init;
+		return rc;
 	}
 
 	v4l2_dev->ctrl_handler = hdl;
@@ -2781,12 +2738,15 @@ static int aspeed_video_setup_video(struct aspeed_video *video)
 	vbq->drv_priv = video;
 	vbq->buf_struct_size = sizeof(struct aspeed_video_buffer);
 	vbq->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
-	vbq->min_buffers_needed = ASPEED_VIDEO_V4L2_MIN_BUF_REQ;
+	vbq->min_queued_buffers = ASPEED_VIDEO_V4L2_MIN_BUF_REQ;
 
 	rc = vb2_queue_init(vbq);
 	if (rc) {
+		v4l2_ctrl_handler_free(&video->ctrl_handler);
+		v4l2_device_unregister(v4l2_dev);
+
 		dev_err(video->dev, "Failed to init vb2 queue\n");
-		goto err_vb2_init;
+		return rc;
 	}
 
 	vdev->queue = vbq;
@@ -2804,21 +2764,20 @@ static int aspeed_video_setup_video(struct aspeed_video *video)
 	video_set_drvdata(vdev, video);
 	rc = video_register_device(vdev, VFL_TYPE_VIDEO, 0);
 	if (rc) {
+		v4l2_ctrl_handler_free(&video->ctrl_handler);
+		v4l2_device_unregister(v4l2_dev);
+
 		dev_err(video->dev, "Failed to register video device\n");
-		goto err_video_reg;
+		return rc;
 	}
 
 	return 0;
-
-err_video_reg:
-err_vb2_init:
-err_ctrl_init:
-	v4l2_ctrl_handler_free(&video->ctrl_handler);
-	v4l2_device_unregister(v4l2_dev);
-	return rc;
 }
 
-// To avoid reset acquire conflict in syscon_regmap_lookup_xxx
+/*
+ * Get regmap without checking res, such as clk/reset, that could lead to
+ * conflict.
+ */
 static struct regmap *aspeed_regmap_lookup(struct device_node *np, const char *property)
 {
 	struct device_node *syscon_np __free(device_node) = of_parse_phandle(np, property, 0);
@@ -2837,19 +2796,8 @@ static int aspeed_video_init(struct aspeed_video *video)
 	unsigned int mask_size = (video->version >= 7) ? 64 : 32;
 	u32 resv_size = VE_MAX_SRC_BUFFER_SIZE * 2 + VE_JPEG_HEADER_SIZE + VE_BCD_BUFF_SIZE;
 
-	video->scu = syscon_regmap_lookup_by_phandle(dev->of_node, "aspeed,scu");
+	video->scu = aspeed_regmap_lookup(dev->of_node, "aspeed,scu");
 	video->gfx = aspeed_regmap_lookup(dev->of_node, "aspeed,gfx");
-	video->video0 = aspeed_regmap_lookup(dev->of_node, "aspeed,video0");
-
-	if (video->version == 7 && !IS_ERR(video->scu)) {
-		u32 val;
-
-		regmap_read(video->scu, 0x00, &val);
-		video->hw_revision = FIELD_GET(SCU_HW_REVISION_ID, val);
-
-		if (video->id == 1 && video->hw_revision == 0 && IS_ERR(video->video0))
-			dev_err(dev, "can't find regmap for video0");
-	}
 
 	irq = irq_of_parse_and_map(dev->of_node, 0);
 	if (!irq) {
@@ -2866,20 +2814,20 @@ static int aspeed_video_init(struct aspeed_video *video)
 	}
 	dev_info(video->dev, "irq %d\n", irq);
 
-       if (!IS_ERR(video->dvi_base)) {
-               irq = irq_of_parse_and_map(dev->of_node, 1);
-               if (!irq) {
-                       dev_err(dev, "Unable to find DVI IRQ\n");
-                       return -ENODEV;
-               }
+	if (!IS_ERR(video->dvi_base)) {
+		irq = irq_of_parse_and_map(dev->of_node, 1);
+		if (!irq) {
+			dev_err(dev, "Unable to find DVI IRQ\n");
+			return -ENODEV;
+		}
 
-               rc = devm_request_irq(dev, irq, aspeed_video_md_irq, 0, dev_name(dev), video);
-               if (rc < 0) {
-                       dev_err(dev, "Unable to request DVI IRQ %d\n", irq);
-                       return rc;
-               }
-               dev_info(video->dev, "dvi mode-detection irq %d\n", irq);
-       }
+		rc = devm_request_irq(dev, irq, aspeed_video_md_irq, 0, dev_name(dev), video);
+		if (rc < 0) {
+			dev_err(dev, "Unable to request DVI IRQ %d\n", irq);
+			return rc;
+		}
+		dev_info(video->dev, "dvi mode-detection irq %d\n", irq);
+	}
 
 	video->reset = devm_reset_control_get_shared(dev, NULL);
 	if (IS_ERR(video->reset)) {
@@ -2962,7 +2910,7 @@ static int aspeed_video_init(struct aspeed_video *video)
 
 err_release_reserved_mem:
 	of_reserved_mem_device_release(dev);
-	if (video->version > 6)
+	if (!IS_ERR(video->crt2clk))
 		clk_disable_unprepare(video->crt2clk);
 err_unprepare_vclk:
 	clk_unprepare(video->vclk);
@@ -3027,19 +2975,13 @@ static int aspeed_video_probe(struct platform_device *pdev)
 	INIT_WORK(&video->rst_work, aspeed_video_rst_worker);
 
 	if (video->version == 7 && video->id == 0)
-        video->dvi_base = devm_platform_ioremap_resource(pdev, 1);
+		video->dvi_base = devm_platform_ioremap_resource(pdev, 1);
 	else
-        video->dvi_base = ERR_PTR(-ENODEV);
+		video->dvi_base = ERR_PTR(-ENODEV);
 
 	rc = aspeed_video_init(video);
 	if (rc)
 		return rc;
-
-	// workaround for ast2700-A0
-	if (video->version == 7 && video->hw_revision == 0 && video->id == 1)
-		video->vga_base = devm_platform_ioremap_resource(pdev, 1);
-	else
-		video->vga_base = ERR_PTR(-ENODEV);
 
 	/* vga_ctrl is a property to say if VGA will be on/off with KVM */
 	vga_ctrl = of_find_property(pdev->dev.of_node, "vga_ctrl", NULL) ? 1 : 0;
@@ -3073,7 +3015,7 @@ static void aspeed_video_remove(struct platform_device *pdev)
 
 	aspeed_video_debugfs_remove(video);
 
-	if (video->version > 6)
+	if (!IS_ERR(video->crt2clk))
 		clk_disable_unprepare(video->crt2clk);
 	clk_unprepare(video->vclk);
 	clk_unprepare(video->eclk);
@@ -3095,7 +3037,7 @@ static struct platform_driver aspeed_video_driver = {
 		.of_match_table = aspeed_video_of_match,
 	},
 	.probe = aspeed_video_probe,
-	.remove_new = aspeed_video_remove,
+	.remove = aspeed_video_remove,
 };
 
 module_platform_driver(aspeed_video_driver);

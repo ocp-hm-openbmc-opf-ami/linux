@@ -77,14 +77,6 @@ enum mctp_pcie_vdm_route_type {
 	MCTP_PCIE_VDM_BROADCAST_FROM_RC = 3,
 };
 
-enum mctp_ctrl_command_code {
-	MCTP_CTRL_CMD_SET_ENDPOINT_ID = 0x01,
-	MCTP_CTRL_CMD_GET_ENDPOINT_ID = 0x02,
-	MCTP_CTRL_CMD_PREPARE_ENDPOINT_DISCOVERY = 0x0B,
-	MCTP_CTRL_CMD_ENDPOINT_DISCOVERY = 0x0C,
-	MCTP_CTRL_CMD_DISCOVERY_NOTIFY = 0x0D
-};
-
 struct mctp_pcie_vdm_hdr {
 	u32 length : 10, rsvd0 : 2, attr : 2, ep : 1, td : 1, rsvd1 : 4, tc : 3,
 		rsvd2 : 1, route_type : 5, fmt : 2, rsvd3 : 1;
@@ -159,8 +151,10 @@ static int mctp_pcie_vdm_xmit(struct net_device *ndev, struct sk_buff *skb)
 	rc = vdm_dev->callback_ops->send_packet(vdm_dev->dev, skb->data, payload_len_dw * sizeof(u32));
 
 	if (rc) {
-		pr_debug("%s: failed to send packet, rc %d\n", __func__, rc);
+		pr_err("%s: failed to send packet, rc %d\n", __func__, rc);
 		stats->tx_errors++;
+		if (rc != -ENOSPC && rc != -EBUSY)
+			stats->tx_dropped++;
 	} else {
 		stats->tx_packets++;
 		stats->tx_bytes += (skb->len - sizeof(struct mctp_pcie_vdm_hdr));
@@ -175,25 +169,17 @@ static netdev_tx_t mctp_pcie_vdm_start_xmit(struct sk_buff *skb,
 
 	pr_debug("%s: skb len %u\n", __func__, skb->len);
 
-	if (!skb)
-		return NETDEV_TX_OK;
-
-	if (!netif_running(ndev) || !netif_carrier_ok(ndev)) {
-		pr_debug_ratelimited("%s: net device %s carrier/link down, dropping packet\n",
-				   __func__, ndev->name);
-		ndev->stats.tx_dropped++;
+	if (skb) {
+		rc = mctp_pcie_vdm_xmit(ndev, skb);
+		if (rc)
+			pr_debug("%s: failed to send packet, rc %d\n", __func__, rc);
+		/*
+		 * Always drop the skb instead of returning NETDEV_TX_BUSY on
+		 * failure, since returning BUSY causes the qdisc to requeue
+		 * and retry the same packet indefinitely.
+		 */
 		kfree_skb(skb);
-		return NETDEV_TX_OK;
 	}
-
-	rc = mctp_pcie_vdm_xmit(ndev, skb);
-	if (rc) {
-		pr_debug_ratelimited("%s: failed to send packet, rc %d, dropping\n",
-				   __func__, rc);
-		ndev->stats.tx_dropped++;
-	}
-	dev_consume_skb_any(skb);
-
 	return NETDEV_TX_OK;
 }
 
@@ -322,6 +308,8 @@ void mctp_pcie_vdm_receive_packet(struct net_device *ndev)
 		cb = __mctp_cb(skb);
 		cb->halen = 3; // route type | bdf address
 		cb->haddr[0] = vdm_hdr->route_type & GENMASK(2, 0);
+		// address is also converted to little-endian, but we want to keep it as big-endian
+		// because kernel network layer assumes address in big-endian format
 		cb->haddr[1] = vdm_hdr->pci_req_id >> 8;
 		cb->haddr[2] = vdm_hdr->pci_req_id & 0xFF;
 		net_status = netif_rx(skb);
@@ -369,3 +357,17 @@ void mctp_pcie_vdm_remove_dev(struct net_device *vdm_dev)
 	}
 }
 EXPORT_SYMBOL_GPL(mctp_pcie_vdm_remove_dev);
+
+void mctp_pcie_vdm_set_carrier(struct net_device *ndev, bool up)
+{
+	if (!ndev) {
+		pr_err("%s: ndev is NULL\n", __func__);
+		return;
+	}
+
+	if (up)
+		netif_carrier_on(ndev);
+	else
+		netif_carrier_off(ndev);
+}
+EXPORT_SYMBOL_GPL(mctp_pcie_vdm_set_carrier);

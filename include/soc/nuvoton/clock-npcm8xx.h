@@ -10,7 +10,9 @@ struct npcm_clock_adev {
 	struct auxiliary_device adev;
 };
 
-#define to_npcm_clock_adev(_adev) \
-	container_of((_adev), struct npcm_clock_adev, adev)
+static inline struct npcm_clock_adev *to_npcm_clock_adev(struct auxiliary_device *_adev)
+{
+	return container_of(_adev, struct npcm_clock_adev, adev);
+}
 
 #endif

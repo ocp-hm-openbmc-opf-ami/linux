@@ -497,7 +497,7 @@ static int tegra_hsp_mailbox_flush(struct mbox_chan *chan,
 			mbox_chan_txdone(chan, 0);
 
 			/* Wait until channel is empty */
-			if (chan->active_req != NULL)
+			if (chan->active_req != MBOX_NO_MSG)
 				continue;
 
 			return 0;
@@ -878,13 +878,11 @@ static int tegra_hsp_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int tegra_hsp_remove(struct platform_device *pdev)
+static void tegra_hsp_remove(struct platform_device *pdev)
 {
 	struct tegra_hsp *hsp = platform_get_drvdata(pdev);
 
 	lockdep_unregister_key(&hsp->lock_key);
-
-	return 0;
 }
 
 static int __maybe_unused tegra_hsp_resume(struct device *dev)

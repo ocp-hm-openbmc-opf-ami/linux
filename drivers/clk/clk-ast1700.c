@@ -114,7 +114,7 @@ static struct clk_hw *AST1700_calc_huclk(int id, u32 val)
 					    CREATE_CLK_NAME(id, "huxclk"), 0, mult, div);
 };
 
-struct clk_hw *AST1700_calc_pll(const char *name, const char *parent_name, u32 val)
+static struct clk_hw *AST1700_calc_pll(const char *name, const char *parent_name, u32 val)
 {
 	unsigned int mult, div;
 
@@ -132,7 +132,7 @@ struct clk_hw *AST1700_calc_pll(const char *name, const char *parent_name, u32 v
 		div = (p + 1);
 	}
 	return clk_hw_register_fixed_factor(NULL, name, parent_name, 0, mult, div);
-};
+}
 
 static int AST1700_clk_is_enabled(struct clk_hw *hw)
 {
@@ -295,7 +295,7 @@ static int AST1700_clk_init(struct device_node *ast1700_node)
 	u32 val;
 	int ret;
 
-	int id = ida_simple_get(&ast1700_clk_ida, 0, 0, GFP_KERNEL);
+	int id = ida_alloc(&ast1700_clk_ida, GFP_KERNEL);
 
 	clk_base = of_iomap(ast1700_node, 0);
 	WARN_ON(!clk_base);
@@ -806,4 +806,3 @@ static int AST1700_clk_init(struct device_node *ast1700_node)
 };
 
 CLK_OF_DECLARE_DRIVER(ast1700, "aspeed,ast1700-scu", AST1700_clk_init);
-

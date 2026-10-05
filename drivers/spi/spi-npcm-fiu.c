@@ -13,6 +13,7 @@
 #include <linux/vmalloc.h>
 #include <linux/regmap.h>
 #include <linux/of.h>
+#include <linux/minmax.h>
 #include <linux/spi/spi-mem.h>
 #include <linux/mfd/syscon.h>
 
@@ -240,6 +241,10 @@ struct npcm_fiu_chip {
 	void __iomem *flash_region_mapped_ptr;
 	struct npcm_fiu_spi *fiu;
 	unsigned long clkrate;
+	bool disable_direct;
+#ifdef CONFIG_NPCM_FIU_WR_DR_EN
+	bool directw_wr_en;
+#endif
 	u32 chipselect;
 };
 
@@ -247,6 +252,9 @@ struct npcm_fiu_spi {
 	struct npcm_fiu_chip chip[NPCM_MAX_CHIP_NUM];
 	const struct npcm_fiu_info *info;
 	struct spi_mem_op drd_op;
+#ifdef CONFIG_NPCM_FIU_WR_DR_EN
+	struct spi_mem_op dwr_op;
+#endif
 	struct resource *res_mem;
 	struct regmap *regmap;
 	unsigned long clkrate;
@@ -310,6 +318,25 @@ static ssize_t npcm_fiu_direct_read(struct spi_mem_dirmap_desc *desc,
 	return len;
 }
 
+#ifdef CONFIG_NPCM_FIU_WR_DR_EN
+static void npcm_fiu_set_dwr(struct npcm_fiu_spi *fiu,
+			     const struct spi_mem_op *op)
+{
+	regmap_update_bits(fiu->regmap, NPCM_FIU_DWR_CFG,
+			   NPCM_FIU_DWR_CFG_WRCMD, op->cmd.opcode);
+	fiu->dwr_op.cmd.opcode = op->cmd.opcode;
+	regmap_update_bits(fiu->regmap, NPCM_FIU_DWR_CFG,
+			   NPCM_FIU_DWR_CFG_DBPCK,
+			   ilog2(op->data.buswidth) <<
+			   NPCM_FIU_DWR_DBPCK_SHIFT);
+	fiu->dwr_op.data.buswidth = op->data.buswidth;
+	regmap_update_bits(fiu->regmap, NPCM_FIU_DWR_CFG,
+			   NPCM_FIU_DWR_CFG_ABPCK,
+			   ilog2(op->addr.buswidth) <<
+			   NPCM_FIU_DWR_ABPCK_SHIFT);
+	fiu->dwr_op.addr.buswidth = op->addr.buswidth;
+}
+#endif
 static ssize_t npcm_fiu_direct_write(struct spi_mem_dirmap_desc *desc,
 				     u64 offs, size_t len, const void *buf)
 {
@@ -321,11 +348,25 @@ static ssize_t npcm_fiu_direct_write(struct spi_mem_dirmap_desc *desc,
 	const u8 *buf_tx = buf;
 	u32 i;
 
+#ifdef CONFIG_NPCM_FIU_WR_DR_EN
+	if (fiu->spix_mode) {
+		for (i = 0 ; i < len ; i++)
+			iowrite8(*(buf_tx + i), dst + i);
+	} else {
+		if (desc->info.op_tmpl.addr.buswidth != fiu->dwr_op.addr.buswidth ||
+		    desc->info.op_tmpl.data.buswidth != fiu->dwr_op.data.buswidth ||
+		    desc->info.op_tmpl.cmd.opcode != fiu->dwr_op.cmd.opcode)
+			npcm_fiu_set_dwr(fiu, &desc->info.op_tmpl);
+
+		memcpy_toio(dst, buf_tx, len);
+	}
+#else
 	if (fiu->spix_mode)
 		for (i = 0 ; i < len ; i++)
 			iowrite8(*(buf_tx + i), dst + i);
 	else
 		memcpy_toio(dst, buf_tx, len);
+#endif
 
 	return len;
 }
@@ -499,10 +540,7 @@ static int npcm_fiu_read(struct spi_mem *mem, const struct spi_mem_op *op)
 
 	do {
 		addr = ((u32)op->addr.val + i);
-		if (currlen < 16)
-			readlen = currlen;
-		else
-			readlen = 16;
+		readlen = min_t(int, currlen, 16);
 
 		buf_ptr = data + i;
 		ret = npcm_fiu_uma_read(mem, op, addr, true, buf_ptr,
@@ -531,7 +569,7 @@ static void npcm_fiux_set_direct_wr(struct npcm_fiu_spi *fiu)
 
 static void npcm_fiux_set_direct_rd(struct npcm_fiu_spi *fiu)
 {
-	u32 rx_dummy = 0;
+	u32 rx_dummy = 2;
 
 	regmap_write(fiu->regmap, NPCM_FIU_DRD_CFG,
 		     NPCM_FIU_DRD_16_BYTE_BURST);
@@ -551,13 +589,8 @@ static int npcm_fiu_exec_op(struct spi_mem *mem, const struct spi_mem_op *op)
 	int ret = 0;
 	u8 *buf;
 
-	dev_dbg(fiu->dev, "cmd:%#x mode:%d.%d.%d.%d addr:%#llx len:%#x\n",
-		op->cmd.opcode, op->cmd.buswidth, op->addr.buswidth,
-		op->dummy.buswidth, op->data.buswidth, op->addr.val,
-		op->data.nbytes);
-
 	if (fiu->spix_mode || op->addr.nbytes > 4)
-		return -ENOTSUPP;
+		return -EOPNOTSUPP;
 
 	if (fiu->clkrate != chip->clkrate) {
 		ret = clk_set_rate(fiu->clk, chip->clkrate);
@@ -616,12 +649,26 @@ static int npcm_fiu_dirmap_create(struct spi_mem_dirmap_desc *desc)
 		return 0;
 	}
 
-	if (!fiu->spix_mode &&
-	    desc->info.op_tmpl.data.dir == SPI_MEM_DATA_OUT) {
+	if (chip->disable_direct) {
+		dev_warn(fiu->dev, "CS%d Direct read and write disabled\n",spi_get_chipselect(desc->mem->spi, 0));
 		desc->nodirmap = true;
 		return 0;
 	}
 
+#ifdef CONFIG_NPCM_FIU_WR_DR_EN
+	if (!fiu->spix_mode && !chip->directw_wr_en && desc->info.op_tmpl.data.dir == SPI_MEM_DATA_OUT) {
+#else
+	if (!fiu->spix_mode &&
+	    desc->info.op_tmpl.data.dir == SPI_MEM_DATA_OUT) {
+#endif
+		desc->nodirmap = true;
+		return 0;
+	}
+
+#ifdef CONFIG_NPCM_FIU_WR_DR_EN
+	if (desc->info.op_tmpl.data.dir == SPI_MEM_DATA_OUT)
+		dev_info(fiu->dev, "Write direct enable cs %d\n",desc->mem->spi->chip_select[0]);
+#endif
 	if (!chip->flash_region_mapped_ptr) {
 		chip->flash_region_mapped_ptr =
 			devm_ioremap(fiu->dev, (fiu->res_mem->start +
@@ -659,7 +706,14 @@ static int npcm_fiu_dirmap_create(struct spi_mem_dirmap_desc *desc)
 			npcm_fiux_set_direct_rd(fiu);
 
 	} else {
+#ifdef CONFIG_NPCM_FIU_WR_DR_EN
+		if (!fiu->spix_mode)
+			npcm_fiu_set_dwr(fiu, &desc->info.op_tmpl);
+		else
+			npcm_fiux_set_direct_wr(fiu);
+#else
 		npcm_fiux_set_direct_wr(fiu);
+#endif
 	}
 
 	return 0;
@@ -701,7 +755,13 @@ static int npcm_fiu_probe(struct platform_device *pdev)
 	struct spi_controller *ctrl;
 	struct npcm_fiu_spi *fiu;
 	void __iomem *regbase;
-	int id, ret;
+	u32 dir_dis[NPCM_MAX_CHIP_NUM];
+	int dir_cnt, i;
+	int id;
+#ifdef CONFIG_NPCM_FIU_WR_DR_EN
+	u32 wr_en[NPCM_MAX_CHIP_NUM];
+	int wr_cnt;
+#endif
 
 	ctrl = devm_spi_alloc_host(dev, sizeof(*fiu));
 	if (!ctrl)
@@ -739,15 +799,38 @@ static int npcm_fiu_probe(struct platform_device *pdev)
 
 	fiu->res_mem = platform_get_resource_byname(pdev, IORESOURCE_MEM,
 						    "memory");
-	fiu->clk = devm_clk_get(dev, NULL);
+	fiu->clk = devm_clk_get_enabled(dev, NULL);
 	if (IS_ERR(fiu->clk))
 		return PTR_ERR(fiu->clk);
 
 	fiu->spix_mode = of_property_read_bool(dev->of_node,
 					       "nuvoton,spix-mode");
 
+	dir_cnt = of_property_count_elems_of_size(dev->of_node, "nuvoton-disable-direct-cs", sizeof(u32));
+	if (dir_cnt > 0) {
+		of_property_read_u32_array(dev->of_node, "nuvoton-disable-direct-cs", dir_dis, dir_cnt);
+		for (i = 0 ; i < dir_cnt ; i++)
+			if (dir_dis[i] < fiu->info->max_cs)
+				fiu->chip[dir_dis[i]].disable_direct = true;
+	}
+
+#ifdef CONFIG_NPCM_FIU_WR_DR_EN
+	/* 
+	 * this modification will not upstream:
+	 * Adding direct write support for FIUX, the user can choose which 
+	 * CS will use direct write by setting nuvoton,dr_wr_en <cs number> in
+	 * the FIU device tree, for example, nuvoton,dr_wr_en = <1 3>; 
+	 * enable direct writing at CS1 and CS3
+	 */ 
+	wr_cnt = of_property_count_elems_of_size(dev->of_node, "nuvoton,dr_wr_en", sizeof(u32));
+	if (wr_cnt > 0) {
+		of_property_read_u32_array(dev->of_node, "nuvoton,dr_wr_en", wr_en, wr_cnt);
+		for (i = 0 ; i < wr_cnt ; i++)
+			if (wr_en[i] < fiu->info->max_cs)
+				fiu->chip[wr_en[i]].directw_wr_en = true;
+	}
+#endif
 	platform_set_drvdata(pdev, fiu);
-	clk_prepare_enable(fiu->clk);
 
 	ctrl->mode_bits = SPI_RX_DUAL | SPI_RX_QUAD
 		| SPI_TX_DUAL | SPI_TX_QUAD;
@@ -757,30 +840,23 @@ static int npcm_fiu_probe(struct platform_device *pdev)
 	ctrl->num_chipselect = fiu->info->max_cs;
 	ctrl->dev.of_node = dev->of_node;
 
-	ret = devm_spi_register_controller(dev, ctrl);
-	if (ret)
-		clk_disable_unprepare(fiu->clk);
-
-	return ret;
+	return devm_spi_register_controller(dev, ctrl);
 }
 
 static void npcm_fiu_remove(struct platform_device *pdev)
 {
-	struct npcm_fiu_spi *fiu = platform_get_drvdata(pdev);
-
-	clk_disable_unprepare(fiu->clk);
 }
 
 MODULE_DEVICE_TABLE(of, npcm_fiu_dt_ids);
 
 static struct platform_driver npcm_fiu_driver = {
 	.driver = {
-		.name	= "NPCM-FIU",
-		.bus	= &platform_bus_type,
+		.name = "NPCM-FIU",
+		.bus = &platform_bus_type,
 		.of_match_table = npcm_fiu_dt_ids,
 	},
-	.probe      = npcm_fiu_probe,
-	.remove_new	    = npcm_fiu_remove,
+	.probe = npcm_fiu_probe,
+	.remove = npcm_fiu_remove,
 };
 module_platform_driver(npcm_fiu_driver);
 

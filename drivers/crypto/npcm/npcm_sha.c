@@ -639,21 +639,12 @@ static int npcm_sha_import(struct ahash_request *req, const void *in)
 
 static int npcm_hash_walk_next(struct crypto_hash_walk *walk)
 {
-	unsigned int alignmask = walk->alignmask;
 	unsigned int offset = walk->offset;
 	unsigned int nbytes = min(walk->entrylen,
 				  ((unsigned int)(PAGE_SIZE)) - offset);
 
 	walk->data = kmap_atomic(walk->pg);
 	walk->data += offset;
-
-	if (offset & alignmask) {
-		unsigned int unaligned = alignmask + 1 - (offset & alignmask);
-
-		if (nbytes > unaligned)
-			nbytes = unaligned;
-	}
-
 	walk->entrylen -= nbytes;
 	return nbytes;
 }
@@ -685,7 +676,6 @@ static int npcm_crypto_ahash_walk_first(struct ahash_request *req,
 		return 0;
 	}
 
-	walk->alignmask = crypto_ahash_alignmask(crypto_ahash_reqtfm(req));
 	walk->sg = req->src;
 	walk->flags = req->base.flags & CRYPTO_TFM_REQ_MASK;
 	walk->flags |= CRYPTO_ALG_ASYNC;
@@ -845,7 +835,7 @@ static struct ahash_alg sha_algs[4] = {
 		.halg.statesize  = sizeof(struct npcm_sha_desc) + NUVOTON_ALIGNMENT,
 		.halg.base	= {
 			.cra_name		= "sha1",
-			.cra_driver_name	= "nuvoton_sha",
+			.cra_driver_name	= "nuvoton_sha1",
 			.cra_priority		= 300,
 			.cra_flags		= CRYPTO_ALG_TYPE_AHASH | CRYPTO_ALG_ASYNC,
 			.cra_blocksize		= SHA1_BLOCK_SIZE,
@@ -868,7 +858,7 @@ static struct ahash_alg sha_algs[4] = {
 		.halg.statesize  = sizeof(struct npcm_sha_desc) + NUVOTON_ALIGNMENT,
 		.halg.base	= {
 			.cra_name		= "sha256",
-			.cra_driver_name	= "nuvoton_sha",
+			.cra_driver_name	= "nuvoton_sha256",
 			.cra_priority		= 300,
 			.cra_flags		= CRYPTO_ALG_TYPE_AHASH | CRYPTO_ALG_ASYNC,
 			.cra_blocksize		= SHA256_BLOCK_SIZE,
@@ -891,7 +881,7 @@ static struct ahash_alg sha_algs[4] = {
 		.halg.statesize  = sizeof(struct npcm_sha_desc) + NUVOTON_ALIGNMENT,
 		.halg.base	= {
 			.cra_name		= "sha384",
-			.cra_driver_name	= "nuvoton_sha",
+			.cra_driver_name	= "nuvoton_sha384",
 			.cra_priority		= 300,
 			.cra_flags		= CRYPTO_ALG_TYPE_AHASH | CRYPTO_ALG_ASYNC,
 			.cra_blocksize		= SHA384_BLOCK_SIZE,
@@ -914,7 +904,7 @@ static struct ahash_alg sha_algs[4] = {
 		.halg.statesize  = sizeof(struct npcm_sha_desc) + NUVOTON_ALIGNMENT,
 		.halg.base	= {
 			.cra_name		= "sha512",
-			.cra_driver_name	= "nuvoton_sha",
+			.cra_driver_name	= "nuvoton_sha512",
 			.cra_priority		= 300,
 			.cra_flags		= CRYPTO_ALG_TYPE_AHASH | CRYPTO_ALG_ASYNC,
 			.cra_blocksize		= SHA512_BLOCK_SIZE,
@@ -981,7 +971,7 @@ err_region:
 	return ret;
 }
 
-static int __exit npcm_sha_remove(struct platform_device *pdev)
+static void npcm_sha_remove(struct platform_device *pdev)
 {
 	struct resource *res = dev_get_drvdata(&pdev->dev);
 	struct device_node *np = pdev->dev.of_node;
@@ -1004,8 +994,6 @@ static int __exit npcm_sha_remove(struct platform_device *pdev)
 	sha_base = NULL;
 
 	printk(KERN_NOTICE  "NPCM-SHA: remove: stop using Nuvoton npcm SHA module.\n");
-
-	return 0;
 }
 
 /* work with hotplug and coldplug */
@@ -1020,7 +1008,7 @@ MODULE_DEVICE_TABLE(of, sha_dt_id);
 
 static struct platform_driver npcm_sha_driver = {
 	.probe		= npcm_sha_probe,
-	.remove		= npcm_sha_remove,
+	.remove = npcm_sha_remove,
 	.shutdown	= NULL,
 	.suspend	= NULL,
 	.resume		= NULL,

@@ -18,21 +18,21 @@
 #define VIDEO_DBG(fmt, args...) \
 dev_info(pAstRVAS->pdev, "%s() " fmt, __func__, ##args)
 #else
-#define VIDEO_DBG(...)
+#define VIDEO_DBG(fmt, ...)
 #endif // RVAS_VIDEO_DEBUG
 
 #ifdef VIDEO_ENGINE_DEBUG
 #define VIDEO_ENG_DBG(fmt, args...) \
 dev_info(pAstRVAS->pdev, "%s() " fmt, __func__, ##args)
 #else
-#define VIDEO_ENG_DBG(...)
+#define VIDEO_ENG_DBG(fmt, ...)
 #endif // RVAS_VIDEO_DEBUG
 
 #ifdef HARDWARE_ENGINE_DEBUG
 #define HW_ENG_DBG(fmt, args...) \
 pr_info("%s() " fmt, __func__, ##args)
 #else
-#define HW_ENG_DBG(...)
+#define HW_ENG_DBG(fmt, ...)
 #endif // RVAS_VIDEO_DEBUG
 
 #endif // AST_VIDEO_DEBUG_H_

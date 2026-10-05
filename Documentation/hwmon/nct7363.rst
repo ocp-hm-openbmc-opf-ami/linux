@@ -28,6 +28,8 @@ Currently, the driver supports the following features:
 
 ==========  ==========================================
 fanX_input  provide current fan rotation value in RPM
+fanX_alarm  report fan low speed real status
+fanX_min    get or set fan count threshold
 
 pwmX        get or set PWM fan control value.
 ==========  ==========================================

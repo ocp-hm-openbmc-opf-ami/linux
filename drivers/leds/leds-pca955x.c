@@ -73,13 +73,13 @@ enum pca955x_type {
 };
 
 struct pca955x_chipdef {
-	int			bits;
+	u8			bits;
 	u8			slv_addr;	/* 7-bit slave address mask */
 	int			slv_addr_shift;	/* Number of bits to ignore */
 	int			blink_div;	/* PSC divider */
 };
 
-static struct pca955x_chipdef pca955x_chipdefs[] = {
+static const struct pca955x_chipdef pca955x_chipdefs[] = {
 	[pca9550] = {
 		.bits		= 2,
 		.slv_addr	= /* 110000x */ 0x60,
@@ -112,20 +112,10 @@ static struct pca955x_chipdef pca955x_chipdefs[] = {
 	},
 };
 
-static const struct i2c_device_id pca955x_id[] = {
-	{ "pca9550", pca9550 },
-	{ "pca9551", pca9551 },
-	{ "pca9552", pca9552 },
-	{ "ibm-pca9552", ibm_pca9552 },
-	{ "pca9553", pca9553 },
-	{ }
-};
-MODULE_DEVICE_TABLE(i2c, pca955x_id);
-
 struct pca955x {
 	struct mutex lock;
 	struct pca955x_led *leds;
-	struct pca955x_chipdef	*chipdef;
+	const struct pca955x_chipdef	*chipdef;
 	struct i2c_client	*client;
 	unsigned long active_blink;
 	unsigned long active_pins;
@@ -152,13 +142,13 @@ struct pca955x_platform_data {
 };
 
 /* 8 bits per input register */
-static inline int pca955x_num_input_regs(int bits)
+static inline u8 pca955x_num_input_regs(u8 bits)
 {
 	return (bits + 7) / 8;
 }
 
 /* 4 bits per LED selector register */
-static inline int pca955x_num_led_regs(int bits)
+static inline u8 pca955x_num_led_regs(u8 bits)
 {
 	return (bits + 3)  / 4;
 }
@@ -264,9 +254,10 @@ static int pca955x_read_pwm(struct pca955x *pca955x, int n, u8 *val)
 
 static int pca955x_read_psc(struct pca955x *pca955x, int n, u8 *val)
 {
-	u8 cmd = pca955x_num_input_regs(pca955x->chipdef->bits) + (2 * n);
 	int ret;
+	u8 cmd;
 
+	cmd = pca955x_num_input_regs(pca955x->chipdef->bits) + (2 * n);
 	ret = i2c_smbus_read_byte_data(pca955x->client, cmd);
 	if (ret < 0) {
 		dev_err(&pca955x->client->dev, "%s: reg 0x%x, err %d\n", __func__, n, ret);
@@ -362,24 +353,26 @@ out:
 	return ret;
 }
 
-static u8 pca955x_period_to_psc(struct pca955x *pca955x, unsigned long p)
+static u8 pca955x_period_to_psc(struct pca955x *pca955x, unsigned long period)
 {
-	p *= pca955x->chipdef->blink_div;
-	p /= MSEC_PER_SEC;
-	p -= 1;
+	/* psc register value = (blink period * coeff) - 1 */
+	period *= pca955x->chipdef->blink_div;
+	period /= MSEC_PER_SEC;
+	period -= 1;
 
-	return p;
+	return period;
 }
 
 static unsigned long pca955x_psc_to_period(struct pca955x *pca955x, u8 psc)
 {
-	unsigned long p = psc;
+	unsigned long period = psc;
 
-	p += 1;
-	p *= MSEC_PER_SEC;
-	p /= pca955x->chipdef->blink_div;
+	/* blink period = (psc register value + 1) / coeff */
+	period += 1;
+	period *= MSEC_PER_SEC;
+	period /= pca955x->chipdef->blink_div;
 
-	return p;
+	return period;
 }
 
 static int pca955x_led_blink(struct led_classdev *led_cdev,
@@ -387,31 +380,31 @@ static int pca955x_led_blink(struct led_classdev *led_cdev,
 {
 	struct pca955x_led *pca955x_led = led_to_pca955x(led_cdev);
 	struct pca955x *pca955x = pca955x_led->pca955x;
-	unsigned long p = *delay_on + *delay_off;
+	unsigned long period = *delay_on + *delay_off;
 	int ret = 0;
 
 	mutex_lock(&pca955x->lock);
 
-	if (p) {
+	if (period) {
 		if (*delay_on != *delay_off) {
 			ret = -EINVAL;
 			goto out;
 		}
 
-		if (p < pca955x_psc_to_period(pca955x, 0) ||
-		    p > pca955x_psc_to_period(pca955x, 0xff)) {
+		if (period < pca955x_psc_to_period(pca955x, 0) ||
+		    period > pca955x_psc_to_period(pca955x, 0xff)) {
 			ret = -EINVAL;
 			goto out;
 		}
 	} else {
-		p = pca955x->active_blink ? pca955x->blink_period :
+		period = pca955x->active_blink ? pca955x->blink_period :
 			PCA955X_BLINK_DEFAULT_MS;
 	}
 
 	if (!pca955x->active_blink ||
 	    pca955x->active_blink == BIT(pca955x_led->led_num) ||
-	    pca955x->blink_period == p) {
-		u8 psc = pca955x_period_to_psc(pca955x, p);
+	    pca955x->blink_period == period) {
+		u8 psc = pca955x_period_to_psc(pca955x, period);
 
 		if (!test_and_set_bit(pca955x_led->led_num,
 				      &pca955x->active_blink)) {
@@ -437,17 +430,17 @@ static int pca955x_led_blink(struct led_classdev *led_cdev,
 				goto out;
 		}
 
-		if (pca955x->blink_period != p) {
-			pca955x->blink_period = p;
+		if (pca955x->blink_period != period) {
+			pca955x->blink_period = period;
 			ret = pca955x_write_psc(pca955x, 0, psc);
 			if (ret)
 				goto out;
 		}
 
-		p = pca955x_psc_to_period(pca955x, psc);
-		p /= 2;
-		*delay_on = p;
-		*delay_off = p;
+		period = pca955x_psc_to_period(pca955x, psc);
+		period /= 2;
+		*delay_on = period;
+		*delay_off = period;
 	} else {
 		ret = -EBUSY;
 	}
@@ -502,10 +495,10 @@ static int pca955x_set_value(struct gpio_chip *gc, unsigned int offset,
 	return pca955x_led_set(&led->led_cdev, PCA955X_GPIO_LOW);
 }
 
-static void pca955x_gpio_set_value(struct gpio_chip *gc, unsigned int offset,
-				   int val)
+static int pca955x_gpio_set_value(struct gpio_chip *gc, unsigned int offset,
+				  int val)
 {
-	pca955x_set_value(gc, offset, val);
+	return pca955x_set_value(gc, offset, val);
 }
 
 static int pca955x_gpio_get_value(struct gpio_chip *gc, unsigned int offset)
@@ -538,7 +531,7 @@ static int pca955x_gpio_direction_output(struct gpio_chip *gc,
 #endif /* CONFIG_LEDS_PCA955X_GPIO */
 
 static struct pca955x_platform_data *
-pca955x_get_pdata(struct i2c_client *client, struct pca955x_chipdef *chip)
+pca955x_get_pdata(struct i2c_client *client, const struct pca955x_chipdef *chip)
 {
 	struct pca955x_platform_data *pdata;
 	struct pca955x_led *led;
@@ -580,50 +573,27 @@ pca955x_get_pdata(struct i2c_client *client, struct pca955x_chipdef *chip)
 	return pdata;
 }
 
-static const struct of_device_id of_pca955x_match[] = {
-	{ .compatible = "nxp,pca9550", .data = (void *)pca9550 },
-	{ .compatible = "nxp,pca9551", .data = (void *)pca9551 },
-	{ .compatible = "nxp,pca9552", .data = (void *)pca9552 },
-	{ .compatible = "ibm,pca9552", .data = (void *)ibm_pca9552 },
-	{ .compatible = "nxp,pca9553", .data = (void *)pca9553 },
-	{},
-};
-MODULE_DEVICE_TABLE(of, of_pca955x_match);
-
 static int pca955x_probe(struct i2c_client *client)
 {
 	struct pca955x *pca955x;
 	struct pca955x_led *pca955x_led;
-	struct pca955x_chipdef *chip;
+	const struct pca955x_chipdef *chip;
 	struct led_classdev *led;
 	struct led_init_data init_data;
 	struct i2c_adapter *adapter;
-	int i, bit, err, nls, reg;
+	u8 i, nls, psc0;
 	u8 ls1[4];
 	u8 ls2[4];
 	struct pca955x_platform_data *pdata;
-	u8 psc0;
 	bool keep_psc0 = false;
 	bool set_default_label = false;
-	char default_label[8];
-	enum pca955x_type chip_type;
-	const void *md = device_get_match_data(&client->dev);
+	char default_label[4];
+	int bit, err, reg;
 
-	if (md) {
-		chip_type = (enum pca955x_type)md;
-	} else {
-		const struct i2c_device_id *id = i2c_match_id(pca955x_id,
-							      client);
+	chip = i2c_get_match_data(client);
+	if (!chip)
+		return dev_err_probe(&client->dev, -ENODEV, "unknown chip\n");
 
-		if (id) {
-			chip_type = (enum pca955x_type)id->driver_data;
-		} else {
-			dev_err(&client->dev, "unknown chip\n");
-			return -ENODEV;
-		}
-	}
-
-	chip = &pca955x_chipdefs[chip_type];
 	adapter = client->adapter;
 	pdata = dev_get_platdata(&client->dev);
 	if (!pdata) {
@@ -640,16 +610,15 @@ static int pca955x_probe(struct i2c_client *client)
 		return -ENODEV;
 	}
 
-	dev_info(&client->dev, "leds-pca955x: Using %s %d-bit LED driver at "
-		 "slave address 0x%02x\n", client->name, chip->bits,
-		 client->addr);
+	dev_info(&client->dev, "Using %s %u-bit LED driver at slave address 0x%02x\n",
+		 client->name, chip->bits, client->addr);
 
 	if (!i2c_check_functionality(adapter, I2C_FUNC_SMBUS_BYTE_DATA))
 		return -EIO;
 
 	if (pdata->num_leds != chip->bits) {
 		dev_err(&client->dev,
-			"board info claims %d LEDs on a %d-bit chip\n",
+			"board info claims %d LEDs on a %u-bit chip\n",
 			pdata->num_leds, chip->bits);
 		return -ENODEV;
 	}
@@ -674,14 +643,14 @@ static int pca955x_probe(struct i2c_client *client)
 	init_data.devicename = "pca955x";
 
 	nls = pca955x_num_led_regs(chip->bits);
-	/* use auto-increment feature to read all the led selectors at once */
+	/* Use auto-increment feature to read all the LED selectors at once. */
 	err = i2c_smbus_read_i2c_block_data(client,
 					    0x10 | (pca955x_num_input_regs(chip->bits) + 4), nls,
 					    ls1);
 	if (err < 0)
 		return err;
 
-	for (i = 0; i < nls; ++i)
+	for (i = 0; i < nls; i++)
 		ls2[i] = ls1[i];
 
 	for (i = 0; i < chip->bits; i++) {
@@ -724,8 +693,7 @@ static int pca955x_probe(struct i2c_client *client)
 			}
 
 			if (set_default_label) {
-				snprintf(default_label, sizeof(default_label),
-					 "%d", i);
+				snprintf(default_label, sizeof(default_label), "%hhu", i);
 				init_data.default_label = default_label;
 			} else {
 				init_data.default_label = NULL;
@@ -740,7 +708,7 @@ static int pca955x_probe(struct i2c_client *client)
 		}
 	}
 
-	for (i = 0; i < nls; ++i) {
+	for (i = 0; i < nls; i++) {
 		if (ls1[i] != ls2[i]) {
 			err = pca955x_write_ls(pca955x, i, ls2[i]);
 			if (err)
@@ -794,6 +762,26 @@ static int pca955x_probe(struct i2c_client *client)
 
 	return 0;
 }
+
+static const struct i2c_device_id pca955x_id[] = {
+	{ "pca9550", (kernel_ulong_t)&pca955x_chipdefs[pca9550] },
+	{ "pca9551", (kernel_ulong_t)&pca955x_chipdefs[pca9551] },
+	{ "pca9552", (kernel_ulong_t)&pca955x_chipdefs[pca9552] },
+	{ "ibm-pca9552", (kernel_ulong_t)&pca955x_chipdefs[ibm_pca9552] },
+	{ "pca9553", (kernel_ulong_t)&pca955x_chipdefs[pca9553] },
+	{}
+};
+MODULE_DEVICE_TABLE(i2c, pca955x_id);
+
+static const struct of_device_id of_pca955x_match[] = {
+	{ .compatible = "nxp,pca9550", .data = &pca955x_chipdefs[pca9550] },
+	{ .compatible = "nxp,pca9551", .data = &pca955x_chipdefs[pca9551] },
+	{ .compatible = "nxp,pca9552", .data = &pca955x_chipdefs[pca9552] },
+	{ .compatible = "ibm,pca9552", .data = &pca955x_chipdefs[ibm_pca9552] },
+	{ .compatible = "nxp,pca9553", .data = &pca955x_chipdefs[pca9553] },
+	{}
+};
+MODULE_DEVICE_TABLE(of, of_pca955x_match);
 
 static struct i2c_driver pca955x_driver = {
 	.driver = {

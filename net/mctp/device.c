@@ -70,6 +70,7 @@ static int mctp_fill_addrinfo(struct sk_buff *skb,
 		return -EMSGSIZE;
 
 	hdr = nlmsg_data(nlh);
+	memset(hdr, 0, sizeof(*hdr));
 	hdr->ifa_family = AF_MCTP;
 	hdr->ifa_prefixlen = 0;
 	hdr->ifa_flags = 0;
@@ -537,9 +538,19 @@ int __init mctp_device_init(void)
 
 	register_netdevice_notifier(&mctp_dev_nb);
 
-	rtnl_af_register(&mctp_af_ops);
-	
+	err = rtnl_af_register(&mctp_af_ops);
+	if (err)
+		goto err_notifier;
+
 	err = rtnl_register_many(mctp_device_rtnl_msg_handlers);
+	if (err)
+		goto err_af;
+
+	return 0;
+err_af:
+	rtnl_af_unregister(&mctp_af_ops);
+err_notifier:
+	unregister_netdevice_notifier(&mctp_dev_nb);
 	return err;
 }
 

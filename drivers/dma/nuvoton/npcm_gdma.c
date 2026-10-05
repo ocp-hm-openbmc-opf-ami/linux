@@ -174,6 +174,10 @@ static void npcm_gdma_issue_pending(struct dma_chan *chan)
 		writel(gdma_chan->cfg.src_addr, gdma->gdmac_reg + GDMA_SRCB(chan_id));
 		writel(gdma_desc->addr, gdma->gdmac_reg + GDMA_DSTB(chan_id));
 		ctl = GDMA_CTL_SAFIX;
+	} else {
+		/* Unsupported direction, return early */
+		spin_unlock_irqrestore(&gdma->lock, flags);
+		return;
 	}
 
 	/* Set transfer count */
@@ -284,7 +288,7 @@ static int npcm_gdma_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int npcm_gdma_remove(struct platform_device *pdev)
+static void npcm_gdma_remove(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct npcm_gdma *gdma = platform_get_drvdata(pdev);
@@ -293,7 +297,6 @@ static int npcm_gdma_remove(struct platform_device *pdev)
 	dma_async_device_unregister(&gdma->ddev);
 
 	dev_info(&pdev->dev, "module removed\n");
-	return 0;
 }
 
 static const struct of_device_id npcm_gdma_match[] = {

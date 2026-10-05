@@ -576,7 +576,7 @@ struct sctp_chunk *sctp_process_strreset_outreq(
 			struct sctp_transport *t;
 
 			t = asoc->strreset_chunk->transport;
-			if (del_timer(&t->reconf_timer))
+			if (timer_delete(&t->reconf_timer))
 				sctp_transport_put(t);
 
 			sctp_chunk_put(asoc->strreset_chunk);
@@ -825,7 +825,7 @@ struct sctp_chunk *sctp_process_strreset_addstrm_out(
 			struct sctp_transport *t;
 
 			t = asoc->strreset_chunk->transport;
-			if (del_timer(&t->reconf_timer))
+			if (timer_delete(&t->reconf_timer))
 				sctp_transport_put(t);
 
 			sctp_chunk_put(asoc->strreset_chunk);
@@ -1038,6 +1038,7 @@ struct sctp_chunk *sctp_process_strreset_resp(
 			stsn, rtsn, GFP_ATOMIC);
 	} else if (req->type == SCTP_PARAM_RESET_ADD_OUT_STREAMS) {
 		struct sctp_strreset_addstrm *addstrm;
+		const struct sctp_sched_ops *sched;
 		__u16 number;
 
 		addstrm = (struct sctp_strreset_addstrm *)req;
@@ -1048,7 +1049,10 @@ struct sctp_chunk *sctp_process_strreset_resp(
 			for (i = number; i < stream->outcnt; i++)
 				SCTP_SO(stream, i)->state = SCTP_STREAM_OPEN;
 		} else {
-			sctp_stream_shrink_out(stream, number);
+			sched = sctp_sched_ops_from_stream(stream);
+			sched->unsched_all(stream);
+			sctp_stream_outq_migrate(stream, NULL, number);
+			sched->sched_all(stream);
 			stream->outcnt = number;
 		}
 
@@ -1076,7 +1080,7 @@ struct sctp_chunk *sctp_process_strreset_resp(
 	/* remove everything for this reconf request */
 	if (!asoc->strreset_outstanding) {
 		t = asoc->strreset_chunk->transport;
-		if (del_timer(&t->reconf_timer))
+		if (timer_delete(&t->reconf_timer))
 			sctp_transport_put(t);
 
 		sctp_chunk_put(asoc->strreset_chunk);

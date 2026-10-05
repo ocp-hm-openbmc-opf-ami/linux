@@ -46,7 +46,7 @@
 #define DC_LOGGER \
 	clk_mgr->base.base.ctx->logger
 
-#include "link.h"
+#include "link_service.h"
 
 #define TO_CLK_MGR_DCN315(clk_mgr)\
 	container_of(clk_mgr, struct clk_mgr_dcn315, base)
@@ -138,7 +138,7 @@ static void dcn315_update_clocks(struct clk_mgr *clk_mgr_base,
 	if (dc->work_arounds.skip_clock_update)
 		return;
 
-	clk_mgr_base->clks.zstate_support = new_clocks->zstate_support;
+	display_count = dcn315_get_active_display_cnt_wa(dc, context);
 	/*
 	 * if it is safe to lower, but we are already in the lower state, we don't have to do anything
 	 * also if safe to lower is false, we just go in the higher state
@@ -151,7 +151,6 @@ static void dcn315_update_clocks(struct clk_mgr *clk_mgr_base,
 		}
 		/* check that we're not already in lower */
 		if (clk_mgr_base->clks.pwr_state != DCN_PWR_STATE_LOW_POWER) {
-			display_count = dcn315_get_active_display_cnt_wa(dc, context);
 			/* if we can go lower, go lower */
 			if (display_count == 0) {
 				union display_idle_optimization_u idle_info = { 0 };
@@ -242,7 +241,7 @@ static void dcn315_update_clocks(struct clk_mgr *clk_mgr_base,
 	cmd.notify_clocks.clocks.dispclk_khz = clk_mgr_base->clks.dispclk_khz;
 	cmd.notify_clocks.clocks.dppclk_khz = clk_mgr_base->clks.dppclk_khz;
 
-	dm_execute_dmub_cmd(dc->ctx, &cmd, DM_DMUB_WAIT_TYPE_WAIT);
+	dc_wake_and_execute_dmub_cmd(dc->ctx, &cmd, DM_DMUB_WAIT_TYPE_WAIT);
 }
 
 static void dcn315_dump_clk_registers(struct clk_state_registers_and_bypass *regs_and_bypass,
@@ -714,7 +713,7 @@ void dcn315_clk_mgr_construct(
 					   i, smu_dpm_clks.dpm_clks->DfPstateTable[i].Voltage);
 		}
 
-		if (ctx->dc_bios && ctx->dc_bios->integrated_info) {
+		if (ctx->dc_bios->integrated_info) {
 			dcn315_clk_mgr_helper_populate_bw_params(
 					&clk_mgr->base,
 					ctx->dc_bios->integrated_info,

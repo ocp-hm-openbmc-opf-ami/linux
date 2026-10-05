@@ -1304,13 +1304,13 @@ out:
 	return rc;
 }
 
-static int aspeed_espi_mmbi_remove(struct platform_device *pdev)
+static void aspeed_espi_mmbi_remove(struct platform_device *pdev)
 {
 	struct ast2700_espi_mmbi *priv = dev_get_drvdata(&pdev->dev);
 	u32 i, j, reg;
 
 	if (!priv)
-		return 0;
+		return;
 
 	regmap_write(priv->mmbi_map, ESPI_MMBI_INT_ENABLE, 0);
 
@@ -1334,7 +1334,6 @@ static int aspeed_espi_mmbi_remove(struct platform_device *pdev)
 		aspeed_espi_mmbi_dma_finish(priv);
 
 	dev_info(&pdev->dev, "ASPEED eSPI MMBI driver removed\n");
-	return 0;
 }
 
 static struct platform_driver aspeed_espi_mmbi_driver = {

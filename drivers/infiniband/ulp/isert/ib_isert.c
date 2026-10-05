@@ -91,9 +91,6 @@ isert_qp_event_callback(struct ib_event *e, void *context)
 	case IB_EVENT_COMM_EST:
 		rdma_notify(isert_conn->cm_id, IB_EVENT_COMM_EST);
 		break;
-	case IB_EVENT_QP_LAST_WQE_REACHED:
-		isert_warn("Reached TX IB_EVENT_QP_LAST_WQE_REACHED\n");
-		break;
 	default:
 		break;
 	}
@@ -1387,6 +1384,12 @@ isert_login_recv_done(struct ib_cq *cq, struct ib_wc *wc)
 
 	ib_dma_sync_single_for_cpu(ib_dev, isert_conn->login_desc->dma_addr,
 			ISER_RX_SIZE, DMA_FROM_DEVICE);
+
+	if (unlikely(wc->byte_len < ISER_HEADERS_LEN)) {
+		isert_dbg("login request length %u is too short\n",
+			  wc->byte_len);
+		return;
+	}
 
 	isert_conn->login_req_len = wc->byte_len - ISER_HEADERS_LEN;
 

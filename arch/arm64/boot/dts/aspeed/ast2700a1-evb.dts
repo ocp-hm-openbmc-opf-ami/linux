@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 /dts-v1/;
-
 #include "aspeed-g7.dtsi"
 #include <dt-bindings/gpio/aspeed-gpio.h>
 #include <dt-bindings/i2c/i2c.h>
 #include <dt-bindings/net/ti-dp83867.h>
+#include <dt-bindings/mmbi/protocols.h>
 
 #define DUAL_NODE 0	// 1: DUAL_NODE, 0: SINGLE_NODE
 #define PCIE0_EP 1	// 1: EP, 0: RC
 #define PCIE1_EP 1	// 1: EP, 0: RC
+#define PCIE2_RC 1	// 1: RC, 0: SGMII
 
 / {
 	model = "AST2700A1 EVB";
@@ -742,10 +743,6 @@
 &espi0 {
 	status = "okay";
 	perif-dma-mode;
-	perif-mmbi-enable;
-	perif-mmbi-src-addr = <0x0 0xa8000000>;
-	perif-mmbi-tgt-memory = <&espi0_mmbi_memory>;
-	perif-mmbi-instance-num = <0x1>;
 	perif-mcyc-enable;
 	perif-mcyc-src-addr = <0x0 0x98000000>;
 	perif-mcyc-size = <0x0 0x10000>;
@@ -760,7 +757,32 @@
 #endif
 };
 
+&espi0_mmbi {
+	status = "okay";
+	host-map-addr = <0x0 0xEC000000>;
+	memory-region = <&espi0_mmbi_memory>;
+	instances = <1>;
+
+	instance@0 {
+		channel = <0>; // channel should start from 0
+		protocols = /bits/ 8 <MMBI_PROTOCOL_MCTP>;
+	};
+};
+
 &rtc_over_espi0 {
+	status = "okay";
+};
+
+/* Enable UART2 and UART9 for obmc-console. */
+&uart2 {
+	/delete-property/ pinctrl-names;
+	/delete-property/ pinctrl-0;
+	status = "okay";
+};
+
+&uart9 {
+	/delete-property/ pinctrl-names;
+	/delete-property/ pinctrl-0;
 	status = "okay";
 };
 
@@ -768,10 +790,6 @@
 &espi1 {
 	status = "okay";
 	perif-dma-mode;
-	perif-mmbi-enable;
-	perif-mmbi-src-addr = <0x0 0xa8000000>;
-	perif-mmbi-tgt-memory = <&espi1_mmbi_memory>;
-	perif-mmbi-instance-num = <0x1>;
 	perif-mcyc-enable;
 	perif-mcyc-src-addr = <0x0 0x98000000>;
 	perif-mcyc-size = <0x0 0x10000>;
@@ -785,7 +803,33 @@
 #endif
 };
 
+&espi1_mmbi {
+	status = "okay";
+	host-map-addr = <0x0 0xEC000000>;
+	memory-region = <&espi1_mmbi_memory>;
+	instances = <1>;
+
+	instance@0 {
+		channel = <0>; // channel should start from 0
+		protocols = /bits/ 8 <MMBI_PROTOCOL_MCTP>;
+	};
+
+};
+
 &rtc_over_espi1 {
+	status = "okay";
+};
+
+/* Enable UART7 and UART10 for obmc-console. */
+&uart7 {
+	/delete-property/ pinctrl-names;
+	/delete-property/ pinctrl-0;
+	status = "okay";
+};
+
+&uart10 {
+	/delete-property/ pinctrl-names;
+	/delete-property/ pinctrl-0;
 	status = "okay";
 };
 #endif /* DUAL_NODE */
@@ -925,6 +969,22 @@
 };
 
 &hace {
+	dummy-key0 = <
+	    0x89878915 0x1DA242FA 0x1A7885CE 0x5BD7FA39
+	    0xC53265FD 0xCC346B25 0x230370EE 0xD0570629
+	>;
+	dummy-key1 = <
+	    0x89878902 0x1DA242FA 0x1A7885CE 0x5BD7FA39
+	    0xC53265FD 0xCC346B25 0x230370EE 0xD0570629
+	>;
+	dummy-key2 = <
+	    0x2C914FA3 0x1056D87B 0xC13D6AE2 0x5E44AF98
+	    0x0DB97321 0xCA378CF6 0x62EE115D 0x3FA74B90
+	>;
+	dummy-key3 = <
+	    0x9E18D25C 0x6FB17A43 0x348DE520 0x1269FAC7
+	    0xAC5503DE 0x2DB61F88 0xEF9AC074 0xB84E6731
+	>;
 	status = "okay";
 };
 
@@ -988,8 +1048,14 @@
 	status = "okay";
 	memory-region = <&pcie0_mmbi0_memory>;
 
-	bmc-int-value = /bits/ 8 <0x00>;
-	bmc-int-location = <0>;
+	noi = <7>;
+	aspeed,mmbi-interface = "mctp-netdev", /* ch0 */
+				"ioctl",       /* ch1 */
+				"ioctl",       /* ch2 */
+				"ioctl",       /* ch3 */
+				"ioctl",       /* ch4 */
+				"ioctl",       /* ch5 */
+				"ioctl";       /* ch6 */
 };
 #else /* !PCIE0_EP */
 &pcie0 {
@@ -1057,24 +1123,20 @@
 	status = "okay";
 	memory-region = <&pcie1_mmbi4_memory>;
 
-	bmc-int-value = /bits/ 8 <0x00>;
-	bmc-int-location = <0>;
+	noi = <7>;
+	aspeed,mmbi-interface = "mctp-netdev", /* ch0 */
+				"ioctl",       /* ch1 */
+				"ioctl",       /* ch2 */
+				"ioctl",       /* ch3 */
+				"ioctl",       /* ch4 */
+				"ioctl",       /* ch5 */
+				"ioctl";       /* ch6 */
 };
 #else /* !PCIE1_EP */
 &pcie1 {
 	status = "okay";
 };
 #endif /* PCIE1_EP */
-
-#if 0
-&i3c0 {
-	status = "okay";
-};
-
-&jtag0 {
-	status = "okay";
-};
-#endif
 
 &sdio_controller {
 	status = "okay";
@@ -1099,7 +1161,6 @@
 		states = <3300000 1>,
 			 <1800000 0>;
 	};
-
 };
 
 &sdhci {

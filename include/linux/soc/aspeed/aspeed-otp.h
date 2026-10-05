@@ -7,5 +7,6 @@
 #define _LINUX_ASPEED_OTP_H
 
 void otp_read_data_buf(u32 offset, u32 *buf, u32 len);
+void otp_read_conf_buf(u32 offset, u32 *buf, u32 len);
 
 #endif /* _LINUX_ASPEED_OTP_H */

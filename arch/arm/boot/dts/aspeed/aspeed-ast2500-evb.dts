@@ -26,7 +26,7 @@
 		ranges;
 
 		video_engine_memory: video {
-			size = <0x04000000>;
+			size = <0x02000000>;
 			alignment = <0x01000000>;
 			compatible = "shared-dma-pool";
 			reusable;
@@ -38,7 +38,18 @@
 			compatible = "shared-dma-pool";
 			reusable;
 		};
+
+		mctp_reserved: mctp_reserved@8a000000 {
+			reg = <0x8a000000 0x10000>;
+			compatible = "shared-dma-pool";
+			no-map;
+		};
 	};
+};
+
+&mctp {
+	status = "okay";
+	memory-region = <&mctp_reserved>;
 };
 
 &fmc {
@@ -67,6 +78,10 @@
 };
 
 &uart5 {
+	status = "okay";
+};
+
+&uart_routing {
 	status = "okay";
 };
 
@@ -140,14 +155,46 @@
 	status = "okay";
 };
 
-&gfx {
-     status = "okay";
-     memory-region = <&gfx_memory>;
-};
-
 &video {
 	status = "okay";
 	memory-region = <&video_engine_memory>;
+};
+
+&uart3 {
+	status = "okay";
+};
+
+&uart4 {
+	status = "okay";
+};
+
+&kcs1 {
+	kcs_addr = <0xca0>;
+	status = "okay";
+};
+
+&kcs2 {
+	kcs_addr = <0xca8>;
+	status = "okay";
+};
+
+&kcs3 {
+	kcs_addr = <0xca2>;
+	status = "okay";
+};
+
+&kcs4 {
+	kcs_addr = <0xca4>;
+	status = "okay";
+};
+
+&lpc_snoop {
+	status = "okay";
+	snoop-ports = <0x80>;
+};
+
+&ibt {
+	status = "okay";
 };
 
 &rtc {

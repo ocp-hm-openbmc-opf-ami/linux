@@ -65,17 +65,6 @@ static irqreturn_t npcm_espi_slave_irq_handler(int irq, void *arg)
 	regmap_read(priv->espi_regmap, ESPISTS, &sts);
 	regmap_read(priv->espi_regmap, VWEVMS1, &evms1);
 
-	if (sts & ESPISTS_CFGUPD) {
-		spin_lock(&priv->pltrstn_lock);
-		priv->pltrstn = (evms1 & VWEVMS1_PLTRST) ? '1' : '0';
-		priv->pltrstn_in_avail = true;
-		spin_unlock(&priv->pltrstn_lock);
-		wake_up_interruptible(&priv->pltrstn_waitq);
-
-		regmap_write_bits(priv->espi_regmap, ESPISTS,
-				  ESPISTS_CFGUPD, ESPISTS_CFGUPD);
-	}
-
 	if (sts & ESPISTS_PLTRST) {
 		spin_lock(&priv->pltrstn_lock);
 		priv->pltrstn = '0';
@@ -83,8 +72,7 @@ static irqreturn_t npcm_espi_slave_irq_handler(int irq, void *arg)
 		spin_unlock(&priv->pltrstn_lock);
 		wake_up_interruptible(&priv->pltrstn_waitq);
 
-		regmap_write_bits(priv->espi_regmap, ESPISTS,
-				  ESPISTS_PLTRST, ESPISTS_PLTRST);
+		regmap_write(priv->espi_regmap, ESPISTS, ESPISTS_PLTRST);
 	}
 
 	if (sts & ESPISTS_ESPIRST) {
@@ -94,10 +82,21 @@ static irqreturn_t npcm_espi_slave_irq_handler(int irq, void *arg)
 		spin_unlock(&priv->pltrstn_lock);
 		wake_up_interruptible(&priv->pltrstn_waitq);
 
-		regmap_write_bits(priv->espi_regmap, ESPISTS,
-				  ESPISTS_ESPIRST, ESPISTS_ESPIRST);
+		regmap_write(priv->espi_regmap, ESPISTS, ESPISTS_ESPIRST);
 
 		npcm_espi_slave_config_irq(priv);
+	}
+
+	if (sts & ESPISTS_CFGUPD) {
+		spin_lock(&priv->pltrstn_lock);
+		priv->pltrstn = (evms1 & VWEVMS1_PLTRST) ? '1' : '0';
+		priv->pltrstn_in_avail = true;
+		spin_unlock(&priv->pltrstn_lock);
+		wake_up_interruptible(&priv->pltrstn_waitq);
+#ifdef CONFIG_SPI_NPCM_FLASH
+		return IRQ_HANDLED;
+#endif
+		regmap_write(priv->espi_regmap, ESPISTS, ESPISTS_CFGUPD);
 	}
 
 	regmap_read(priv->espi_regmap, ESPISTS, &sts);
@@ -254,14 +253,13 @@ static int npcm_espi_slave_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int npcm_espi_slave_remove(struct platform_device *pdev)
+static void npcm_espi_slave_remove(struct platform_device *pdev)
 {
 	struct npcm_espi_slave *priv = dev_get_drvdata(&pdev->dev);
 
 	misc_deregister(&priv->miscdev);
 	kfree(priv->miscdev.name);
 	kfree(priv);
-	return 0;
 }
 
 static const struct of_device_id npcm_espi_slave_match[] = {
@@ -276,8 +274,8 @@ static struct platform_driver npcm_espi_slave_driver = {
 		.owner		= THIS_MODULE,
 		.of_match_table	= of_match_ptr(npcm_espi_slave_match),
 	},
-	.probe	= npcm_espi_slave_probe,
-	.remove	= npcm_espi_slave_remove,
+	.probe		= npcm_espi_slave_probe,
+	.remove = npcm_espi_slave_remove,
 };
 module_platform_driver(npcm_espi_slave_driver);
 

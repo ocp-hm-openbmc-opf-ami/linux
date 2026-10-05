@@ -231,7 +231,7 @@ static ssize_t        npcm750_otp_read                      (struct file *file, 
 static ssize_t        npcm750_otp_write                     (struct file *filp, const char __user *buff, size_t count, loff_t *pos);
        long           npcm750_otp_ioctl                     (struct file *filp, unsigned cmd, unsigned long arg);
 static int            npcm750_otp_probe                     (struct platform_device *pdev);
-static int __exit     npcmx50_otp_remove                    (struct platform_device *pdev);
+static void		      npcmx50_otp_remove                    (struct platform_device *pdev);
 static int __init     npcm750_otp_init                      (void);
 static void __exit    npcm750_otp_exit                      (void);
 
@@ -1423,7 +1423,7 @@ MODULE_DEVICE_TABLE(of, otp_dt_id);
 
 static struct platform_driver npcm750_otp_driver = {
 	.probe		= npcm750_otp_probe,
-	.remove		= npcmx50_otp_remove,
+	.remove = npcmx50_otp_remove,
 	.shutdown	= NULL,
 	.suspend	= NULL,
 	.resume		= NULL,
@@ -1525,7 +1525,7 @@ err_ioremap:
 	return ret;
 }
 
-static int __exit npcmx50_otp_remove(struct platform_device *pdev)
+static void npcmx50_otp_remove(struct platform_device *pdev)
 {
 	struct resource *res = dev_get_drvdata(&pdev->dev);
 
@@ -1544,7 +1544,6 @@ static int __exit npcmx50_otp_remove(struct platform_device *pdev)
 	otp_dev = NULL;
 
 	release_mem_region(res->start, resource_size(res));
-	return 0;
 }
 
 
@@ -1605,8 +1604,8 @@ static void __exit npcm750_otp_exit(void)
 	platform_driver_unregister(&npcm750_otp_driver);
 }
 
-module_init(npcm750_otp_init);
-module_exit(npcm750_otp_exit);
+/*module_init(npcm750_otp_init);
+module_exit(npcm750_otp_exit);*/
 
 
 MODULE_AUTHOR("Tali Perry <tali.perry@nuvoton.com>");

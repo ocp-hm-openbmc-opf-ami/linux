@@ -141,7 +141,7 @@ static irqreturn_t npcm_bpc_irq(int irq, void *arg)
 			kfifo_skip(&bpc->ch[addr_index].fifo);
 		kfifo_put(&bpc->ch[addr_index].fifo, data);
 		if (fifo_st & FIFO_OVERFLOW)
-			dev_warn(bpc->dev, "BIOS Post Codes FIFO Overflow\n");
+			dev_warn_ratelimited(bpc->dev, "BIOS Post Codes FIFO Overflow\n");
 
 		fifo_st = ioread8(bpc->base + NPCM_BPCFSTAT_REG);
 		if (bpc->en_dwcap) {
@@ -353,7 +353,7 @@ static int npcm_bpc_probe(struct platform_device *pdev)
 	return err;
 }
 
-static int npcm_bpc_remove(struct platform_device *pdev)
+static void npcm_bpc_remove(struct platform_device *pdev)
 {
 	struct npcm_bpc *bpc = dev_get_drvdata(&pdev->dev);
 	u8 reg_en;
@@ -364,8 +364,6 @@ static int npcm_bpc_remove(struct platform_device *pdev)
 		npcm_disable_bpc(bpc, 0);
 	if (reg_en & FIFO_IOADDR2_ENABLE)
 		npcm_disable_bpc(bpc, 1);
-
-	return 0;
 }
 
 static const struct of_device_id npcm_bpc_match[] = {
@@ -378,7 +376,7 @@ static struct platform_driver npcm_bpc_driver = {
 		.name		= DEVICE_NAME,
 		.of_match_table = npcm_bpc_match,
 	},
-	.probe = npcm_bpc_probe,
+	.probe 		= npcm_bpc_probe,
 	.remove = npcm_bpc_remove,
 };
 

@@ -1228,7 +1228,7 @@ static int npcm_pci_mmbi_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int npcm_pci_mmbi_remove(struct platform_device *pdev)
+static void npcm_pci_mmbi_remove(struct platform_device *pdev)
 {
 	struct npcm_pci_mmbi *priv = dev_get_drvdata(&pdev->dev);
 	int i, j;
@@ -1244,7 +1244,6 @@ static int npcm_pci_mmbi_remove(struct platform_device *pdev)
 			misc_deregister(&priv->chan[i].protocol[j].miscdev);
 	}
 
-	return 0;
 }
 
 static const struct of_device_id npcm_pci_mmbi_match[] = {
@@ -1258,7 +1257,7 @@ static struct platform_driver npcm_pci_mmbi_driver = {
 		.name           = DEVICE_NAME,
 		.of_match_table = npcm_pci_mmbi_match,
 	},
-	.probe  = npcm_pci_mmbi_probe,
+	.probe  	= npcm_pci_mmbi_probe,
 	.remove = npcm_pci_mmbi_remove,
 };
 module_platform_driver(npcm_pci_mmbi_driver);

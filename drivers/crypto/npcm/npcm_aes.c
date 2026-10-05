@@ -39,7 +39,9 @@
 #include <crypto/algapi.h>
 #include <crypto/aes.h>
 #include <crypto/hash.h>
+#include <crypto/aead.h>
 #include <crypto/internal/hash.h>
+#include <crypto/internal/skcipher.h>
 #include <crypto/ctr.h>
 #include <asm/io.h>
 #include <linux/dmaengine.h>
@@ -52,6 +54,9 @@ static void __iomem *gdma_aes_base;
 static struct platform_device *aes_dev;
 static bool aes_npcm_dma = false;
 static struct device *dev_aes;
+#ifdef CONFIG_CRYPTO_GCM
+static struct crypto_aead *gcm_generic_tfm;
+#endif
 
 #define GDMA_TIMEOUT 0x200000
 
@@ -899,9 +904,33 @@ static struct skcipher_alg aes_algs[] = {
 
 #ifdef CONFIG_CRYPTO_CTR
 	{
+#ifdef CONFIG_CRYPTO_GCM
+		.base.cra_name		= "nuvoton-ctr(aes)",
+#else
 		.base.cra_name		= "ctr(aes)",
+#endif
 		.base.cra_driver_name	= "Nuvoton-ctr-aes",
 		.base.cra_priority	= 300,
+		.base.cra_flags		= CRYPTO_ALG_ASYNC,
+		.base.cra_blocksize	= 16,
+		.base.cra_ctxsize	= sizeof(struct npcm_aes_ctx),
+		.base.cra_module	= THIS_MODULE,
+		.min_keysize		= AES_MIN_KEY_SIZE,
+		.max_keysize		= AES_MAX_KEY_SIZE,
+		.ivsize			= AES_MAX_CTR_SIZE,
+		.setkey			= npcm_aes_set_key,
+		.encrypt		= npcm_aes_ctr_encrypt,
+		.decrypt		= npcm_aes_ctr_decrypt,
+		.init			= npcm_aes_cra_init,
+		.exit			= npcm_aes_cra_exit,
+	},
+#endif
+
+#ifdef CONFIG_CRYPTO_GCM
+	{
+		.base.cra_name		= "ctr(aes)",
+		.base.cra_driver_name	= "Nuvoton-ctr-aes-lowp",
+		.base.cra_priority	= 90,
 		.base.cra_flags		= CRYPTO_ALG_ASYNC,
 		.base.cra_blocksize	= 16,
 		.base.cra_ctxsize	= sizeof(struct npcm_aes_ctx),
@@ -1088,10 +1117,7 @@ static int npcm_aes_ecb_encrypt(struct skcipher_request *req)
 			break;
 	}
 
-	if (!err)
-		//ablkcipher_walk_complete(&walk);
-		mutex_unlock(&npcm_aes_lock);
-
+	mutex_unlock(&npcm_aes_lock);
 
 	aes_print(KERN_NOTICE  "\t\t\t*NPCM-AES: ecb encrypt done, err = %d\n\n\n", err);
 
@@ -1155,10 +1181,8 @@ static int npcm_aes_ecb_decrypt(struct skcipher_request *req)
 		if (err)
 			break;
 	}
-	if (!err)
-		//ablkcipher_walk_complete(&walk);
 
-		mutex_unlock(&npcm_aes_lock);
+	mutex_unlock(&npcm_aes_lock);
 
 	aes_print(KERN_NOTICE  "\t\t\t*NPCM-AES: ecb decrypt done, err = %d\n\n\n", err);
 
@@ -1525,6 +1549,18 @@ static int npcm_aes_probe(struct platform_device *pdev)
 		}
 	}
 
+#ifdef CONFIG_CRYPTO_GCM
+	gcm_generic_tfm = crypto_alloc_aead("gcm(aes)", 0, 0);
+	if (IS_ERR(gcm_generic_tfm)) {
+		ret = PTR_ERR(gcm_generic_tfm);
+		dev_err(&pdev->dev, "Failed to allocate generic gcm(aes): %d\n", ret);
+		// Optionally, return `ret` to fail the probe if GCM is a critical dependency
+		// Or log the error and continue, allowing the generic fallback to fail later
+	} else {
+		dev_info(&pdev->dev, "Successfully initialized generic gcm(aes) for CIFS fallback.\n");
+	}
+#endif
+
 	ret = npcm_aes_register_algs();
 	if (ret)
 		goto err_register;
@@ -1549,11 +1585,16 @@ err_region:
 	return ret;
 }
 
-static int __exit npcm_aes_remove(struct platform_device *pdev)
+static void npcm_aes_remove(struct platform_device *pdev)
 {
 	struct resource *res = dev_get_drvdata(&pdev->dev);
 
 	npcm_aes_unregister_algs();
+
+#ifdef CONFIG_CRYPTO_GCM
+	if (!IS_ERR_OR_NULL(gcm_generic_tfm))
+		crypto_free_aead(gcm_generic_tfm);
+#endif
 
 	aes_print(KERN_NOTICE  "\t\t\t*NPCM-AES: remove: stop using Nuvoton NPCM AES algorithm.\n");
 
@@ -1561,7 +1602,6 @@ static int __exit npcm_aes_remove(struct platform_device *pdev)
 
 	release_mem_region(res->start, resource_size(res));
 	aes_base = NULL;
-	return 0;
 }
 
 
@@ -1577,7 +1617,7 @@ MODULE_DEVICE_TABLE(of, aes_dt_id);
 
 static struct platform_driver npcm_aes_driver = {
 	.probe		= npcm_aes_probe,
-	.remove		= npcm_aes_remove,
+	.remove = npcm_aes_remove,
 	.shutdown	= NULL,  // npcm_aes_shutdown,
 	.suspend	= NULL,  // npcm_aes_suspend,
 	.resume		= NULL,  // npcm_aes_resume,

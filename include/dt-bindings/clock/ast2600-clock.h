@@ -86,12 +86,14 @@
 #define ASPEED_CLK_MAC3RCLK		69
 #define ASPEED_CLK_MAC4RCLK		70
 #define ASPEED_CLK_I3C			71
-#define ASPEED_CLK_HUARTX		72
-#define ASPEED_CLK_UXCLK		73
-#define ASPEED_CLK_HUXCLK		74
+#define ASPEED_CLK_FSI			72
+#define ASPEED_CLK_HUARTX		73
+#define ASPEED_CLK_UXCLK		74
+#define ASPEED_CLK_HUXCLK		75
 
 /* Only list resets here that are not part of a clock gate + reset pair */
 #define ASPEED_RESET_ESPI		57
+#define ASPEED_RESET_SDIO		56
 #define ASPEED_RESET_ADC		55
 #define ASPEED_RESET_JTAG_MASTER2	54
 
@@ -125,7 +127,7 @@
 #define ASPEED_RESET_PCIE_DEV_O		20
 #define ASPEED_RESET_PCIE_RC_OE		19
 #define ASPEED_RESET_PCIE_RC_O		18
-#define ASPEED_RESET_EMMC               16
+#define ASPEED_RESET_EMMC		16
 #define ASPEED_RESET_CRT		13
 #define ASPEED_RESET_MAC2		12
 #define ASPEED_RESET_MAC1		11

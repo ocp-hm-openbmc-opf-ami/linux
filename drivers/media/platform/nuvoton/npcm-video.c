@@ -170,7 +170,7 @@ static const struct npcm_fmt npcm_fmt_list[] = {
 #define NUM_FORMATS ARRAY_SIZE(npcm_fmt_list)
 
 struct res_tbl {
-	char *name;
+	const char *name;
 	unsigned int hdisp; /* displayed pixels (width) */
 	unsigned int vdisp; /* displayed lines (height) */
 };
@@ -450,7 +450,7 @@ static void npcm_video_free_diff_table(struct npcm_video *video)
 	struct rect_list *tmp;
 	unsigned int i;
 
-	for (i = 0; i < video->queue.num_buffers; i++) {
+	for (i = 0; i < vb2_get_num_buffers(&video->queue); i++) {
 		head = &video->list[i];
 		list_for_each_safe(pos, nx, head) {
 			tmp = list_entry(pos, struct rect_list, list);
@@ -748,7 +748,7 @@ static void npcm_video_adjust_dvodel(struct npcm_video *video)
 
 	if (detWidth < 1440) {
 		if ((hact == 0x88) && (detWidth == 1024) && (detHeight == 768) &&
-		    (detPixelclock == 65000)) {
+		    (detPixelclock == 65000000)) {
 			vdelay = npcm_video_vbp(video) + video->vdelay_add + 0x6;
 		} else if ((detWidth == 720) && (detHeight == 400)) {
 			vdelay = npcm_video_vbp(video) + video->vdelay_add + 0xa;
@@ -866,6 +866,9 @@ static void npcm_video_command(struct npcm_video *video, unsigned int value)
 		video->full_capture_cnt--;
 	}
 
+	reinit_completion(&video->irq_cmp);
+	cancel_work(&video->irq_timeout_work);
+
 	regmap_write(vcd, VCD_STAT, VCD_STAT_CLEAR);
 	regmap_read(vcd, VCD_CMD, &cmd);
 	cmd |= FIELD_PREP(VCD_CMD_OPERATION, value);
@@ -874,7 +877,6 @@ static void npcm_video_command(struct npcm_video *video, unsigned int value)
 	regmap_update_bits(vcd, VCD_CMD, VCD_CMD_GO, VCD_CMD_GO);
 	video->op_cmd = value;
 
-	reinit_completion(&video->irq_cmp);
 	schedule_work(&video->irq_timeout_work);
 }
 
@@ -1052,6 +1054,9 @@ static void npcm_video_detect_resolution(struct npcm_video *video)
 				}
 				if (valid_res)
 					break;
+
+				/* Add a delay to allow resolution to stabilize */
+				usleep_range(1000, 2000);
 			}
 		}
 
@@ -1062,7 +1067,6 @@ static void npcm_video_detect_resolution(struct npcm_video *video)
 
 	if (valid_res && det->width && det->height) {
 		video->v4l2_input_status = 0;
-
 		dev_dbg(video->dev, "Got resolution[%dx%d] -> [%dx%d], status %d\n",
 			act->width, act->height, det->width, det->height,
 			video->v4l2_input_status);
@@ -1782,8 +1786,6 @@ static const struct regmap_config npcm_video_ece_regmap_cfg = {
 
 static const struct vb2_ops npcm_video_vb2_ops = {
 	.queue_setup = npcm_video_queue_setup,
-	.wait_prepare = vb2_ops_wait_prepare,
-	.wait_finish = vb2_ops_wait_finish,
 	.buf_prepare = npcm_video_buf_prepare,
 	.buf_finish = npcm_video_buf_finish,
 	.start_streaming = npcm_video_start_streaming,
@@ -1836,7 +1838,7 @@ static int npcm_video_setup_video(struct npcm_video *video)
 	vbq->drv_priv = video;
 	vbq->buf_struct_size = sizeof(struct npcm_video_buffer);
 	vbq->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
-	vbq->min_buffers_needed = 3;
+	vbq->min_queued_buffers = 3;
 
 	rc = vb2_queue_init(vbq);
 	if (rc) {
@@ -1874,8 +1876,8 @@ rel_ctrl_handler:
 
 static int npcm_video_ece_init(struct npcm_video *video)
 {
+	struct device_node *ece_node __free(device_node) = NULL;
 	struct device *dev = video->dev;
-	struct device_node *ece_node;
 	struct platform_device *ece_pdev;
 	void __iomem *regs;
 
@@ -1891,11 +1893,11 @@ static int npcm_video_ece_init(struct npcm_video *video)
 		dev_info(dev, "Support HEXTILE pixel format\n");
 
 		ece_pdev = of_find_device_by_node(ece_node);
-		if (IS_ERR(ece_pdev)) {
+		if (!ece_pdev) {
 			dev_err(dev, "Failed to find ECE device\n");
-			return PTR_ERR(ece_pdev);
+			return -ENODEV;
 		}
-		of_node_put(ece_node);
+		struct device *ece_dev __free(put_device) = &ece_pdev->dev;
 
 		regs = devm_platform_ioremap_resource(ece_pdev, 0);
 		if (IS_ERR(regs)) {
@@ -1910,7 +1912,7 @@ static int npcm_video_ece_init(struct npcm_video *video)
 			return PTR_ERR(video->ece.regmap);
 		}
 
-		video->ece.reset = devm_reset_control_get(&ece_pdev->dev, NULL);
+		video->ece.reset = devm_reset_control_get(ece_dev, NULL);
 		if (IS_ERR(video->ece.reset)) {
 			dev_err(dev, "Failed to get ECE reset control in DTS\n");
 			return PTR_ERR(video->ece.reset);
@@ -2049,7 +2051,7 @@ static int npcm_video_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int npcm_video_remove(struct platform_device *pdev)
+static void npcm_video_remove(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct v4l2_device *v4l2_dev = dev_get_drvdata(dev);
@@ -2062,8 +2064,6 @@ static int npcm_video_remove(struct platform_device *pdev)
 	if (video->ece.enable)
 		npcm_video_ece_stop(video);
 	of_reserved_mem_device_release(dev);
-
-	return 0;
 }
 
 static const struct of_device_id npcm_video_match[] = {

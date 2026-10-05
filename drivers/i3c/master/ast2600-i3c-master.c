@@ -787,7 +787,6 @@ static int ast2600_i3c_probe(struct platform_device *pdev)
 			i3c->sda_pullup);
 
 	i3c->dw.platform_ops = &ast2600_i3c_ops;
-	i3c->dw.ibi_capable = true;
 	i3c->dw.base.pec_supported = true;
 
 	ast2600_i3c_init_swdat(&i3c->dw);
@@ -810,7 +809,7 @@ MODULE_DEVICE_TABLE(of, ast2600_i3c_master_of_match);
 
 static struct platform_driver ast2600_i3c_driver = {
 	.probe = ast2600_i3c_probe,
-	.remove_new = ast2600_i3c_remove,
+	.remove = ast2600_i3c_remove,
 	.driver = {
 		.name = "ast2600-i3c-master",
 		.of_match_table = ast2600_i3c_master_of_match,

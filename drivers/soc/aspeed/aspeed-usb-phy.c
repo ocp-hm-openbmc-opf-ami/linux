@@ -94,9 +94,8 @@ static int aspeed_usb_phy_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int aspeed_usb_phy_remove(struct platform_device *pdev)
+static void aspeed_usb_phy_remove(struct platform_device *pdev)
 {
-	return 0;
 }
 
 static struct platform_driver aspeed_usb_phy_driver = {

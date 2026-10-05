@@ -5,6 +5,7 @@
 #include "aspeed-g7.dtsi"
 #include <dt-bindings/gpio/aspeed-gpio.h>
 #include <dt-bindings/net/ti-dp83867.h>
+#include <dt-bindings/mmbi/protocols.h>
 
 #define PCIE0_EP 1	// 1: EP, 0: RC
 #define PCIE1_EP 1	// 1: EP, 0: RC
@@ -520,6 +521,8 @@
 	pinctrl-names = "default";
 	status = "okay";
 
+	spi-aspeed-full-duplex;
+
 	tpm0: tpmdev@0 {
 		compatible = "tcg,tpm_tis-spi";
 		spi-max-frequency = <25000000>;
@@ -674,24 +677,28 @@
 	mac1-clk-delay = <0x18 0x17
 			  0x10 0x10
 			  0x10 0x10>;
-	assigned-clocks = <&syscon1 SCU1_CLK_MACHCLK>,
-			  <&syscon1 SCU1_CLK_RGMII>,
-			  <&syscon1 SCU1_CLK_RMII>;
-	assigned-clock-rates = <200000000>, <125000000>, <50000000>;
 };
 
 &espi0 {
 	status = "okay";
 	perif-dma-mode;
-	perif-mmbi-enable;
-	perif-mmbi-src-addr = <0x0 0xa8000000>;
-	perif-mmbi-tgt-memory = <&espi0_mmbi_memory>;
-	perif-mmbi-instance-num = <0x1>;
 	perif-mcyc-enable;
 	perif-mcyc-src-addr = <0x0 0x98000000>;
 	perif-mcyc-size = <0x0 0x10000>;
 	oob-dma-mode;
 	flash-dma-mode;
+};
+
+&espi0_mmbi {
+	status = "okay";
+	host-map-addr = <0x0 0xEC000000>;
+	memory-region = <&espi0_mmbi_memory>;
+	instances = <1>;
+
+	instance@0 {
+		channel = <0>; // channel should start from 0
+		protocols = /bits/ 8 <MMBI_PROTOCOL_MCTP>;
+	};
 };
 
 &lpc0_kcs0 {
@@ -866,8 +873,14 @@
 	status = "okay";
 	memory-region = <&pcie0_mmbi0_memory>;
 
-	bmc-int-value = /bits/ 8 <0x00>;
-	bmc-int-location = <0>;
+	noi = <7>;
+	aspeed,mmbi-interface = "mctp-netdev", /* ch0 */
+				"ioctl",       /* ch1 */
+				"ioctl",       /* ch2 */
+				"ioctl",       /* ch3 */
+				"ioctl",       /* ch4 */
+				"ioctl",       /* ch5 */
+				"ioctl";       /* ch6 */
 };
 #else
 &pcie0 {
@@ -935,8 +948,14 @@
 	status = "okay";
 	memory-region = <&pcie1_mmbi4_memory>;
 
-	bmc-int-value = /bits/ 8 <0x00>;
-	bmc-int-location = <0>;
+	noi = <7>;
+	aspeed,mmbi-interface = "mctp-netdev", /* ch0 */
+				"ioctl",       /* ch1 */
+				"ioctl",       /* ch2 */
+				"ioctl",       /* ch3 */
+				"ioctl",       /* ch4 */
+				"ioctl",       /* ch5 */
+				"ioctl";       /* ch6 */
 };
 #else
 &pcie1 {

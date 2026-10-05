@@ -23,7 +23,14 @@
 #include <linux/ip.h>
 #include <linux/ipv6.h>
 
-static DEFINE_PER_CPU(struct nft_inner_tun_ctx, nft_pcpu_tun_ctx);
+struct nft_inner_tun_ctx_locked {
+	struct nft_inner_tun_ctx ctx;
+	local_lock_t bh_lock;
+};
+
+static DEFINE_PER_CPU(struct nft_inner_tun_ctx_locked, nft_pcpu_tun_ctx) = {
+	.bh_lock = INIT_LOCAL_LOCK(bh_lock),
+};
 
 /* Same layout as nft_expr but it embeds the private expression data area. */
 struct __nft_expr {
@@ -156,7 +163,6 @@ static int nft_inner_parse_l2l3(const struct nft_inner *priv,
 			return -1;
 
 		if (fragoff == 0) {
-			thoff = nhoff + sizeof(_ip6h);
 			ctx->flags |= NFT_PAYLOAD_CTX_INNER_TH;
 			ctx->inner_thoff = thoff;
 			ctx->l4proto = l4proto;
@@ -237,12 +243,15 @@ static bool nft_inner_restore_tun_ctx(const struct nft_pktinfo *pkt,
 	struct nft_inner_tun_ctx *this_cpu_tun_ctx;
 
 	local_bh_disable();
-	this_cpu_tun_ctx = this_cpu_ptr(&nft_pcpu_tun_ctx);
+	local_lock_nested_bh(&nft_pcpu_tun_ctx.bh_lock);
+	this_cpu_tun_ctx = this_cpu_ptr(&nft_pcpu_tun_ctx.ctx);
 	if (this_cpu_tun_ctx->cookie != (unsigned long)pkt->skb) {
+		local_unlock_nested_bh(&nft_pcpu_tun_ctx.bh_lock);
 		local_bh_enable();
 		return false;
 	}
 	*tun_ctx = *this_cpu_tun_ctx;
+	local_unlock_nested_bh(&nft_pcpu_tun_ctx.bh_lock);
 	local_bh_enable();
 
 	return true;
@@ -254,9 +263,11 @@ static void nft_inner_save_tun_ctx(const struct nft_pktinfo *pkt,
 	struct nft_inner_tun_ctx *this_cpu_tun_ctx;
 
 	local_bh_disable();
-	this_cpu_tun_ctx = this_cpu_ptr(&nft_pcpu_tun_ctx);
+	local_lock_nested_bh(&nft_pcpu_tun_ctx.bh_lock);
+	this_cpu_tun_ctx = this_cpu_ptr(&nft_pcpu_tun_ctx.ctx);
 	if (this_cpu_tun_ctx->cookie != tun_ctx->cookie)
 		*this_cpu_tun_ctx = *tun_ctx;
+	local_unlock_nested_bh(&nft_pcpu_tun_ctx.bh_lock);
 	local_bh_enable();
 }
 

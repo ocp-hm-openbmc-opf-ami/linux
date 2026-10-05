@@ -186,8 +186,7 @@ static __maybe_unused int aspeed_crypt_run_tests(char *alg_name)
 	return ret;
 }
 
-#if defined(CONFIG_CRYPTO_MANAGER_DISABLE_TESTS) && \
-	!defined(CONFIG_CRYPTO_DEV_ASPEED_ACRY)
+#ifndef CONFIG_CRYPTO_SELFTESTS
 static ssize_t aspeed_crypt_write(struct file *file, const char __user *ubuf,
 				  size_t count, loff_t *ppos)
 {

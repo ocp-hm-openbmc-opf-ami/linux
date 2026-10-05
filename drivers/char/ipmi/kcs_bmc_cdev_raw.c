@@ -107,6 +107,23 @@ static int kcs_bmc_raw_open(struct inode *inode, struct file *filp)
 	return rc;
 }
 
+static bool kcs_bmc_raw_prepare_obe(struct kcs_bmc_raw *priv)
+{
+	bool writable;
+
+	/* Enable the OBE event so we can catch the host clearing OBF */
+	kcs_bmc_raw_update_event_mask(priv, KCS_BMC_EVENT_TYPE_OBE, KCS_BMC_EVENT_TYPE_OBE);
+
+	/* Now that we'll catch an OBE event, check if it's already occurred */
+	writable = !(kcs_bmc_read_status(priv->client.dev) & KCS_BMC_STR_OBF);
+
+	/* If OBF is clear we've missed the OBE event, so disable it */
+	if (writable)
+		kcs_bmc_raw_update_event_mask(priv, KCS_BMC_EVENT_TYPE_OBE, 0);
+
+	return writable;
+}
+
 static __poll_t kcs_bmc_raw_poll(struct file *filp, poll_table *wait)
 {
 	struct kcs_bmc_raw *priv;
@@ -117,6 +134,8 @@ static __poll_t kcs_bmc_raw_poll(struct file *filp, poll_table *wait)
 	poll_wait(filp, &priv->queue, wait);
 
 	spin_lock_irq(&priv->queue.lock);
+	if (kcs_bmc_raw_prepare_obe(priv))
+		events |= (EPOLLOUT | EPOLLWRNORM);
 
 	if (priv->readable || (kcs_bmc_read_status(priv->client.dev) & KCS_BMC_STR_IBF))
 		events |= (EPOLLIN | EPOLLRDNORM);
@@ -155,6 +174,11 @@ static ssize_t kcs_bmc_raw_read(struct file *filp, char __user *buf,
 	if (read_idr) {
 		dev_dbg(dev, "Waiting for IBF\n");
 		str = kcs_bmc_read_status(kcs_bmc);
+		if ((filp->f_flags & O_NONBLOCK) && (str & KCS_BMC_STR_IBF)) {
+			rc = -EWOULDBLOCK;
+			goto out;
+		}
+
 		rc = wait_event_interruptible_locked(priv->queue,
 						     priv->readable || (str & KCS_BMC_STR_IBF));
 		if (rc < 0)
@@ -280,9 +304,7 @@ static ssize_t kcs_bmc_raw_write(struct file *filp, const char __user *buf,
 				goto out;
 			}
 
-			/* Enable the OBE event so we can catch the host clearing OBF */
-			priv->writable = false;
-			kcs_bmc_raw_update_event_mask(priv, KCS_BMC_EVENT_TYPE_OBE, KCS_BMC_EVENT_TYPE_OBE);
+			priv->writable = kcs_bmc_raw_prepare_obe(priv);
 
 			/* Now either OBF is already clear, or we'll get an OBE event to wake us */
 			dev_dbg(dev, "Waiting for OBF to clear\n");

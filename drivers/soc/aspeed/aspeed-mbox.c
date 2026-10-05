@@ -283,14 +283,12 @@ static int aspeed_mbox_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int aspeed_mbox_remove(struct platform_device *pdev)
+static void aspeed_mbox_remove(struct platform_device *pdev)
 {
 	struct ast_mbox_info *info = platform_get_drvdata(pdev);
 
 	mbox_free_channel(info->chan);
 	misc_deregister(&info->mdev);
-
-	return 0;
 }
 
 static const struct of_device_id mbox_cl_match[] = {
@@ -304,7 +302,7 @@ static struct platform_driver aspeed_mbox_driver = {
 		.name = "aspeed_mbox_client",
 		.of_match_table = mbox_cl_match,
 	},
-	.probe	= aspeed_mbox_probe,
+	.probe		= aspeed_mbox_probe,
 	.remove	= aspeed_mbox_remove,
 };
 module_platform_driver(aspeed_mbox_driver);

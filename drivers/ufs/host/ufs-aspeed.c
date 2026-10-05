@@ -37,13 +37,8 @@ struct aspeed_ufscnr {
 	void __iomem *regs;
 };
 
-struct aspeed_ufshc {
-	u32 temp;
-};
-
 static int aspeed_ufscnr_probe(struct platform_device *pdev)
 {
-	struct device_node *parent, *child;
 	struct aspeed_ufscnr *cnr;
 	u32 reg;
 	int ret;
@@ -99,16 +94,17 @@ static int aspeed_ufscnr_probe(struct platform_device *pdev)
 
 	dev_set_drvdata(&pdev->dev, cnr);
 
-	parent = pdev->dev.of_node;
-	for_each_available_child_of_node(parent, child) {
-		struct platform_device *cpdev;
-
-		cpdev = of_platform_device_create(child, NULL, &pdev->dev);
-		if (!cpdev) {
-			of_node_put(child);
-			ret = -ENODEV;
-			goto err_clk;
-		}
+	/*
+	 * devm_of_platform_populate() sets OF_POPULATED_BUS on this device's
+	 * OF node and registers of_platform_depopulate() as a devm release
+	 * action.  On unbind the child platform device (ufshc) is destroyed
+	 * and its OF_POPULATED flag cleared, allowing probe to re-create it
+	 * cleanly on the next bind.
+	 */
+	ret = devm_of_platform_populate(&pdev->dev);
+	if (ret) {
+		dev_err(&pdev->dev, "Failed to populate OF children: %d\n", ret);
+		goto err_clk;
 	}
 
 	return 0;
@@ -124,13 +120,11 @@ err_clk:
  *
  * Always returns 0
  */
-static int aspeed_ufscnr_remove(struct platform_device *pdev)
+static void aspeed_ufscnr_remove(struct platform_device *pdev)
 {
 	struct aspeed_ufscnr *cnr = dev_get_drvdata(&pdev->dev);
 
 	clk_disable_unprepare(cnr->clk);
-
-	return 0;
 }
 
 /**
@@ -142,19 +136,8 @@ static int aspeed_ufscnr_remove(struct platform_device *pdev)
 static int aspeed_ufshc_init(struct ufs_hba *hba)
 {
 	int status = 0;
-	struct aspeed_ufshc *ufshc;
-	struct device *dev = hba->dev;
-
-	ufshc = devm_kzalloc(dev, sizeof(*ufshc), GFP_KERNEL);
-
-	if (!ufshc)
-		return -ENOMEM;
-
-	ufshcd_set_variant(hba, ufshc);
 
 	status = ufshcd_vops_phy_initialization(hba);
-
-	hba->quirks |= UFSHCD_QUIRK_DME_PEER_ACCESS_AUTO_MODE | UFSHCD_QUIRK_HIBERN_FASTAUTO;
 
 	return status;
 }
@@ -240,21 +223,21 @@ static int aspeed_ufshc_link_startup_notify(struct ufs_hba *hba,
 }
 
 static int aspeed_ufshc_pre_pwr_change(struct ufs_hba *hba,
-				       struct ufs_pa_layer_attr *dev_max_params,
+				       const struct ufs_pa_layer_attr *dev_max_params,
 				       struct ufs_pa_layer_attr *dev_req_params)
 {
-	struct ufs_dev_params host_cap;
+	struct ufs_host_params host_cap;
 	int ret;
 
-	ufshcd_init_pwr_dev_param(&host_cap);
+	ufshcd_init_host_params(&host_cap);
 	host_cap.hs_rx_gear = UFS_HS_G3;
 	host_cap.hs_tx_gear = UFS_HS_G3;
-	host_cap.rx_pwr_hs = FASTAUTO_MODE;
-	host_cap.tx_pwr_hs = FASTAUTO_MODE;
+	host_cap.rx_pwr_hs = FAST_MODE;
+	host_cap.tx_pwr_hs = FAST_MODE;
 
-	ret = ufshcd_get_pwr_dev_param(&host_cap,
-				       dev_max_params,
-				       dev_req_params);
+	ret = ufshcd_negotiate_pwr_params(&host_cap,
+					  dev_max_params,
+					  dev_req_params);
 	if (ret) {
 		pr_info("%s: failed to determine capabilities\n",
 			__func__);
@@ -278,7 +261,7 @@ static int aspeed_ufshc_pre_pwr_change(struct ufs_hba *hba,
 		       PA_NO_ADAPT);
 
 	ret = ufshcd_uic_change_pwr_mode(hba,
-					 SLOWAUTO_MODE << 4 | SLOWAUTO_MODE);
+					 SLOW_MODE << 4 | SLOW_MODE);
 
 	if (ret) {
 		dev_err(hba->dev, "%s: PWMG1B SLOWAUTO failed ret=%d\n",
@@ -290,7 +273,7 @@ static int aspeed_ufshc_pre_pwr_change(struct ufs_hba *hba,
 
 static int aspeed_ufshc_pwr_change_notify(struct ufs_hba *hba,
 					  enum ufs_notify_change_status stage,
-					  struct ufs_pa_layer_attr *dev_max_params,
+					  const struct ufs_pa_layer_attr *dev_max_params,
 					  struct ufs_pa_layer_attr *dev_req_params)
 {
 	int ret = 0;
@@ -358,12 +341,11 @@ static int aspeed_ufshc_probe(struct platform_device *pdev)
  *
  * Always returns 0
  */
-static int aspeed_ufshc_remove(struct platform_device *pdev)
+static void aspeed_ufshc_remove(struct platform_device *pdev)
 {
 	struct ufs_hba *hba =  platform_get_drvdata(pdev);
 
 	ufshcd_remove(hba);
-	return 0;
 }
 
 static const struct dev_pm_ops aspeed_ufshc_dev_pm_ops = {
@@ -425,4 +407,4 @@ module_exit(aspeed_ufs_exit);
 
 MODULE_AUTHOR("Cool Lee <cool_lee@aspeedtech.com>");
 MODULE_DESCRIPTION("Aspeed UFS host controller platform driver");
-MODULE_LICENSE("GPL v2");
+MODULE_LICENSE("GPL");

@@ -52,9 +52,14 @@ static void aspeed_gfx_set_g6_clock_source(struct aspeed_gfx *priv, int mode_wid
 
 static void aspeed_gfx_set_g7_clock(struct aspeed_gfx *priv)
 {
-	/* apply 800 x 600 @ 62 on ast2700 */
+	/* apply 800 x 600 @ 60 on ast2700 */
 	regmap_update_bits(priv->scu, 0x288, BIT(14), BIT(14));
-	regmap_write(priv->scu, 0x340, 0x00130002);
+	regmap_write(priv->scu, 0x340, 0x00190002);
+
+	/* apply 800 x 600 @ 60 on ast2700 DAC */
+	/* Move the scu1.d0 to the aspeed_gfx_enable_controller first check */
+	regmap_write(priv->scu1, 0x324, 0x00000007);
+	regmap_write(priv->scu1, 0x320, 0x1048000F);
 }
 
 static int aspeed_gfx_set_pixel_fmt(struct aspeed_gfx *priv, u32 *bpp)
@@ -98,10 +103,19 @@ static void aspeed_gfx_enable_controller(struct aspeed_gfx *priv)
 		regmap_update_bits(priv->scu, priv->dac_reg, priv->soc_crt_bit, priv->soc_crt_bit);
 		if (priv->dp_support)
 			regmap_update_bits(priv->scu, priv->dac_reg, priv->soc_dp_bit, priv->soc_dp_bit);
+		if ((priv->flags & CLK_MASK) == CLK_G7)
+			regmap_update_bits(priv->scu1, 0xd0, BIT(10), BIT(10));
 	}
+
+    /* remove the cursor and osd usage */
+	ctrl1 &= ~(CRT_CTRL_HW_CURSOR_EN | CRT_CTRL_OSD_EN);
 
 	writel(ctrl1 | CRT_CTRL_EN, priv->base + CRT_CTRL1);
 	writel(ctrl2 | CRT_CTRL_DAC_EN, priv->base + CRT_CTRL2);
+
+	/* trigger cursor position to apply cursor disable */
+	writel(CRT_CTRL_CURSOR0, priv->base + CRT_CURSOR0);
+	writel(CRT_CTRL_CURSOR1, priv->base + CRT_CURSOR1);
 }
 
 static void aspeed_gfx_disable_controller(struct aspeed_gfx *priv)

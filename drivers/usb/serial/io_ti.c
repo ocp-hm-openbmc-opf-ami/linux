@@ -773,6 +773,12 @@ static int get_manuf_info(struct edgeport_serial *serial, u8 *buffer)
 	}
 
 	/* Read the descriptor data */
+	if (le16_to_cpu(rom_desc->Size) != sizeof(struct edge_ti_manuf_descriptor)) {
+		dev_err(dev, "unexpected Edge descriptor length: %u\n",
+			le16_to_cpu(rom_desc->Size));
+		status = -EINVAL;
+		goto exit;
+	}
 	status = read_rom(serial, start_address+sizeof(struct ti_i2c_desc),
 					le16_to_cpu(rom_desc->Size), buffer);
 	if (status)
@@ -838,6 +844,11 @@ static int build_i2c_fw_hdr(u8 *header, const struct firmware *fw)
 	/* Pointer to fw_down memory image */
 	img_header = (struct ti_i2c_image_header *)&fw->data[4];
 
+	if (le16_to_cpu(img_header->Length) >
+			buffer_size - sizeof(struct ti_i2c_firmware_rec)) {
+		kfree(buffer);
+		return -EINVAL;
+	}
 	memcpy(buffer + sizeof(struct ti_i2c_firmware_rec),
 		&fw->data[4 + sizeof(struct ti_i2c_image_header)],
 		le16_to_cpu(img_header->Length));
@@ -2670,7 +2681,6 @@ static int edge_resume(struct usb_serial *serial)
 
 static struct usb_serial_driver edgeport_1port_device = {
 	.driver = {
-		.owner		= THIS_MODULE,
 		.name		= "edgeport_ti_1",
 	},
 	.description		= "Edgeport TI 1 port adapter",
@@ -2708,7 +2718,6 @@ static struct usb_serial_driver edgeport_1port_device = {
 
 static struct usb_serial_driver edgeport_2port_device = {
 	.driver = {
-		.owner		= THIS_MODULE,
 		.name		= "edgeport_ti_2",
 	},
 	.description		= "Edgeport TI 2 port adapter",

@@ -25,6 +25,7 @@
 		udc5 = &udc5;
 		udc6 = &udc6;
 		udc7 = &udc7;
+		udc8 = &udc8;
 		fiu0 = &fiu0;
 		fiu1 = &fiu3;
 		fiu2 = &fiux;
@@ -63,7 +64,8 @@
 		stdout-path = &serial0;
 	};
 
-	memory {
+	memory@0 {
+		device_type = "memory";
 		reg = <0x0 0x0 0x0 0x40000000>;
 	};
 
@@ -346,10 +348,6 @@
 	status = "okay";
 };
 
-&ehci2 {
-	status = "okay";
-};
-
 &ohci1 {
         status = "okay";
 };
@@ -365,7 +363,11 @@
 	status = "okay";
 };
 
-&pcimbox {
+&vdma {
+	status = "okay";
+};
+
+&pcimbox1 {
 	status = "okay";
 };
 
@@ -401,13 +403,8 @@
 	status = "okay";
 };
 
-&gcr {
-	udc9_mux: mux-controller {
-		compatible = "mmio-mux";
-		#mux-control-cells = <1>;
-		mux-reg-masks = <0x9C 0x3000>;
-		idle-states = <0x3000>;
-	};
+&udc8 {
+	status = "okay";
 };
 
 &lpc_kcs {
@@ -671,13 +668,13 @@
 
 &i3c0 {
 	status = "okay";
-	i3c-scl-hz = <12500000>;
+	i3c-scl-hz = <8000000>;
 	i2c-scl-hz = <400000>;
 };
 
 &i3c1 {
 	status = "okay";
-	i3c-scl-hz = <12500000>;
+	i3c-scl-hz = <8000000>;
 	i2c-scl-hz = <400000>;
 };
 
@@ -691,16 +688,16 @@
 			&jtag2_pins
 			&lpc_pins
 			&spix_pins
+			&pin0_slew
+			&pin1_slew
+			&pin2_slew
+			&pin3_slew
 			&pin4_slew
 			&pin5_slew
 			&pin6_slew
 			&pin7_slew
 			&pin108_slew
-			&pin109_slew
-			&pin240_slew
-			&pin241_slew
-			&pin242_slew
-			&pin243_slew>;
+			&pin109_slew>;
 };
 
 &vcd {

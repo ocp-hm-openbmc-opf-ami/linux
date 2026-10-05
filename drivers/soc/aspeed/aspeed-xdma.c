@@ -189,8 +189,8 @@
 #define XDMA_AST2700_BMC_CMDQ_ADDR0		0x10
 #define XDMA_AST2700_BMC_CMDQ_ADDR1		0x14
 #define XDMA_AST2700_BMC_CMDQ_ENDP		0x18
-#define XDMA_AST2700_BMC_CMDQ_WRITEP 		0x1c
-#define XDMA_AST2700_BMC_CMDQ_READP 		0x20
+#define XDMA_AST2700_BMC_CMDQ_WRITEP		0x1c
+#define XDMA_AST2700_BMC_CMDQ_READP		0x20
 #define XDMA_AST2700_CTRL			0x38
 #define  XDMA_AST2700_CTRL_US_COMP		 BIT(16)
 #define  XDMA_AST2700_CTRL_DS_COMP		 BIT(17)
@@ -198,8 +198,8 @@
 #define  XDMA_AST2700_CTRL_IDLE			 BIT(19)
 #define  XDMA_AST2700_CTRL_DS_SIZE_256		 BIT(20)
 #define XDMA_AST2700_STATUS			0x3c
-#define  XDMA_AST2700_STATUS_US_COMP 		 BIT(16)
-#define  XDMA_AST2700_STATUS_DS_COMP 		 BIT(17)
+#define  XDMA_AST2700_STATUS_US_COMP		 BIT(16)
+#define  XDMA_AST2700_STATUS_DS_COMP		 BIT(17)
 #define  XDMA_AST2700_STATUS_DS_DIRTY		 BIT(18)
 #define  XDMA_AST2700_STATUS_IDLE		 BIT(19)
 #define XDMA_AST2700_INPRG_DS_CMD00		0x40
@@ -244,6 +244,8 @@ struct aspeed_xdma_chip {
 	u32 control;
 	u32 scu_bmc_class;
 	u32 scu_misc_ctrl;
+	u32 scu_misc_mask;
+	u32 scu_disable_mask;
 	u32 scu_pcie_conf;
 	u32 scu_pcie_ctrl;
 	unsigned int queue_entry_size;
@@ -429,8 +431,8 @@ static unsigned int aspeed_xdma_ast2600_set_cmd(struct aspeed_xdma *ctx,
 	    (op->host_addr + (u64)op->len) & 0xffffffff00000000ULL)
 		cmd |= XDMA_CMD_AST2600_CMD_64_EN;
 
-	dev_dbg(ctx->dev, "xdma %s ast2600: bmc[%08llx] len[%08x] "
-		"host[%016llx]\n", op->direction ? "upstream" : "downstream",
+	dev_dbg(ctx->dev, "xdma %s ast2600: bmc[%08llx] len[%08x] host[%016llx]\n",
+		op->direction ? "upstream" : "downstream",
 		bmc_addr, op->len, op->host_addr);
 
 	if ((op->host_addr & 0xff) + op->len > XDMA_CMD_AST2600_CMD_LINE_SIZE) {
@@ -497,7 +499,7 @@ static unsigned int aspeed_xdma_ast2700_set_cmd(struct aspeed_xdma *ctx,
 	    (op->host_addr + (u64)op->len) & 0xffffffff00000000ULL)
 		cmd |= XDMA_CMD_AST2700_CMD_64_EN;
 
-	dev_dbg(ctx->dev, "xdma %s ast2700: bmc[%08llx] len[%08x] host[%016llx]\n",
+	dev_dbg(ctx->dev, "xdma %s ast2700: bmc[%016llx] len[%08x] host[%016llx]\n",
 		op->direction ? "upstream" : "downstream",
 		bmc_addr, op->len, op->host_addr);
 
@@ -512,7 +514,6 @@ static unsigned int aspeed_xdma_ast2700_set_cmd(struct aspeed_xdma *ctx,
 		pitch = line_size;
 
 		if (rem) {
-			// TODO: why +total?
 			u64 rbmc = bmc_addr + total;
 
 			cmds[1].host_addr = op->host_addr + (u64)total;
@@ -982,19 +983,12 @@ static int aspeed_xdma_init_scu(struct aspeed_xdma *ctx, struct device *dev)
 				   selection);
 
 		if (ctx->chip->scu_misc_ctrl) {
-			u32 mask = (ctx->chip->regs.bmc_cmdq_addr_ext)
-				 ? SCU_AST2700_MISC_CTRL_XDMA_CLIENT
-				 : SCU_AST2600_MISC_CTRL_XDMA_BMC;
-			u32 disable = DEBUG_CTRL_AST2600_XDMA_DISABLE;
-
-			if (ctx->chip->regs.bmc_cmdq_addr_ext)
-				disable |= DEBUG_CTRL_AST2700_XDMA_DISABLE;
-
 			regmap_update_bits(scu, ctx->chip->scu_misc_ctrl,
-					   mask, mask);
+					   ctx->chip->scu_misc_mask,
+					   ctx->chip->scu_misc_mask);
 
 			regmap_update_bits(scu, SCU_AST2600_DEBUG_CTRL,
-					   disable, 0);
+					   ctx->chip->scu_disable_mask, 0);
 		}
 
 		if (ctx->chip->scu_pcie_ctrl) {
@@ -1022,7 +1016,7 @@ static void aspeed_xdma_kobject_release(struct kobject *kobj)
 			  ctx->mem_coherent);
 }
 
-static struct kobj_type aspeed_xdma_kobject_type = {
+static const struct kobj_type aspeed_xdma_kobject_type = {
 	.release = aspeed_xdma_kobject_release,
 };
 
@@ -1125,7 +1119,7 @@ static int aspeed_xdma_probe(struct platform_device *pdev)
 	}
 
 	ctx->mem_virt = dma_alloc_coherent(dev, ctx->mem_size,
-					   &ctx->mem_coherent, 0);
+					   &ctx->mem_coherent, __GFP_NOWARN);
 	if (!ctx->mem_virt) {
 		dev_err(dev, "Failed to allocate reserved memory.\n");
 		rc = -ENOMEM;
@@ -1227,7 +1221,7 @@ err_nopool:
 	return rc;
 }
 
-static int aspeed_xdma_remove(struct platform_device *pdev)
+static void aspeed_xdma_remove(struct platform_device *pdev)
 {
 	struct aspeed_xdma *ctx = platform_get_drvdata(pdev);
 
@@ -1240,8 +1234,6 @@ static int aspeed_xdma_remove(struct platform_device *pdev)
 
 	misc_deregister(&ctx->misc);
 	kobject_put(&ctx->kobj);
-
-	return 0;
 }
 
 static const struct aspeed_xdma_chip aspeed_ast2500_xdma_chip = {
@@ -1275,6 +1267,8 @@ static const struct aspeed_xdma_chip aspeed_ast2600_xdma_chip = {
 		XDMA_AST2600_CTRL_DS_DIRTY | XDMA_AST2600_CTRL_DS_SIZE_256,
 	.scu_bmc_class = SCU_AST2600_BMC_CLASS_REV,
 	.scu_misc_ctrl = SCU_AST2600_MISC_CTRL,
+	.scu_misc_mask = SCU_AST2600_MISC_CTRL_XDMA_BMC,
+	.scu_disable_mask = DEBUG_CTRL_AST2600_XDMA_DISABLE,
 	.scu_pcie_conf = SCU_AST2600_PCIE_CONF,
 	.scu_pcie_ctrl = 0,
 	.queue_entry_size = XDMA_AST2600_QUEUE_ENTRY_SIZE,
@@ -1300,6 +1294,8 @@ static const struct aspeed_xdma_chip aspeed_ast2700_xdma0_chip = {
 		XDMA_AST2700_CTRL_DS_DIRTY,
 	.scu_bmc_class = SCU_AST2700_PCIE0_BMC_CLASS_REV,
 	.scu_misc_ctrl = SCU_AST2600_MISC_CTRL,
+	.scu_misc_mask = SCU_AST2700_MISC_CTRL_XDMA_CLIENT,
+	.scu_disable_mask = DEBUG_CTRL_AST2600_XDMA_DISABLE | DEBUG_CTRL_AST2700_XDMA_DISABLE,
 	.scu_pcie_conf = SCU_AST2700_PCIE0_CONF,
 	.scu_pcie_ctrl = SCU_AST2700_PCIE0_CTRL,
 	.queue_entry_size = XDMA_AST2700_QUEUE_ENTRY_SIZE,
@@ -1325,6 +1321,8 @@ static const struct aspeed_xdma_chip aspeed_ast2700_xdma1_chip = {
 		XDMA_AST2700_CTRL_DS_DIRTY,
 	.scu_bmc_class = SCU_AST2700_PCIE1_BMC_CLASS_REV,
 	.scu_misc_ctrl = SCU_AST2600_MISC_CTRL,
+	.scu_misc_mask = SCU_AST2700_MISC_CTRL_XDMA_CLIENT,
+	.scu_disable_mask = DEBUG_CTRL_AST2600_XDMA_DISABLE | DEBUG_CTRL_AST2700_XDMA_DISABLE,
 	.scu_pcie_conf = SCU_AST2700_PCIE1_CONF,
 	.scu_pcie_ctrl = SCU_AST2700_PCIE1_CTRL,
 	.queue_entry_size = XDMA_AST2700_QUEUE_ENTRY_SIZE,
@@ -1378,4 +1376,4 @@ module_platform_driver(aspeed_xdma_driver);
 
 MODULE_AUTHOR("Eddie James");
 MODULE_DESCRIPTION("ASPEED XDMA Engine Driver");
-MODULE_LICENSE("GPL v2");
+MODULE_LICENSE("GPL");

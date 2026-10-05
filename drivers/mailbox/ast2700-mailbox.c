@@ -31,7 +31,7 @@ struct ast2700_mbox {
 	u8 msg_size;
 	void __iomem *tx_regs;
 	void __iomem *rx_regs;
-	spinlock_t lock; /* control register lock */
+	spinlock_t lock;
 };
 
 static inline int ch_num(struct mbox_chan *chan)

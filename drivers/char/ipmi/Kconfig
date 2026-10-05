@@ -84,6 +84,13 @@ config IPMI_IPMB
 	  bus, and it also supports direct messaging on the bus using
 	  IPMB direct messages.  This module requires I2C support.
 
+config IPMI_LS2K
+	bool 'Loongson-2K IPMI interface'
+	depends on LOONGARCH
+	select MFD_LS2K_BMC_CORE
+	help
+	  Provides a driver for Loongson-2K IPMI interfaces.
+
 config IPMI_POWERNV
 	depends on PPC_POWERNV
 	tristate 'POWERNV (OPAL firmware) IPMI interface'
@@ -186,6 +193,16 @@ config ASPEED_BT_IPMI_BMC
 	  Provides a driver for the BT (Block Transfer) IPMI interface
 	  found on Aspeed SOCs (AST2400 and AST2500). The driver
 	  implements the BMC side of the BT interface.
+
+config NPCM_BT_IPMI_BMC
+        depends on ARCH_NPCM || COMPILE_TEST
+	depends on MFD_SYSCON
+	select REGMAP_MMIO
+        tristate "Nuvonton BT IPMI bmc driver"
+        help
+	  Provides a driver for the BT (Block Transfer) IPMI interface
+	  found on Nuvoton SOC. The driver implements the BMC side of
+	  the BT interface.
 
 config SSIF_IPMI_BMC
 	tristate "SSIF IPMI BMC driver"

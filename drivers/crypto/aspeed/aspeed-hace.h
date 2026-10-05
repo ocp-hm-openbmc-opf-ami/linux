@@ -10,7 +10,7 @@
 #include <linux/compiler_attributes.h>
 #include <linux/interrupt.h>
 #include <linux/types.h>
-#include <linux/soc/aspeed/aspeed-otp.h>
+#include <linux/semaphore.h>
 
 /*****************************
  *                           *
@@ -126,8 +126,9 @@
 
 #define CRYPTO_FLAGS_BUSY		BIT(1)
 
-#define SHA_OP_UPDATE			1
-#define SHA_OP_FINAL			2
+#define SHA_OP_INIT			BIT(0)
+#define SHA_OP_UPDATE			BIT(1)
+#define SHA_OP_FINAL			BIT(2)
 
 #define SHA_FLAGS_SHA1			BIT(0)
 #define SHA_FLAGS_SHA224		BIT(1)
@@ -174,6 +175,9 @@ struct aspeed_engine_hash {
 	struct tasklet_struct		done_task;
 	unsigned long			flags;
 	struct ahash_request		*req;
+
+	/* Protects hash engine operation enqueue in order */
+	struct mutex			queue_lock;
 
 	/* input buffer */
 	void				*ahash_src_addr;
@@ -226,7 +230,12 @@ struct aspeed_sham_reqctx {
 	size_t			ivsize;
 	const __be32		*sha_iv;
 
+	/* remain data buffer */
+	u8			buffer[SHA512_BLOCK_SIZE * 2];
 	size_t			bufcnt;		/* buffer counter */
+
+	/* output buffer */
+	u8			digest[SHA512_DIGEST_SIZE];
 	u64			digcnt[2];
 };
 
@@ -293,6 +302,9 @@ struct aspeed_hace_dev {
 	struct reset_control		*rst;
 	unsigned long			version;
 
+	/* Protects hace register access */
+	struct semaphore lock;
+
 	struct crypto_engine		*crypt_engine_hash;
 	struct crypto_engine		*crypt_engine_crypto;
 
@@ -335,7 +347,9 @@ void aspeed_register_hace_aead_algs(struct aspeed_hace_dev *hace_dev);
 void aspeed_register_hace_vault_key(struct aspeed_hace_dev *hace_dev);
 void aspeed_unregister_hace_crypto_algs(struct aspeed_hace_dev *hace_dev);
 int aspeed_hace_hash_init(struct aspeed_hace_dev *hace_dev);
+void aspeed_hace_hash_remove(struct aspeed_hace_dev *hace_dev);
 int aspeed_hace_crypto_init(struct aspeed_hace_dev *hace_dev);
+void aspeed_hace_crypto_remove(struct aspeed_hace_dev *hace_dev);
 int aspeed_hace_reset(struct aspeed_hace_dev *dev);
 
 #endif

@@ -9,11 +9,8 @@
 
 #include <linux/delay.h>
 #include <linux/device.h>
-#ifdef CONFIG_NPCM_CHIPIDEA_SRAM_ALLOC
-#include <linux/mempool.h>
-#else
 #include <linux/dmapool.h>
-#endif
+#include <linux/dma-direct.h>
 #include <linux/err.h>
 #include <linux/irqreturn.h>
 #include <linux/kernel.h>
@@ -52,50 +49,6 @@ ctrl_endpt_in_desc = {
 	.bmAttributes    = USB_ENDPOINT_XFER_CONTROL,
 	.wMaxPacketSize  = cpu_to_le16(CTRL_PAYLOAD_MAX),
 };
-
-#ifdef CONFIG_NPCM_CHIPIDEA_SRAM_ALLOC
-static void *udc_alloc_sram_qh(struct ci_hdrc *ci, dma_addr_t *dma)
-{
-	void *ptr;
-
-	if ((ci->qh_offset + 64) > ci->qh_blocksize)
-		return NULL;
-
-	ptr = (void*)(ci->qh_baseram + ci->qh_offset);
-	*dma = (dma_addr_t)((void *)(ci->qh_start + ci->qh_offset));
-	ci->qh_offset += 64;
-
-	return ptr;
-}
-
-static void udc_free_sram_qh(struct ci_hdrc *ci)
-{
-	if (ci->qh_offset > 0)
-		ci->qh_offset = ci->qh_offset - 64;
-}
-
-static void *udc_alloc_sram_td(gfp_t gfp_mask, void *pool_data)
-{
-	struct ci_hdrc *ci = pool_data;
-	void *ptr;
-
-	if ((ci->td_offset + 64) > ci->td_blocksize)
-		return NULL;
-
-	ptr = (void*)(ci->td_baseram + ci->td_offset);
-	ci->td_offset += 64;
-
-	return ptr;
-}
-
-static void udc_free_sram_td(void *element, void *pool_data)
-{
-	struct ci_hdrc *ci = pool_data;
-
-	if (ci->td_offset)
-		ci->td_offset = ci->td_offset - 64;
-}
-#endif
 
 static int reprime_dtd(struct ci_hdrc *ci, struct ci_hw_ep *hwep,
 		       struct td_node *node);
@@ -238,18 +191,12 @@ static int hw_ep_get_halt(struct ci_hdrc *ci, int num, int dir)
  *
  * This function returns an error code
  */
-static int hw_ep_prime(struct ci_hdrc *ci, struct ci_hw_ep *hwep, int num, int dir, int is_ctrl)
+static int hw_ep_prime(struct ci_hdrc *ci, int num, int dir, int is_ctrl)
 {
 	int n = hw_ep_bit(num, dir);
 
 	/* Synchronize before ep prime */
 	wmb();
-	
-	/* We add the read from qh.ptr->td.token to make sure the previous
-	   write to it indeed got into the mamory so when we prime the DMA
-	   will read the updated data */
-	if (hwep->qh.ptr->td.token & 0x80000000)
-		pr_info("%s(): hwep->qh.ptr->td.token=%08x\n", __func__, hwep->qh.ptr->td.token);
 
 	if (is_ctrl && dir == RX && hw_read(ci, OP_ENDPTSETUPSTAT, BIT(num)))
 		return -EAGAIN;
@@ -418,12 +365,8 @@ static int add_td_to_list(struct ci_hw_ep *hwep, struct ci_hw_req *hwreq,
 
 	if (node == NULL)
 		return -ENOMEM;
-#ifdef CONFIG_NPCM_CHIPIDEA_SRAM_ALLOC
-	node->ptr = mempool_alloc(hwep->ci->td_pool, GFP_ATOMIC);
-	node->dma = (dma_addr_t)((void *)hwep->ci->td_start + ((void *)node->ptr - (void *)hwep->ci->td_baseram));
-#else
+
 	node->ptr = dma_pool_zalloc(hwep->td_pool, GFP_ATOMIC, &node->dma);
-#endif
 	if (node->ptr == NULL) {
 		kfree(node);
 		return -ENOMEM;
@@ -598,6 +541,126 @@ static int prepare_td_for_sg(struct ci_hw_ep *hwep, struct ci_hw_req *hwreq)
 	return ret;
 }
 
+/*
+ * Verify if the scatterlist is valid by iterating each sg entry.
+ * Return invalid sg entry index which is less than num_sgs.
+ */
+static int sglist_get_invalid_entry(struct device *dma_dev, u8 dir,
+			struct usb_request *req)
+{
+	int i;
+	struct scatterlist *s = req->sg;
+
+	if (req->num_sgs == 1)
+		return 1;
+
+	dir = dir ? DMA_TO_DEVICE : DMA_FROM_DEVICE;
+
+	for (i = 0; i < req->num_sgs; i++, s = sg_next(s)) {
+		/* Only small sg (generally last sg) may be bounced. If
+		 * that happens. we can't ensure the addr is page-aligned
+		 * after dma map.
+		 */
+		if (dma_kmalloc_needs_bounce(dma_dev, s->length, dir))
+			break;
+
+		/* Make sure each sg start address (except first sg) is
+		 * page-aligned and end address (except last sg) is also
+		 * page-aligned.
+		 */
+		if (i == 0) {
+			if (!IS_ALIGNED(s->offset + s->length,
+						CI_HDRC_PAGE_SIZE))
+				break;
+		} else {
+			if (s->offset)
+				break;
+			if (!sg_is_last(s) && !IS_ALIGNED(s->length,
+						CI_HDRC_PAGE_SIZE))
+				break;
+		}
+	}
+
+	return i;
+}
+
+static int sglist_do_bounce(struct ci_hw_req *hwreq, int index,
+			bool copy, unsigned int *bounced)
+{
+	void *buf;
+	int i, ret, nents, num_sgs;
+	unsigned int rest, rounded;
+	struct scatterlist *sg, *src, *dst;
+
+	nents = index + 1;
+	ret = sg_alloc_table(&hwreq->sgt, nents, GFP_KERNEL);
+	if (ret)
+		return ret;
+
+	sg = src = hwreq->req.sg;
+	num_sgs = hwreq->req.num_sgs;
+	rest = hwreq->req.length;
+	dst = hwreq->sgt.sgl;
+
+	for (i = 0; i < index; i++) {
+		memcpy(dst, src, sizeof(*src));
+		rest -= src->length;
+		src = sg_next(src);
+		dst = sg_next(dst);
+	}
+
+	/* create one bounce buffer */
+	rounded = round_up(rest, CI_HDRC_PAGE_SIZE);
+	buf = kmalloc(rounded, GFP_KERNEL);
+	if (!buf) {
+		sg_free_table(&hwreq->sgt);
+		return -ENOMEM;
+	}
+
+	sg_set_buf(dst, buf, rounded);
+
+	hwreq->req.sg = hwreq->sgt.sgl;
+	hwreq->req.num_sgs = nents;
+	hwreq->sgt.sgl = sg;
+	hwreq->sgt.nents = num_sgs;
+
+	if (copy)
+		sg_copy_to_buffer(src, num_sgs - index, buf, rest);
+
+	*bounced = rest;
+
+	return 0;
+}
+
+static void sglist_do_debounce(struct ci_hw_req *hwreq, bool copy)
+{
+	void *buf;
+	int i, nents, num_sgs;
+	struct scatterlist *sg, *src, *dst;
+
+	sg = hwreq->req.sg;
+	num_sgs = hwreq->req.num_sgs;
+	src = sg_last(sg, num_sgs);
+	buf = sg_virt(src);
+
+	if (copy) {
+		dst = hwreq->sgt.sgl;
+		for (i = 0; i < num_sgs - 1; i++)
+			dst = sg_next(dst);
+
+		nents = hwreq->sgt.nents - num_sgs + 1;
+		sg_copy_from_buffer(dst, nents, buf, sg_dma_len(src));
+	}
+
+	hwreq->req.sg = hwreq->sgt.sgl;
+	hwreq->req.num_sgs = hwreq->sgt.nents;
+	hwreq->sgt.sgl = sg;
+	hwreq->sgt.nents = num_sgs;
+
+	kfree(buf);
+	sg_free_table(&hwreq->sgt);
+}
+
 /**
  * _hardware_enqueue: configures a request at hardware level
  * @hwep:   endpoint
@@ -610,6 +673,8 @@ static int _hardware_enqueue(struct ci_hw_ep *hwep, struct ci_hw_req *hwreq)
 	struct ci_hdrc *ci = hwep->ci;
 	int ret = 0;
 	struct td_node *firstnode, *lastnode;
+	unsigned int bounced_size;
+	struct scatterlist *sg;
 
 	/* don't queue twice */
 	if (hwreq->req.status == -EALREADY)
@@ -617,10 +682,28 @@ static int _hardware_enqueue(struct ci_hw_ep *hwep, struct ci_hw_req *hwreq)
 
 	hwreq->req.status = -EALREADY;
 
+	if (hwreq->req.num_sgs && hwreq->req.length &&
+		ci->has_short_pkt_limit) {
+		ret = sglist_get_invalid_entry(ci->dev->parent, hwep->dir,
+					&hwreq->req);
+		if (ret < hwreq->req.num_sgs) {
+			ret = sglist_do_bounce(hwreq, ret, hwep->dir == TX,
+					&bounced_size);
+			if (ret)
+				return ret;
+		}
+	}
+
 	ret = usb_gadget_map_request_by_dev(ci->dev->parent,
 					    &hwreq->req, hwep->dir);
 	if (ret)
 		return ret;
+
+	if (hwreq->sgt.sgl) {
+		/* We've mapped a bigger buffer, now recover the actual size */
+		sg = sg_last(hwreq->req.sg, hwreq->req.num_sgs);
+		sg_dma_len(sg) = min(sg_dma_len(sg), bounced_size);
+	}
 
 	if (hwreq->req.num_mapped_sgs)
 		ret = prepare_td_for_sg(hwep, hwreq);
@@ -670,9 +753,16 @@ static int _hardware_enqueue(struct ci_hw_ep *hwep, struct ci_hw_req *hwreq)
 		do {
 			hw_write(ci, OP_USBCMD, USBCMD_ATDTW, USBCMD_ATDTW);
 			tmp_stat = hw_read(ci, OP_ENDPTSTAT, BIT(n));
-		} while (!hw_read(ci, OP_USBCMD, USBCMD_ATDTW));
+		} while (!hw_read(ci, OP_USBCMD, USBCMD_ATDTW) && tmp_stat);
 		hw_write(ci, OP_USBCMD, USBCMD_ATDTW, 0);
 		if (tmp_stat)
+			goto done;
+
+		/* OP_ENDPTSTAT will be clear by HW when the endpoint met
+		 * err. This dTD don't push to dQH if current dTD point is
+		 * not the last one in previous request.
+		 */
+		if (hwep->qh.ptr->curr != cpu_to_le32(prevlastnode->dma))
 			goto done;
 	}
 
@@ -690,7 +780,7 @@ static int _hardware_enqueue(struct ci_hw_ep *hwep, struct ci_hw_req *hwreq)
 		hwep->qh.ptr->cap |= cpu_to_le32(mul << __ffs(QH_MULT));
 	}
 
-	ret = hw_ep_prime(ci, hwep, hwep->num, hwep->dir,
+	ret = hw_ep_prime(ci, hwep->num, hwep->dir,
 			   hwep->type == USB_ENDPOINT_XFER_CONTROL);
 done:
 	return ret;
@@ -704,11 +794,7 @@ static void free_pending_td(struct ci_hw_ep *hwep)
 {
 	struct td_node *pending = hwep->pending_td;
 
-#ifdef CONFIG_NPCM_CHIPIDEA_SRAM_ALLOC
-	mempool_free(pending->ptr, hwep->ci->td_pool);
-#else
 	dma_pool_free(hwep->td_pool, pending->ptr, pending->dma);
-#endif
 	hwep->pending_td = NULL;
 	kfree(pending);
 }
@@ -720,7 +806,7 @@ static int reprime_dtd(struct ci_hdrc *ci, struct ci_hw_ep *hwep,
 	hwep->qh.ptr->td.token &=
 		cpu_to_le32(~(TD_STATUS_HALTED | TD_STATUS_ACTIVE));
 
-	return hw_ep_prime(ci, hwep, hwep->num, hwep->dir,
+	return hw_ep_prime(ci, hwep->num, hwep->dir,
 				hwep->type == USB_ENDPOINT_XFER_CONTROL);
 }
 
@@ -738,6 +824,7 @@ static int _hardware_dequeue(struct ci_hw_ep *hwep, struct ci_hw_req *hwreq)
 	unsigned remaining_length;
 	unsigned actual = hwreq->req.length;
 	struct ci_hdrc *ci = hwep->ci;
+	bool is_isoc = hwep->type == USB_ENDPOINT_XFER_ISOC;
 
 	if (hwreq->req.status != -EALREADY)
 		return -EINVAL;
@@ -750,7 +837,8 @@ static int _hardware_dequeue(struct ci_hw_ep *hwep, struct ci_hw_req *hwreq)
 		if ((TD_STATUS_ACTIVE & tmptoken) != 0) {
 			int n = hw_ep_bit(hwep->num, hwep->dir);
 
-			if (ci->rev == CI_REVISION_24)
+			if (ci->rev == CI_REVISION_24 ||
+			    ci->rev == CI_REVISION_22 || is_isoc)
 				if (!hw_read(ci, OP_ENDPTSTAT, BIT(n)))
 					reprime_dtd(ci, hwep, node);
 			hwreq->req.status = -EALREADY;
@@ -769,11 +857,15 @@ static int _hardware_dequeue(struct ci_hw_ep *hwep, struct ci_hw_req *hwreq)
 			hwreq->req.status = -EPROTO;
 			break;
 		} else if ((TD_STATUS_TR_ERR & hwreq->req.status)) {
-			hwreq->req.status = -EILSEQ;
-			break;
+			if (is_isoc) {
+				hwreq->req.status = 0;
+			} else {
+				hwreq->req.status = -EILSEQ;
+				break;
+			}
 		}
 
-		if (remaining_length) {
+		if (remaining_length && !is_isoc) {
 			if (hwep->dir == TX) {
 				hwreq->req.status = -EPROTO;
 				break;
@@ -793,6 +885,10 @@ static int _hardware_dequeue(struct ci_hw_ep *hwep, struct ci_hw_req *hwreq)
 
 	usb_gadget_unmap_request_by_dev(hwep->ci->dev->parent,
 					&hwreq->req, hwep->dir);
+
+	/* sglist bounced */
+	if (hwreq->sgt.sgl)
+		sglist_do_debounce(hwreq, hwep->dir == RX);
 
 	hwreq->req.actual += actual;
 
@@ -826,11 +922,7 @@ __acquires(hwep->lock)
 						     struct ci_hw_req, queue);
 
 		list_for_each_entry_safe(node, tmpnode, &hwreq->tds, td) {
-#ifdef CONFIG_NPCM_CHIPIDEA_SRAM_ALLOC
-			mempool_free(node->ptr, hwep->ci->td_pool);
-#else
 			dma_pool_free(hwep->td_pool, node->ptr, node->dma);
-#endif
 			list_del_init(&node->td);
 			node->ptr = NULL;
 			kfree(node);
@@ -838,6 +930,13 @@ __acquires(hwep->lock)
 
 		list_del_init(&hwreq->queue);
 		hwreq->req.status = -ESHUTDOWN;
+
+		/* Unmap DMA and clean up bounce buffers before giving back */
+		usb_gadget_unmap_request_by_dev(hwep->ci->dev->parent,
+					&hwreq->req, hwep->dir);
+
+		if (hwreq->sgt.sgl)
+			sglist_do_debounce(hwreq, false);
 
 		if (hwreq->req.complete != NULL) {
 			spin_unlock(hwep->lock);
@@ -1577,11 +1676,7 @@ static void ep_free_request(struct usb_ep *ep, struct usb_request *req)
 	spin_lock_irqsave(hwep->lock, flags);
 
 	list_for_each_entry_safe(node, tmpnode, &hwreq->tds, td) {
-#ifdef CONFIG_NPCM_CHIPIDEA_SRAM_ALLOC
-		mempool_free(node->ptr, hwep->td_pool);
-#else
 		dma_pool_free(hwep->td_pool, node->ptr, node->dma);
-#endif
 		list_del_init(&node->td);
 		node->ptr = NULL;
 		kfree(node);
@@ -1639,11 +1734,7 @@ static int ep_dequeue(struct usb_ep *ep, struct usb_request *req)
 		hw_ep_flush(hwep->ci, hwep->num, hwep->dir);
 
 	list_for_each_entry_safe(node, tmpnode, &hwreq->tds, td) {
-#ifdef CONFIG_NPCM_CHIPIDEA_SRAM_ALLOC
-		mempool_free(node->ptr, hwep->td_pool);
-#else
 		dma_pool_free(hwep->td_pool, node->ptr, node->dma);
-#endif
 		list_del(&node->td);
 		kfree(node);
 	}
@@ -1652,6 +1743,9 @@ static int ep_dequeue(struct usb_ep *ep, struct usb_request *req)
 	list_del_init(&hwreq->queue);
 
 	usb_gadget_unmap_request(&hwep->ci->gadget, req, hwep->dir);
+
+	if (hwreq->sgt.sgl)
+		sglist_do_debounce(hwreq, false);
 
 	req->status = -ECONNRESET;
 
@@ -1883,6 +1977,11 @@ static int ci_udc_pullup(struct usb_gadget *_gadget, int is_on)
 		hw_write(ci, OP_USBCMD, USBCMD_RS, USBCMD_RS);
 	else
 		hw_write(ci, OP_USBCMD, USBCMD_RS, 0);
+
+	if (ci->platdata->notify_event) {
+		_gadget->connected = is_on;
+		ci->platdata->notify_event(ci, CI_HDRC_CONTROLLER_PULLUP_EVENT);
+	}
 	pm_runtime_put_sync(ci->dev);
 
 	return 0;
@@ -1967,12 +2066,8 @@ static int init_eps(struct ci_hdrc *ci)
 			usb_ep_set_maxpacket_limit(&hwep->ep, (unsigned short)~0);
 
 			INIT_LIST_HEAD(&hwep->qh.queue);
-#ifdef CONFIG_NPCM_CHIPIDEA_SRAM_ALLOC
-			hwep->qh.ptr = (struct ci_hw_qh *)udc_alloc_sram_qh(ci, &hwep->qh.dma);
-#else
 			hwep->qh.ptr = dma_pool_zalloc(ci->qh_pool, GFP_KERNEL,
 						       &hwep->qh.dma);
-#endif
 			if (hwep->qh.ptr == NULL)
 				retval = -ENOMEM;
 
@@ -2005,11 +2100,7 @@ static void destroy_eps(struct ci_hdrc *ci)
 
 		if (hwep->pending_td)
 			free_pending_td(hwep);
-#ifdef CONFIG_NPCM_CHIPIDEA_SRAM_ALLOC
-		udc_free_sram_qh(ci);
-#else
 		dma_pool_free(ci->qh_pool, hwep->qh.ptr, hwep->qh.dma);
-#endif
 	}
 }
 
@@ -2202,14 +2293,6 @@ static int udc_start(struct ci_hdrc *ci)
 	INIT_LIST_HEAD(&ci->gadget.ep_list);
 
 	/* alloc resources */
-#ifdef CONFIG_NPCM_CHIPIDEA_SRAM_ALLOC
-	ci->td_pool = mempool_create(ci->td_blocksize / 0x40, udc_alloc_sram_td,
-				     udc_free_sram_td, ci);
-	if (ci->td_pool == NULL) {
-		retval = -ENOMEM;
-		goto free_pools;
-	}
-#else
 	ci->qh_pool = dma_pool_create("ci_hw_qh", dev->parent,
 				       sizeof(struct ci_hw_qh),
 				       64, CI_HDRC_PAGE_SIZE);
@@ -2223,7 +2306,6 @@ static int udc_start(struct ci_hdrc *ci)
 		retval = -ENOMEM;
 		goto free_qh_pool;
 	}
-#endif
 
 	retval = init_eps(ci);
 	if (retval)
@@ -2240,13 +2322,9 @@ static int udc_start(struct ci_hdrc *ci)
 destroy_eps:
 	destroy_eps(ci);
 free_pools:
-#ifdef CONFIG_NPCM_CHIPIDEA_SRAM_ALLOC
-	mempool_destroy(ci->td_pool);
-#else
 	dma_pool_destroy(ci->td_pool);
 free_qh_pool:
 	dma_pool_destroy(ci->qh_pool);
-#endif
 	return retval;
 }
 
@@ -2264,12 +2342,8 @@ void ci_hdrc_gadget_destroy(struct ci_hdrc *ci)
 
 	destroy_eps(ci);
 
-#ifdef CONFIG_NPCM_CHIPIDEA_SRAM_ALLOC
-	mempool_destroy(ci->td_pool);
-#else
 	dma_pool_destroy(ci->td_pool);
 	dma_pool_destroy(ci->qh_pool);
-#endif
 }
 
 static int udc_id_switch_for_device(struct ci_hdrc *ci)

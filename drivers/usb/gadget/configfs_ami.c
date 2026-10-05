@@ -16,6 +16,9 @@
 #include "function/u_ether.h"
 #include "function/u_rndis.h"
 
+void ami_bind_ecm_rndis_shared(struct usb_gadget *gadget,
+			       struct list_head *available_func);
+
 /**
  * find_ecm_rndis_pair - Locate ECM and RNDIS function instances
  * @available_func: pointer to the list of available function instances
@@ -99,7 +102,7 @@ void ami_bind_ecm_rndis_shared(struct usb_gadget *gadget,
 	 * To share the ECM network device to RNDIS, the original RNDIS
 	 * device must be released. This only works during first UDC binding.
 	 */
-	if (!rndis_opts->borrowed_net && !rndis_opts->bound) {
+	if (!rndis_opts->borrowed_net && !device_is_registered(&rndis_opts->net->dev)) {
 		rndis_borrow_net(rndis_fi, ecm_opts->net);
 	}
 }

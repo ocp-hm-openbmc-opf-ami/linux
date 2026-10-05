@@ -314,7 +314,7 @@ static int jtag_register(struct jtag *jtag)
 	if (!dev)
 		return -ENODEV;
 
-	id = ida_simple_get(&jtag_ida, 0, 0, GFP_KERNEL);
+	id = ida_alloc(&jtag_ida, GFP_KERNEL);
 	if (id < 0)
 		return id;
 
@@ -338,7 +338,7 @@ static int jtag_register(struct jtag *jtag)
 err_jtag_name:
 	kfree(jtag->miscdev.name);
 err_jtag_alloc:
-	ida_simple_remove(&jtag_ida, id);
+	ida_free(&jtag_ida, id);
 	return err;
 }
 
@@ -346,7 +346,7 @@ static void jtag_unregister(struct jtag *jtag)
 {
 	misc_deregister(&jtag->miscdev);
 	kfree(jtag->miscdev.name);
-	ida_simple_remove(&jtag_ida, jtag->id);
+	ida_free(&jtag_ida, jtag->id);
 }
 
 static void devm_jtag_unregister(struct device *dev, void *res)

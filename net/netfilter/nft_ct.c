@@ -22,6 +22,8 @@
 #include <net/netfilter/nf_conntrack_timeout.h>
 #include <net/netfilter/nf_conntrack_l4proto.h>
 #include <net/netfilter/nf_conntrack_expect.h>
+#include <net/netfilter/nf_conntrack_seqadj.h>
+#include "nf_internals.h"
 
 struct nft_ct_helper_obj  {
 	struct nf_conntrack_helper *helper4;
@@ -76,7 +78,7 @@ static void nft_ct_get_eval(const struct nft_expr *expr,
 		break;
 	}
 
-	if (ct == NULL)
+	if (!ct || nf_ct_is_template(ct))
 		goto err;
 
 	switch (priv->key) {
@@ -178,12 +180,10 @@ static void nft_ct_get_eval(const struct nft_expr *expr,
 	tuple = &ct->tuplehash[priv->dir].tuple;
 	switch (priv->key) {
 	case NFT_CT_SRC:
-		memcpy(dest, tuple->src.u3.all,
-		       nf_ct_l3num(ct) == NFPROTO_IPV4 ? 4 : 16);
+		memcpy(dest, tuple->src.u3.all, priv->len);
 		return;
 	case NFT_CT_DST:
-		memcpy(dest, tuple->dst.u3.all,
-		       nf_ct_l3num(ct) == NFPROTO_IPV4 ? 4 : 16);
+		memcpy(dest, tuple->dst.u3.all, priv->len);
 		return;
 	case NFT_CT_PROTO_SRC:
 		nft_reg_store16(dest, (__force u16)tuple->src.u.all);
@@ -379,6 +379,14 @@ static bool nft_ct_tmpl_alloc_pcpu(void)
 }
 #endif
 
+static void __nft_ct_get_destroy(const struct nft_ctx *ctx, struct nft_ct *priv)
+{
+#ifdef CONFIG_NF_CONNTRACK_LABELS
+	if (priv->key == NFT_CT_LABELS)
+		nf_connlabels_put(ctx->net);
+#endif
+}
+
 static int nft_ct_get_init(const struct nft_ctx *ctx,
 			   const struct nft_expr *expr,
 			   const struct nlattr * const tb[])
@@ -413,6 +421,10 @@ static int nft_ct_get_init(const struct nft_ctx *ctx,
 		if (tb[NFTA_CT_DIRECTION] != NULL)
 			return -EINVAL;
 		len = NF_CT_LABELS_MAX_SIZE;
+
+		err = nf_connlabels_get(ctx->net, (len * BITS_PER_BYTE) - 1);
+		if (err)
+			return err;
 		break;
 #endif
 	case NFT_CT_HELPER:
@@ -494,7 +506,8 @@ static int nft_ct_get_init(const struct nft_ctx *ctx,
 		case IP_CT_DIR_REPLY:
 			break;
 		default:
-			return -EINVAL;
+			err = -EINVAL;
+			goto err;
 		}
 	}
 
@@ -502,11 +515,11 @@ static int nft_ct_get_init(const struct nft_ctx *ctx,
 	err = nft_parse_register_store(ctx, tb[NFTA_CT_DREG], &priv->dreg, NULL,
 				       NFT_DATA_VALUE, len);
 	if (err < 0)
-		return err;
+		goto err;
 
 	err = nf_ct_netns_get(ctx->net, ctx->family);
 	if (err < 0)
-		return err;
+		goto err;
 
 	if (priv->key == NFT_CT_BYTES ||
 	    priv->key == NFT_CT_PKTS  ||
@@ -514,6 +527,9 @@ static int nft_ct_get_init(const struct nft_ctx *ctx,
 		nf_ct_set_acct(ctx->net, true);
 
 	return 0;
+err:
+	__nft_ct_get_destroy(ctx, priv);
+	return err;
 }
 
 static void __nft_ct_set_destroy(const struct nft_ctx *ctx, struct nft_ct *priv)
@@ -526,6 +542,7 @@ static void __nft_ct_set_destroy(const struct nft_ctx *ctx, struct nft_ct *priv)
 #endif
 #ifdef CONFIG_NF_CONNTRACK_ZONES
 	case NFT_CT_ZONE:
+		nf_queue_nf_hook_drop(ctx->net);
 		mutex_lock(&nft_ct_pcpu_mutex);
 		if (--nft_ct_pcpu_template_refcnt == 0)
 			nft_ct_tmpl_put_pcpu();
@@ -608,7 +625,7 @@ static int nft_ct_set_init(const struct nft_ctx *ctx,
 	}
 
 	priv->len = len;
-	err = nft_parse_register_load(tb[NFTA_CT_SREG], &priv->sreg, len);
+	err = nft_parse_register_load(ctx, tb[NFTA_CT_SREG], &priv->sreg, len);
 	if (err < 0)
 		goto err1;
 
@@ -626,6 +643,9 @@ err1:
 static void nft_ct_get_destroy(const struct nft_ctx *ctx,
 			       const struct nft_expr *expr)
 {
+	struct nft_ct *priv = nft_expr_priv(expr);
+
+	__nft_ct_get_destroy(ctx, priv);
 	nf_ct_netns_put(ctx->net, ctx->family);
 }
 
@@ -756,7 +776,7 @@ static bool nft_ct_set_reduce(struct nft_regs_track *track,
 	return false;
 }
 
-#ifdef CONFIG_RETPOLINE
+#ifdef CONFIG_MITIGATION_RETPOLINE
 static const struct nft_expr_ops nft_ct_get_fast_ops = {
 	.type		= &nft_ct_type,
 	.size		= NFT_EXPR_SIZE(sizeof(struct nft_ct)),
@@ -801,7 +821,7 @@ nft_ct_select_ops(const struct nft_ctx *ctx,
 		return ERR_PTR(-EINVAL);
 
 	if (tb[NFTA_CT_DREG]) {
-#ifdef CONFIG_RETPOLINE
+#ifdef CONFIG_MITIGATION_RETPOLINE
 		u32 k = ntohl(nla_get_be32(tb[NFTA_CT_KEY]));
 
 		switch (k) {
@@ -931,7 +951,7 @@ static void nft_ct_timeout_obj_eval(struct nft_object *obj,
 	 */
 	values = nf_ct_timeout_data(timeout);
 	if (values)
-		nf_ct_refresh(ct, pkt->skb, values[0]);
+		nf_ct_refresh(ct, values[0]);
 }
 
 static int nft_ct_timeout_obj_init(const struct nft_ctx *ctx,
@@ -996,9 +1016,10 @@ static void nft_ct_timeout_obj_destroy(const struct nft_ctx *ctx,
 	struct nft_ct_timeout_obj *priv = nft_obj_data(obj);
 	struct nf_ct_timeout *timeout = priv->timeout;
 
+	nf_queue_nf_hook_drop(ctx->net);
 	nf_ct_untimeout(ctx->net, timeout);
 	nf_ct_netns_put(ctx->net, ctx->family);
-	kfree(priv->timeout);
+	kfree_rcu(priv->timeout, rcu);
 }
 
 static int nft_ct_timeout_obj_dump(struct sk_buff *skb,
@@ -1128,6 +1149,7 @@ static void nft_ct_helper_obj_destroy(const struct nft_ctx *ctx,
 {
 	struct nft_ct_helper_obj *priv = nft_obj_data(obj);
 
+	nf_queue_nf_hook_drop(ctx->net);
 	if (priv->helper4)
 		nf_conntrack_helper_put(priv->helper4);
 	if (priv->helper6)
@@ -1173,6 +1195,10 @@ static void nft_ct_helper_obj_eval(struct nft_object *obj,
 	if (help) {
 		rcu_assign_pointer(help->helper, to_assign);
 		set_bit(IPS_HELPER_BIT, &ct->status);
+
+		if ((ct->status & IPS_NAT_MASK) && !nfct_seqadj(ct))
+			if (!nfct_seqadj_ext_add(ct))
+				regs->verdict.code = NF_DROP;
 	}
 }
 
@@ -1354,6 +1380,8 @@ static void nft_ct_expect_obj_eval(struct nft_object *obj,
 
 	if (nf_ct_expect_related(exp, 0) != 0)
 		regs->verdict.code = NF_DROP;
+
+	nf_ct_expect_put(exp);
 }
 
 static const struct nla_policy nft_ct_expect_policy[NFTA_CT_EXPECT_MAX + 1] = {

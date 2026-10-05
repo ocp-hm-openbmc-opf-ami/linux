@@ -417,7 +417,7 @@ static int aspeed_can_exit_reset_mode(struct net_device *ndev)
 	return 0;
 }
 
-void aspeed_can_err_init(struct net_device *ndev)
+static void aspeed_can_err_init(struct net_device *ndev)
 {
 	struct aspeed_can_priv *priv = netdev_priv(ndev);
 	u32 reg_val;
@@ -428,7 +428,7 @@ void aspeed_can_err_init(struct net_device *ndev)
 	writel(reg_val, priv->reg_base + CAN_ERR_STAT);
 }
 
-void aspeed_can_interrupt_conf(struct net_device *ndev)
+static void aspeed_can_interrupt_conf(struct net_device *ndev)
 {
 	struct aspeed_can_priv *priv = netdev_priv(ndev);
 	u32 inte;
@@ -441,7 +441,7 @@ void aspeed_can_interrupt_conf(struct net_device *ndev)
 	writel(inte, priv->reg_base + CAN_INTE);
 }
 
-void aspeed_can_tb_mode_conf(struct net_device *ndev)
+static void aspeed_can_tb_mode_conf(struct net_device *ndev)
 {
 	struct aspeed_can_priv *priv = netdev_priv(ndev);
 
@@ -451,7 +451,7 @@ void aspeed_can_tb_mode_conf(struct net_device *ndev)
 		aspeed_can_clr_bit(priv, CAN_CTRL, CAN_CTRL_TBSEL_BIT);
 }
 
-void aspeed_can_sack_conf(struct net_device *ndev, bool enable)
+static void aspeed_can_sack_conf(struct net_device *ndev, bool enable)
 {
 	struct aspeed_can_priv *priv = netdev_priv(ndev);
 
@@ -461,7 +461,7 @@ void aspeed_can_sack_conf(struct net_device *ndev, bool enable)
 		aspeed_can_clr_bit(priv, CAN_CTRL, CAN_CTRL_SACK_BIT);
 }
 
-void aspeed_can_loopback_ext_conf(struct net_device *ndev, bool enable)
+static void aspeed_can_loopback_ext_conf(struct net_device *ndev, bool enable)
 {
 	struct aspeed_can_priv *priv = netdev_priv(ndev);
 
@@ -471,7 +471,7 @@ void aspeed_can_loopback_ext_conf(struct net_device *ndev, bool enable)
 		aspeed_can_clr_bit(priv, CAN_CTRL, CAN_CTRL_LBMEMOD_BIT);
 }
 
-void aspeed_can_loopback_int_conf(struct net_device *ndev, bool enable)
+static void aspeed_can_loopback_int_conf(struct net_device *ndev, bool enable)
 {
 	struct aspeed_can_priv *priv = netdev_priv(ndev);
 
@@ -481,7 +481,7 @@ void aspeed_can_loopback_int_conf(struct net_device *ndev, bool enable)
 		aspeed_can_clr_bit(priv, CAN_CTRL, CAN_CTRL_LBMIMOD_BIT);
 }
 
-void aspeed_can_fd_init(struct net_device *ndev)
+static void aspeed_can_fd_init(struct net_device *ndev)
 {
 	struct aspeed_can_priv *priv = netdev_priv(ndev);
 
@@ -607,13 +607,21 @@ static void aspeed_can_reg_dump(struct net_device *ndev)
 
 	for (i = 0; i < 0x50; i += 4)
 		netdev_info(ndev, "REG(%03x): 0x%08x\n", i, readl(priv->reg_base + i));
+
+	netdev_info(ndev, "TX_MIRROR\n");
+	for (i = 0; i < 0x30; i += 4)
+		netdev_info(ndev, "(0x%02x): 0x%08x\n", i, readl(priv->reg_base + CAN_TBUF_MIRROR + i));
+
+	netdev_info(ndev, "RX_BUF\n");
+	for (i = 0; i < 0x30; i += 4)
+		netdev_info(ndev, "(0x%02x): 0x%08x\n", i, readl(priv->reg_base + CAN_RBUF + i));
 }
 
 static int aspeed_can_set_bittiming(struct net_device *ndev)
 {
 	struct aspeed_can_priv *priv = netdev_priv(ndev);
 	struct can_bittiming *bt = &priv->can.bittiming;
-	struct can_bittiming *dbt = &priv->can.data_bittiming;
+	struct can_bittiming *dbt = &priv->can.fd.data_bittiming;
 	u32 btr0, btr1;
 	u32 can_fd_ssp;
 
@@ -1577,7 +1585,7 @@ static int aspeed_can_probe(struct platform_device *pdev)
 	};
 
 	priv->can.bittiming_const = &aspeed_can_bittiming_const;
-	priv->can.data_bittiming_const = &aspeed_canfd_bittiming_const;
+	priv->can.fd.data_bittiming_const = &aspeed_canfd_bittiming_const;
 	priv->can.do_set_mode = aspeed_can_do_set_mode;
 	priv->can.do_get_berr_counter = aspeed_can_get_berr_counter;
 	priv->can.ctrlmode_supported = CAN_CTRLMODE_LOOPBACK |
@@ -1585,7 +1593,7 @@ static int aspeed_can_probe(struct platform_device *pdev)
 				       CAN_CTRLMODE_FD |
 				       CAN_CTRLMODE_CC_LEN8_DLC |
 				       CAN_CTRLMODE_TDC_AUTO;
-	priv->can.do_get_auto_tdcv = aspeed_can_get_auto_tdcv;
+	priv->can.fd.do_get_auto_tdcv = aspeed_can_get_auto_tdcv;
 
 	priv->tx_max = 3;
 	spin_lock_init(&priv->tx_lock);
@@ -1690,7 +1698,7 @@ err:
 	return ret;
 }
 
-static int aspeed_can_remove(struct platform_device *pdev)
+static void aspeed_can_remove(struct platform_device *pdev)
 {
 	struct net_device *ndev = platform_get_drvdata(pdev);
 	struct aspeed_can_priv *priv = netdev_priv(ndev);
@@ -1701,8 +1709,6 @@ static int aspeed_can_remove(struct platform_device *pdev)
 	kfree(priv->stb_ring);
 
 	free_candev(ndev);
-
-	return 0;
 }
 
 static struct platform_driver aspeed_can_driver = {

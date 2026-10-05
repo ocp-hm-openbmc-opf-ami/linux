@@ -669,7 +669,7 @@ err_free_aspeed:
 	return rc;
 }
 
-static int fsi_master_aspeed_remove(struct platform_device *pdev)
+static void fsi_master_aspeed_remove(struct platform_device *pdev)
 {
 	struct fsi_master_aspeed *aspeed = platform_get_drvdata(pdev);
 
@@ -677,8 +677,6 @@ static int fsi_master_aspeed_remove(struct platform_device *pdev)
 	clk_disable_unprepare(aspeed->clk);
 	if (!IS_ERR(aspeed->rst))
 		reset_control_assert(aspeed->rst);
-
-	return 0;
 }
 
 static const struct aspeed_fsi_match_data ast2600_match_data = {
@@ -706,4 +704,5 @@ static struct platform_driver fsi_master_aspeed_driver = {
 };
 
 module_platform_driver(fsi_master_aspeed_driver);
+MODULE_DESCRIPTION("FSI master driver for AST2600");
 MODULE_LICENSE("GPL");

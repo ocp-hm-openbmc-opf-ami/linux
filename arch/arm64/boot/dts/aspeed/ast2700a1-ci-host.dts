@@ -1,0 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+
+/dts-v1/;
+
+#include "ast2700-ci-host.dts"

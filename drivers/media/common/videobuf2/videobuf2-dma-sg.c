@@ -345,6 +345,7 @@ static int vb2_dma_sg_mmap(void *buf_priv, struct vm_area_struct *vma)
 		return err;
 	}
 
+	vm_flags_set(vma, VM_DONTEXPAND | VM_DONTDUMP);
 	/*
 	 * Use common vm_area operations to track buffer refcount.
 	 */
@@ -676,4 +677,4 @@ EXPORT_SYMBOL_GPL(vb2_dma_sg_memops);
 MODULE_DESCRIPTION("dma scatter/gather memory handling routines for videobuf2");
 MODULE_AUTHOR("Andrzej Pietrasiewicz");
 MODULE_LICENSE("GPL");
-MODULE_IMPORT_NS(DMA_BUF);
+MODULE_IMPORT_NS("DMA_BUF");

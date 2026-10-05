@@ -242,7 +242,19 @@ static int mctp_i2c_slave_cb(struct i2c_client *client,
 		return 0;
 
 	switch (event) {
+	case I2C_SLAVE_READ_REQUESTED:
+	case I2C_SLAVE_READ_PROCESSED:
+		/* MCTP I2C transport only uses writes */
+		midev->rx_pos = 0;
+		*val = 0xff;
+		break;
 	case I2C_SLAVE_WRITE_RECEIVED:
+		if (!val) {
+			dev_err(&client->dev, "NULL val in WRITE_RECEIVED\n");
+			rc = -EINVAL;
+			break;
+		}
+
 		if (midev->rx_pos < MCTP_I2C_BUFSZ) {
 			midev->rx_buffer[midev->rx_pos] = *val;
 			midev->rx_pos++;
@@ -278,6 +290,9 @@ static int mctp_i2c_recv(struct mctp_i2c_dev *midev)
 	u8 pec, calc_pec;
 	size_t recvlen;
 	int status;
+
+	if (midev->rx_pos == 0)
+		return 0;
 
 	/* + 1 for the PEC */
 	if (midev->rx_pos < MCTP_I2C_MINLEN + 1) {
@@ -334,6 +349,7 @@ static int mctp_i2c_recv(struct mctp_i2c_dev *midev)
 	} else {
 		status = NET_RX_DROP;
 		spin_unlock_irqrestore(&midev->lock, flags);
+		kfree_skb(skb);
 	}
 
 	if (status == NET_RX_SUCCESS) {
@@ -477,23 +493,6 @@ static void mctp_i2c_invalidate_tx_flow(struct mctp_i2c_dev *midev,
 		mctp_i2c_unlock_nest(midev);
 }
 
-#define MCTP_I2C_TX_RETRY_COUNT	5
-
-static int mctp_i2c_transfer_retry(struct i2c_adapter *adap,
-				   struct i2c_msg *msgs, int num)
-{
-	int rc, i;
-
-	for (i = 0; i < MCTP_I2C_TX_RETRY_COUNT; i++) {
-		rc = __i2c_transfer(adap, msgs, num);
-		if (rc >= 0)
-			return rc;
-		usleep_range(2000, 3000);
-	}
-
-	return rc;
-}
-
 static void mctp_i2c_xmit(struct mctp_i2c_dev *midev, struct sk_buff *skb)
 {
 	struct net_device_stats *stats = &midev->ndev->stats;
@@ -502,8 +501,6 @@ static void mctp_i2c_xmit(struct mctp_i2c_dev *midev, struct sk_buff *skb)
 	struct i2c_msg msg = {0};
 	u8 *pecp;
 	int rc;
-
-	fs = mctp_i2c_get_tx_flow_state(midev, skb);
 
 	hdr = (void *)skb_mac_header(skb);
 	/* Sanity check that packet contents matches skb length,
@@ -515,6 +512,8 @@ static void mctp_i2c_xmit(struct mctp_i2c_dev *midev, struct sk_buff *skb)
 				     hdr->byte_count + 3, skb->len);
 		return;
 	}
+
+	fs = mctp_i2c_get_tx_flow_state(midev, skb);
 
 	if (skb_tailroom(skb) >= 1) {
 		/* Linear case with space, we can just append the PEC */
@@ -537,7 +536,7 @@ static void mctp_i2c_xmit(struct mctp_i2c_dev *midev, struct sk_buff *skb)
 		/* no flow: full lock & unlock */
 		mctp_i2c_lock_nest(midev);
 		mctp_i2c_device_select(midev->client, midev);
-		rc = mctp_i2c_transfer_retry(midev->adapter, &msg, 1);
+		rc = __i2c_transfer(midev->adapter, &msg, 1);
 		mctp_i2c_unlock_nest(midev);
 		break;
 
@@ -551,7 +550,7 @@ static void mctp_i2c_xmit(struct mctp_i2c_dev *midev, struct sk_buff *skb)
 
 	case MCTP_I2C_TX_FLOW_EXISTING:
 		/* existing flow: we already have the lock; just tx */
-		rc = mctp_i2c_transfer_retry(midev->adapter, &msg, 1);
+		rc = __i2c_transfer(midev->adapter, &msg, 1);
 
 		/* on tx errors, the flow can no longer be considered valid */
 		if (rc < 0)

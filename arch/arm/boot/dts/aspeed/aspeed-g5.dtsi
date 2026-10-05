@@ -274,7 +274,6 @@
 			gfx: display@1e6e6000 {
 				compatible = "aspeed,ast2500-gfx", "syscon";
 				reg = <0x1e6e6000 0x1000>;
-				reg-io-width = <4>;
 				clocks = <&syscon ASPEED_CLK_GATE_D1CLK>;
 				resets = <&syscon ASPEED_RESET_CRT1>;
 				syscon = <&syscon>;
@@ -293,6 +292,17 @@
 				status = "disabled";
 			};
 
+			mctp: mctp@1e6e8000 {
+				compatible = "aspeed,ast2500-mctp";
+				reg = <0x1e6e8000 0x30>;
+				interrupts-extended = <&vic 42>, <&scu_ic ASPEED_AST2500_SCU_IC_PCIE_RESET_LO_TO_HI>;
+				interrupt-names = "mctp", "pcie";
+				resets = <&syscon ASPEED_RESET_MCTP>;
+				aspeed,scu = <&syscon>;
+				aspeed,pcieh = <&pcie_ep>;
+				status = "disabled";
+			};
+
 			adc: adc@1e6e9000 {
 				compatible = "aspeed,ast2500-adc";
 				reg = <0x1e6e9000 0xb0>;
@@ -302,11 +312,9 @@
 				status = "disabled";
 			};
 
-			espi: espi@1e6ee000 {
-				compatible = "aspeed,ast2500-espi";
-				reg = <0x1e6ee000 0x1000>;
-				interrupts = <23>;
-				clocks = <&syscon ASPEED_CLK_GATE_ESPICLK>;
+			pcie_ep:pcie_ep@1e6ed000 {
+				compatible = "aspeed,ast2500-pcie-ep", "syscon";
+				reg = <0x1e6ed000 0x100>;
 				status = "disabled";
 			};
 		};
@@ -339,6 +347,7 @@
 			#size-cells = <1>;
 			ranges = <0 0x1e740000 0x10000>;
 			clocks = <&syscon ASPEED_CLK_GATE_SDCLK>;
+			resets = <&syscon ASPEED_RESET_SDIO>;
 			status = "disabled";
 
 			sdhci0: sdhci@100 {
@@ -388,7 +397,7 @@
 				clocks = <&syscon ASPEED_CLK_APB>;
 				#interrupt-cells = <2>;
 				interrupt-controller;
-				bus-frequency = <1000000>;
+				bus-frequency = <12000000>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&pinctrl_sgpm_default>;
 				status = "disabled";
@@ -397,6 +406,7 @@
 			rtc: rtc@1e781000 {
 				compatible = "aspeed,ast2500-rtc";
 				reg = <0x1e781000 0x18>;
+				interrupts = <22>;
 				status = "disabled";
 			};
 
@@ -472,7 +482,6 @@
 			lpc: lpc@1e789000 {
 				compatible = "aspeed,ast2500-lpc-v2", "simple-mfd", "syscon";
 				reg = <0x1e789000 0x1000>;
-				reg-io-width = <4>;
 
 				#address-cells = <1>;
 				#size-cells = <1>;
@@ -542,18 +551,12 @@
 					reg = <0xa0 0x24 0xc8 0x8>;
 				};
 
+
 				ibt: ibt@140 {
 					compatible = "aspeed,ast2500-ibt-bmc";
 					reg = <0x140 0x18>;
 					interrupts = <8>;
 					clocks = <&syscon ASPEED_CLK_GATE_LCLK>;
-					status = "disabled";
-				};
-
-				mbox: mbox@200 {
-					compatible = "aspeed,ast2500-mbox";
-					reg = <0x200 0x30>;
-					interrupts = <46>;
 					status = "disabled";
 				};
 			};

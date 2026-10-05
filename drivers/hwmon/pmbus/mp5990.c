@@ -8,6 +8,8 @@
 #include <linux/of_device.h>
 #include "pmbus.h"
 
+enum chips { mp5990, mp5998 };
+
 #define MP5990_EFUSE_CFG	(0xC4)
 #define MP5990_VOUT_FORMAT	BIT(9)
 
@@ -28,9 +30,10 @@ static int mp5990_read_byte_data(struct i2c_client *client, int page, int reg)
 	case PMBUS_VOUT_MODE:
 		if (data->vout_mode == linear) {
 			/*
-			 * The VOUT format is linear11, not linear16.
-			 * We should enforce the VOUT in linear mode and
-			 * return exponent value.
+			 * The VOUT format used by the chip is linear11,
+			 * not linear16. Report that VOUT is in linear mode
+			 * and return exponent value extracted while probing
+			 * the chip.
 			 */
 			return data->vout_linear_exponent;
 		}
@@ -38,9 +41,9 @@ static int mp5990_read_byte_data(struct i2c_client *client, int page, int reg)
 		/*
 		 * The datasheet does not support the VOUT command,
 		 * but the device responds with a default value of 0x17.
-		 * In the standard, 0x17 represents linear mode. However,
-		 * Therefore, we should enforce the VOUT in the direct format
-		 * when format use default direct mode.
+		 * In the standard, 0x17 represents linear mode.
+		 * Therefore, we should report that VOUT is in direct
+		 * format when the chip is configured for it.
 		 */
 		return PB_VOUT_MODE_DIRECT;
 
@@ -63,8 +66,9 @@ static int mp5990_read_word_data(struct i2c_client *client, int page,
 		if (ret < 0)
 			return ret;
 		/*
-		 * Because the VOUT mode is linear11 and not linear16,
-		 * we disregard bits[15:11] and report based on the VOUT mode.
+		 * Because the VOUT format used by the chip is linear11 and not
+		 * linear16, we disregard bits[15:11]. The exponent is reported
+		 * as part of the VOUT_MODE command.
 		 */
 		if (data->vout_mode == linear) {
 			mantissa = ((s16)((ret & 0x7ff) << 5)) >> 5;
@@ -108,10 +112,53 @@ static struct pmbus_driver_info mp5990_info = {
 	.read_word_data = mp5990_read_word_data,
 };
 
+static struct pmbus_driver_info mp5998_info = {
+	.pages = 1,
+	.format[PSC_VOLTAGE_IN] = direct,
+	.format[PSC_VOLTAGE_OUT] = direct,
+	.format[PSC_CURRENT_IN] = direct,
+	.format[PSC_CURRENT_OUT] = direct,
+	.format[PSC_POWER] = direct,
+	.format[PSC_TEMPERATURE] = direct,
+	.m[PSC_VOLTAGE_IN] = 64,
+	.b[PSC_VOLTAGE_IN] = 0,
+	.R[PSC_VOLTAGE_IN] = 0,
+	.m[PSC_VOLTAGE_OUT] = 64,
+	.b[PSC_VOLTAGE_OUT] = 0,
+	.R[PSC_VOLTAGE_OUT] = 0,
+	.m[PSC_CURRENT_IN] = 16,
+	.b[PSC_CURRENT_IN] = 0,
+	.R[PSC_CURRENT_IN] = 0,
+	.m[PSC_CURRENT_OUT] = 16,
+	.b[PSC_CURRENT_OUT] = 0,
+	.R[PSC_CURRENT_OUT] = 0,
+	.m[PSC_POWER] = 2,
+	.b[PSC_POWER] = 0,
+	.R[PSC_POWER] = 0,
+	.m[PSC_TEMPERATURE] = 1,
+	.b[PSC_TEMPERATURE] = 0,
+	.R[PSC_TEMPERATURE] = 0,
+	.func[0] =
+		PMBUS_HAVE_VIN | PMBUS_HAVE_VOUT | PMBUS_HAVE_IOUT |
+		PMBUS_HAVE_IIN | PMBUS_HAVE_PIN | PMBUS_HAVE_POUT |
+		PMBUS_HAVE_TEMP | PMBUS_HAVE_STATUS_IOUT |
+		PMBUS_HAVE_STATUS_INPUT | PMBUS_HAVE_STATUS_TEMP,
+	.read_byte_data = mp5990_read_byte_data,
+	.read_word_data = mp5990_read_word_data,
+};
+
+static const struct i2c_device_id mp5990_id[] = {
+	{"mp5990", mp5990},
+	{"mp5998", mp5998},
+	{ }
+};
+MODULE_DEVICE_TABLE(i2c, mp5990_id);
+
 static int mp5990_probe(struct i2c_client *client)
 {
 	struct pmbus_driver_info *info;
 	struct mp5990_data *data;
+	enum chips chip;
 	int ret;
 
 	data = devm_kzalloc(&client->dev, sizeof(struct mp5990_data),
@@ -119,7 +166,15 @@ static int mp5990_probe(struct i2c_client *client)
 	if (!data)
 		return -ENOMEM;
 
-	memcpy(&data->info, &mp5990_info, sizeof(*info));
+	if (client->dev.of_node)
+		chip = (uintptr_t)of_device_get_match_data(&client->dev);
+	else
+		chip = i2c_match_id(mp5990_id, client)->driver_data;
+
+	if (chip == mp5990)
+		memcpy(&data->info, &mp5990_info, sizeof(*info));
+	else
+		memcpy(&data->info, &mp5998_info, sizeof(*info));
 	info = &data->info;
 
 	/* Read Vout Config */
@@ -138,6 +193,9 @@ static int mp5990_probe(struct i2c_client *client)
 		data->info.format[PSC_VOLTAGE_OUT] = linear;
 		data->info.format[PSC_CURRENT_OUT] = linear;
 		data->info.format[PSC_POWER] = linear;
+		if (chip == mp5998)
+			data->info.format[PSC_CURRENT_IN] = linear;
+
 		ret = i2c_smbus_read_word_data(client, PMBUS_READ_VOUT);
 		if (ret < 0) {
 			dev_err(&client->dev, "Can't get vout exponent.");
@@ -151,15 +209,10 @@ static int mp5990_probe(struct i2c_client *client)
 }
 
 static const struct of_device_id mp5990_of_match[] = {
-	{ .compatible = "mps,mp5990" },
+	{ .compatible = "mps,mp5990", .data = (void *)mp5990 },
+	{ .compatible = "mps,mp5998", .data = (void *)mp5998 },
 	{}
 };
-
-static const struct i2c_device_id mp5990_id[] = {
-	{"mp5990", 0},
-	{ }
-};
-MODULE_DEVICE_TABLE(i2c, mp5990_id);
 
 static struct i2c_driver mp5990_driver = {
 	.driver = {
@@ -174,4 +227,4 @@ module_i2c_driver(mp5990_driver);
 MODULE_AUTHOR("Peter Yin <peter.yin@quantatw.com>");
 MODULE_DESCRIPTION("PMBus driver for MP5990 HSC");
 MODULE_LICENSE("GPL");
-MODULE_IMPORT_NS(PMBUS);
+MODULE_IMPORT_NS("PMBUS");

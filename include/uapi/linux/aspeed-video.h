@@ -8,7 +8,7 @@
 
 #include <linux/v4l2-controls.h>
 
-// enum for aspeed video's v4l2 s_input
+/* aspeed video's input types */
 enum aspeed_video_input {
 	VIDEO_INPUT_VGA = 0,
 	VIDEO_INPUT_GFX,

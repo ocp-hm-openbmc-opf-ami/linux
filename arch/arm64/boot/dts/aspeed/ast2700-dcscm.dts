@@ -5,6 +5,7 @@
 #include "aspeed-g7.dtsi"
 #include <dt-bindings/gpio/aspeed-gpio.h>
 #include <dt-bindings/i2c/i2c.h>
+#include <dt-bindings/mmbi/protocols.h>
 
 #define PCIE0_EP 1	// 1: EP, 0: RC
 #define PCIE1_EP 1	// 1: EP, 0: RC
@@ -150,17 +151,13 @@
 &i3c5 {
 	/* I3C_MNG_BMC_SCM */
 	initial-role = "primary";
+	mctp-controller;
 	status = "okay";
 };
 
 &i3c6 {
 	/* I3C_SPD_SCM */
 	initial-role = "primary";
-	status = "okay";
-};
-
-&uart0 {
-	/* CPU0 SYSUART */
 	status = "okay";
 };
 
@@ -177,11 +174,6 @@
 	status = "okay";
 };
 
-&uart5 {
-	/* CPU1 SYSUART */
-	status = "okay";
-};
-
 /* Enable UART7 and UART10 for obmc-console. */
 &uart7 {
 	/delete-property/ pinctrl-names;
@@ -195,7 +187,13 @@
 	status = "okay";
 };
 
-/* UART13 and UART14 will be tunnelded to LTPI UART channels */
+/* UART3, UART13 and UART14 will be tunnelded to LTPI UART channels. */
+&uart3 {
+	/delete-property/ pinctrl-names;
+	/delete-property/ pinctrl-0;
+	status = "okay";
+};
+
 &uart13 {
 	status = "okay";
 };
@@ -497,14 +495,8 @@
 	pinctrl-0 = <&pinctrl_rgmii0_default &pinctrl_rgmii0_driving>;
 };
 
-&syscon1 {
-	mac0-clk-delay = <0x18 0x16
-			  0x10 0x10
-			  0x10 0x10>;
-	assigned-clocks = <&syscon1 SCU1_CLK_MACHCLK>,
-			  <&syscon1 SCU1_CLK_RGMII>,
-			  <&syscon1 SCU1_CLK_RMII>;
-	assigned-clock-rates = <200000000>, <125000000>, <50000000>;
+&jtag1 {
+	status = "okay";
 };
 
 &gpio1 {
@@ -585,10 +577,6 @@
 &espi0 {
 	status = "okay";
 	perif-dma-mode;
-	perif-mmbi-enable;
-	perif-mmbi-src-addr = <0x0 0xa8000000>;
-	perif-mmbi-tgt-memory = <&espi0_mmbi_memory>;
-	perif-mmbi-instance-num = <0x1>;
 	perif-mcyc-enable;
 	perif-mcyc-src-addr = <0x0 0x98000000>;
 	perif-mcyc-size = <0x0 0x10000>;
@@ -597,20 +585,42 @@
 	flash-dma-mode;
 };
 
+&espi0_mmbi {
+	status = "okay";
+
+	host-map-addr = <0x0 0xEC000000>;
+	memory-region = <&espi0_mmbi_memory>;
+	instances = <1>;
+
+	instance@0 {
+		channel = <0>; // channel should start from 0
+		protocols = /bits/ 8 <MMBI_PROTOCOL_MCTP>;
+	};
+};
+
 #if 0 //eSPI1 and SD are multi-functional pin, SD default on
 &espi1 {
 	status = "okay";
 	perif-dma-mode;
-	perif-mmbi-enable;
-	perif-mmbi-src-addr = <0x0 0xa8000000>;
-	perif-mmbi-tgt-memory = <&espi1_mmbi_memory>;
-	perif-mmbi-instance-num = <0x1>;
 	perif-mcyc-enable;
 	perif-mcyc-src-addr = <0x0 0x98000000>;
 	perif-mcyc-size = <0x0 0x10000>;
 	vw-pltrst-monitor;
 	oob-dma-mode;
 	flash-dma-mode;
+};
+
+&espi1_mmbi {
+	status = "okay";
+
+	host-map-addr = <0x0 0xEC000000>;
+	memory-region = <&espi1_mmbi_memory>;
+	instances = <1>;
+
+	instance@0 {
+		channel = <0>; // channel should start from 0
+		protocols = /bits/ 8 <MMBI_PROTOCOL_MCTP>;
+	};
 };
 #endif
 
@@ -723,6 +733,22 @@
 };
 
 &hace {
+	dummy-key0 = <
+		0x89878915 0x1DA242FA 0x1A7885CE 0x5BD7FA39
+		0xC53265FD 0xCC346B25 0x230370EE 0xD0570629
+	>;
+	dummy-key1 = <
+		0x89878902 0x1DA242FA 0x1A7885CE 0x5BD7FA39
+		0xC53265FD 0xCC346B25 0x230370EE 0xD0570629
+	>;
+	dummy-key2 = <
+		0x2C914FA3 0x1056D87B 0xC13D6AE2 0x5E44AF98
+		0x0DB97321 0xCA378CF6 0x62EE115D 0x3FA74B90
+	>;
+	dummy-key3 = <
+		0x9E18D25C 0x6FB17A43 0x348DE520 0x1269FAC7
+		0xAC5503DE 0x2DB61F88 0xEF9AC074 0xB84E6731
+	>;
 	status = "okay";
 };
 
@@ -846,9 +872,30 @@
 	memory-region = <&mctp1_reserved>;
 };
 
-#if 0  /* Disable i2c0 and i2c4. It is testing for LTPI passthrough. */
+/* Enable i2c0~i2c4 for LTPI testing. */
 &i2c0 {
 	/* SMB_PMBUS1_SCM */
+	/delete-property/ pinctrl-names;
+	/delete-property/ pinctrl-0;
+	status = "okay";
+};
+
+&i2c1 {
+	/* SMB_IPMB_SCL1 */
+	/delete-property/ pinctrl-names;
+	/delete-property/ pinctrl-0;
+	status = "okay";
+};
+
+&i2c2 {
+	/* SMB_CPLD_SCL2 */
+	/delete-property/ pinctrl-names;
+	/delete-property/ pinctrl-0;
+	status = "okay";
+};
+
+&i2c3 {
+	/* SMB_PMBUS2_SCM */
 	/delete-property/ pinctrl-names;
 	/delete-property/ pinctrl-0;
 	status = "okay";
@@ -860,27 +907,12 @@
 	/delete-property/ pinctrl-0;
 	status = "okay";
 };
-#endif
 
-#if 0 /* Disable i2c1, Cancel to SCI pin due to 2nd NCSI. */
-&i2c1 {
-	/* SMB_IPMB_SCL1 */
-	status = "okay";
-};
-#endif
-
-&i2c2 {
-	/* SMB_CPLD_SCL2 */
-	status = "okay";
-};
-
+/* Default i2c5 is tunnelded to LTPI. */
+/* Enable i2c5 pinctrl for testing on board LM75. */
 &i2c5 {
 	/* SMB_TMP_BMC */
 	status = "okay";
-	lm75@4b {
-		compatible = "national,lm75";
-		reg = <0x4b>;
-	};
 };
 
 /* AST2700 i2c8 -> AST1060 i2c5 for PCH mailbox emulation test. */
@@ -955,3 +987,25 @@
 &otp {
 	status = "okay";
 };
+
+#if 0
+&soc0 {
+	mbox-ssp-0 {
+		compatible = "aspeed,aspeed-mbox";
+		reg = <0x4 0x31480000 0x0 0x200000>, <0x0 0x10001000 0x0 0x1000>;
+		mboxes = <&mbox0 0>;
+		aspeed,tx-timeout = <100>;
+	};
+};
+#endif
+
+#if 1
+&soc0 {
+	mbox-bootmcu-1 {
+		compatible = "aspeed,aspeed-mbox";
+		reg = <0x4 0x31880000 0x0 0x100000>, <0x4 0x31980000 0x0 0x100000>;
+		mboxes = <&mbox2 1>;
+		aspeed,tx-timeout = <10000>;
+	};
+};
+#endif

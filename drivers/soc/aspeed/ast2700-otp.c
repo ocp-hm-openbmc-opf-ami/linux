@@ -158,6 +158,10 @@ static DEFINE_SPINLOCK(otp_state_lock);
 
 #define OTP_TIMEOUT_US			10000
 
+/* OTPCAL: Vendor key hash at w_offset 0x12, 48 bytes (24 words) */
+#define OTPCAL_VKEY_HASH_W_OFFSET	0x12
+#define OTPCAL_VKEY_HASH_WORDS		24
+
 /* OTPSTRAP */
 #define OTPSTRAP0_ADDR			STRAP_REGION_START_ADDR
 #define OTPSTRAP14_ADDR			(OTPSTRAP0_ADDR + 0xe)
@@ -252,7 +256,7 @@ static int otp_read_data(struct aspeed_otp *ctx, u32 offset, u16 *data)
 	return 0;
 }
 
-int otp_prog_data(struct aspeed_otp *ctx, u32 offset, u16 data)
+static int otp_prog_data(struct aspeed_otp *ctx, u32 offset, u16 data)
 {
 	struct device *dev = ctx->dev;
 	int ret;
@@ -268,7 +272,7 @@ int otp_prog_data(struct aspeed_otp *ctx, u32 offset, u16 data)
 	return 0;
 }
 
-int otp_prog_multi_data(struct aspeed_otp *ctx, u32 offset, u32 *data, int count)
+static int otp_prog_multi_data(struct aspeed_otp *ctx, u32 offset, u32 *data, int count)
 {
 	struct device *dev = ctx->dev;
 	int ret;
@@ -352,6 +356,39 @@ end:
 
 	return ret;
 }
+
+#ifdef CONFIG_AST2700_OTP_SYSFS
+static ssize_t vendor_key_hash_show(struct device *dev,
+				    struct device_attribute *attr, char *buf)
+{
+	u32 offset = CAL_REGION_START_ADDR + OTPCAL_VKEY_HASH_W_OFFSET;
+	struct aspeed_otp *ctx = dev_get_drvdata(dev);
+	u16 data[OTPCAL_VKEY_HASH_WORDS];
+	u8 *bytes = (u8 *)data;
+	ssize_t len = 0;
+	int ret, i;
+
+	ret = aspeed_otp_read(ctx, offset, data, ARRAY_SIZE(data));
+	if (ret)
+		return -EIO;
+
+	for (i = 0; i < sizeof(data); i++)
+		len += scnprintf(buf + len, PAGE_SIZE - len, "%02x", bytes[i]);
+
+	len += scnprintf(buf + len, PAGE_SIZE - len, "\n");
+	return len;
+}
+static DEVICE_ATTR_RO(vendor_key_hash);
+
+static struct attribute *aspeed_otp_attrs[] = {
+	&dev_attr_vendor_key_hash.attr,
+	NULL,
+};
+
+static const struct attribute_group aspeed_otp_attr_group = {
+	.attrs = aspeed_otp_attrs,
+};
+#endif /* CONFIG_AST2700_OTP_SYSFS */
 
 static long aspeed_otp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
@@ -536,19 +573,26 @@ static int aspeed_otp_probe(struct platform_device *pdev)
 		return rc;
 	}
 
+#ifdef CONFIG_AST2700_OTP_SYSFS
+	rc = devm_device_add_group(dev, &aspeed_otp_attr_group);
+	if (rc) {
+		dev_err(dev, "failed to add sysfs attributes\n");
+		misc_deregister(&priv->miscdev);
+		return rc;
+	}
+#endif
+
 	dev_info(dev, "Aspeed OTP driver successfully registered\n");
 
 	return 0;
 }
 
-static int aspeed_otp_remove(struct platform_device *pdev)
+static void aspeed_otp_remove(struct platform_device *pdev)
 {
 	struct aspeed_otp *ctx = dev_get_drvdata(&pdev->dev);
 
 	kfree(ctx->data);
 	misc_deregister(&ctx->miscdev);
-
-	return 0;
 }
 
 static struct platform_driver aspeed_otp_driver = {

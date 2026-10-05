@@ -40,14 +40,6 @@ config I2C_BOARDINFO
 	bool
 	default y
 
-config I2C_COMPAT
-	bool "Enable compatibility bits for old user-space"
-	default y
-	help
-	  Say Y here if you intend to run lm-sensors 3.1.1 or older, or any
-	  other user-space package which expects i2c adapters to be class
-	  devices. If you don't know, say Y.
-
 config I2C_CHARDEV
 	tristate "I2C device interface"
 	help
@@ -135,12 +127,37 @@ config I2C_SLAVE_EEPROM
 	  Documentation/i2c/slave-eeprom-backend.rst for further details.
 
 config I2C_SLAVE_TESTUNIT
-	tristate "I2C eeprom testunit driver"
+	tristate "I2C testunit driver"
 	help
 	  This backend can be used to trigger test cases for I2C bus masters
 	  which require a remote device with certain capabilities, e.g.
 	  multi-master, SMBus Host Notify, etc. Please read
 	  Documentation/i2c/slave-testunit-backend.rst for further details.
+
+config I2C_SLAVE_MQUEUE
+	tristate "I2C mqueue (message queue) slave driver"
+	help
+	  Some protocols over I2C are designed for bi-directional transferring
+	  messages by using I2C Master Write protocol. This driver is used to
+	  receive and queue messages from the remote I2C device.
+
+	  Userspace can get the messages by reading sysfs file that this driver
+	  exposes.
+
+	  This support is also available as a module. If so, the module will be
+	  called i2c-slave-mqueue.
+
+config I2C_SLAVE_MQUEUE_MESSAGE_SIZE
+	int "The message size of I2C mqueue slave"
+	depends on I2C_SLAVE_MQUEUE
+	default 120
+
+config I2C_SLAVE_MQUEUE_QUEUE_SIZE
+	int "The queue size of I2C mqueue slave"
+	depends on I2C_SLAVE_MQUEUE
+	default 32
+	help
+	  This number MUST be power of 2.
 
 endif
 

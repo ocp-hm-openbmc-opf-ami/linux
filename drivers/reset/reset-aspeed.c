@@ -8,33 +8,26 @@
 #include <linux/device.h>
 #include <linux/io.h>
 #include <linux/module.h>
-#include <linux/of.h>
-#include <linux/of_address.h>
 #include <linux/reset-controller.h>
+#include <linux/slab.h>
 
 #include <dt-bindings/reset/aspeed,ast2700-scu.h>
-#include <soc/aspeed/reset-aspeed.h>
 
 #define SCU0_RESET_CTRL1 0x200
 #define SCU0_RESET_CTRL2 0x220
 #define SCU1_RESET_CTRL1 0x200
 #define SCU1_RESET_CTRL2 0x220
-#define AST2755_SCU1_RESET_CTRL2 0x218
-#define AST2755_SCU1_RESET_CTRL3 0x230
+#define AST2705_SCU1_RESET_CTRL2 0x218
 #define SCU1_PCIE3_CTRL 0x908
-
-struct aspeed_reset;
 
 struct ast2700_reset_signal {
 	bool dedicated_clr; /* dedicated reset clr offset */
-	u32 offset;
-	u32 bit;
+	u32 offset, bit;
 };
 
 struct aspeed_reset_info {
 	unsigned int nr_resets;
 	const struct ast2700_reset_signal *signal;
-	void	(*reset_init)(struct aspeed_reset *reset);
 };
 
 struct aspeed_reset {
@@ -159,7 +152,7 @@ static const struct ast2700_reset_signal ast2700_reset1_signals[] = {
 	[SCU1_RESET_PCIE2RST] = { false, SCU1_PCIE3_CTRL, BIT(0) },
 };
 
-static const struct ast2700_reset_signal ast2755_reset1_signals[] = {
+static const struct ast2700_reset_signal ast2705_reset1_signals[] = {
 	[SCU1_RESET_LPC0] = { true, SCU1_RESET_CTRL1, BIT(0) },
 	[SCU1_RESET_LPC1] = { true, SCU1_RESET_CTRL1, BIT(1) },
 	[SCU1_RESET_MII] = { true, SCU1_RESET_CTRL1, BIT(2) },
@@ -192,39 +185,39 @@ static const struct ast2700_reset_signal ast2755_reset1_signals[] = {
 	[SCU1_RESET_I3C13] = { true, SCU1_RESET_CTRL1, BIT(29) },
 	[SCU1_RESET_I3C14] = { true, SCU1_RESET_CTRL1, BIT(30) },
 	[SCU1_RESET_I3C15] = { true, SCU1_RESET_CTRL1, BIT(31) },
-	[SCU1_RESET_MCU0] = { true, AST2755_SCU1_RESET_CTRL2, BIT(0) },
-	[SCU1_RESET_MCU1] = { true, AST2755_SCU1_RESET_CTRL2, BIT(1) },
-	[SCU1_RESET_H2A_SPI1] = { true, AST2755_SCU1_RESET_CTRL2, BIT(2) },
-	[SCU1_RESET_H2A_SPI2] = { true, AST2755_SCU1_RESET_CTRL2, BIT(3) },
-	[SCU1_RESET_UART0] = { true, AST2755_SCU1_RESET_CTRL2, BIT(4) },
-	[SCU1_RESET_UART1] = { true, AST2755_SCU1_RESET_CTRL2, BIT(5) },
-	[SCU1_RESET_UART2] = { true, AST2755_SCU1_RESET_CTRL2, BIT(6) },
-	[SCU1_RESET_UART3] = { true, AST2755_SCU1_RESET_CTRL2, BIT(7) },
-	[SCU1_RESET_I2C_FILTER] = { true, AST2755_SCU1_RESET_CTRL2, BIT(8) },
-	[SCU1_RESET_CALIPTRA] = { true, AST2755_SCU1_RESET_CTRL2, BIT(9) },
-	[SCU1_RESET_XDMA] = { true, AST2755_SCU1_RESET_CTRL2, BIT(10) },
-	[SCU1_RESET_XPCS] = { true, AST2755_SCU1_RESET_CTRL2, BIT(11) },
-	[SCU1_RESET_FSI] = { true, AST2755_SCU1_RESET_CTRL2, BIT(12) },
-	[SCU1_RESET_CAN] = { true, AST2755_SCU1_RESET_CTRL2, BIT(13) },
-	[SCU1_RESET_MCTP] = { true, AST2755_SCU1_RESET_CTRL2, BIT(14) },
-	[SCU1_RESET_I2C] = { true, AST2755_SCU1_RESET_CTRL2, BIT(15) },
-	[SCU1_RESET_UART6] = { true, AST2755_SCU1_RESET_CTRL2, BIT(16) },
-	[SCU1_RESET_UART7] = { true, AST2755_SCU1_RESET_CTRL2, BIT(17) },
-	[SCU1_RESET_UART8] = { true, AST2755_SCU1_RESET_CTRL2, BIT(18) },
-	[SCU1_RESET_UART9] = { true, AST2755_SCU1_RESET_CTRL2, BIT(19) },
-	[SCU1_RESET_LTPI0] = { true, AST2755_SCU1_RESET_CTRL2, BIT(20) },
-	[SCU1_RESET_VGAL] = { true, AST2755_SCU1_RESET_CTRL2, BIT(21) },
-	[SCU1_RESET_LTPI1] = { true, AST2755_SCU1_RESET_CTRL2, BIT(22) },
-	[SCU1_RESET_ACE] = { true, AST2755_SCU1_RESET_CTRL2, BIT(23) },
-	[SCU1_RESET_E2M] = { true, AST2755_SCU1_RESET_CTRL2, BIT(24) },
-	[SCU1_RESET_UHCI] = { true, AST2755_SCU1_RESET_CTRL2, BIT(25) },
-	[SCU1_RESET_PORTC_USB2UART] = { true, AST2755_SCU1_RESET_CTRL2, BIT(26) },
-	[SCU1_RESET_PORTC_VHUB_EHCI] = { true, AST2755_SCU1_RESET_CTRL2, BIT(27) },
-	[SCU1_RESET_PORTD_USB2UART] = { true, AST2755_SCU1_RESET_CTRL2, BIT(28) },
-	[SCU1_RESET_PORTD_VHUB_EHCI] = { true, AST2755_SCU1_RESET_CTRL2, BIT(29) },
-	[SCU1_RESET_H2X] = { true, AST2755_SCU1_RESET_CTRL2, BIT(30) },
-	[SCU1_RESET_I3CDMA] = { true, AST2755_SCU1_RESET_CTRL2, BIT(31) },
-	[SCU1_RESET_PCIE2RST] = { false, AST2755_SCU1_RESET_CTRL2, BIT(0) },
+	[SCU1_RESET_MCU0] = { true, AST2705_SCU1_RESET_CTRL2, BIT(0) },
+	[SCU1_RESET_MCU1] = { true, AST2705_SCU1_RESET_CTRL2, BIT(1) },
+	[SCU1_RESET_H2A_SPI1] = { true, AST2705_SCU1_RESET_CTRL2, BIT(2) },
+	[SCU1_RESET_H2A_SPI2] = { true, AST2705_SCU1_RESET_CTRL2, BIT(3) },
+	[SCU1_RESET_UART0] = { true, AST2705_SCU1_RESET_CTRL2, BIT(4) },
+	[SCU1_RESET_UART1] = { true, AST2705_SCU1_RESET_CTRL2, BIT(5) },
+	[SCU1_RESET_UART2] = { true, AST2705_SCU1_RESET_CTRL2, BIT(6) },
+	[SCU1_RESET_UART3] = { true, AST2705_SCU1_RESET_CTRL2, BIT(7) },
+	[SCU1_RESET_I2C_FILTER] = { true, AST2705_SCU1_RESET_CTRL2, BIT(8) },
+	[SCU1_RESET_CALIPTRA] = { true, AST2705_SCU1_RESET_CTRL2, BIT(9) },
+	[SCU1_RESET_XDMA] = { true, AST2705_SCU1_RESET_CTRL2, BIT(10) },
+	[SCU1_RESET_XPCS] = { true, AST2705_SCU1_RESET_CTRL2, BIT(11) },
+	[SCU1_RESET_FSI] = { true, AST2705_SCU1_RESET_CTRL2, BIT(12) },
+	[SCU1_RESET_CAN] = { true, AST2705_SCU1_RESET_CTRL2, BIT(13) },
+	[SCU1_RESET_MCTP] = { true, AST2705_SCU1_RESET_CTRL2, BIT(14) },
+	[SCU1_RESET_I2C] = { true, AST2705_SCU1_RESET_CTRL2, BIT(15) },
+	[SCU1_RESET_UART6] = { true, AST2705_SCU1_RESET_CTRL2, BIT(16) },
+	[SCU1_RESET_UART7] = { true, AST2705_SCU1_RESET_CTRL2, BIT(17) },
+	[SCU1_RESET_UART8] = { true, AST2705_SCU1_RESET_CTRL2, BIT(18) },
+	[SCU1_RESET_UART9] = { true, AST2705_SCU1_RESET_CTRL2, BIT(19) },
+	[SCU1_RESET_LTPI0] = { true, AST2705_SCU1_RESET_CTRL2, BIT(20) },
+	[SCU1_RESET_VGAL] = { true, AST2705_SCU1_RESET_CTRL2, BIT(21) },
+	[SCU1_RESET_LTPI1] = { true, AST2705_SCU1_RESET_CTRL2, BIT(22) },
+	[SCU1_RESET_ACE] = { true, AST2705_SCU1_RESET_CTRL2, BIT(23) },
+	[SCU1_RESET_E2M] = { true, AST2705_SCU1_RESET_CTRL2, BIT(24) },
+	[SCU1_RESET_UHCI] = { true, AST2705_SCU1_RESET_CTRL2, BIT(25) },
+	[SCU1_RESET_PORTC_USB2UART] = { true, AST2705_SCU1_RESET_CTRL2, BIT(26) },
+	[SCU1_RESET_PORTC_VHUB_EHCI] = { true, AST2705_SCU1_RESET_CTRL2, BIT(27) },
+	[SCU1_RESET_PORTD_USB2UART] = { true, AST2705_SCU1_RESET_CTRL2, BIT(28) },
+	[SCU1_RESET_PORTD_VHUB_EHCI] = { true, AST2705_SCU1_RESET_CTRL2, BIT(29) },
+	[SCU1_RESET_H2X] = { true, AST2705_SCU1_RESET_CTRL2, BIT(30) },
+	[SCU1_RESET_I3CDMA] = { true, AST2705_SCU1_RESET_CTRL2, BIT(31) },
+	[SCU1_RESET_PCIE2RST] = { false, SCU1_PCIE3_CTRL, BIT(0) },
 };
 
 static inline struct aspeed_reset *to_aspeed_reset(struct reset_controller_dev *rcdev)
@@ -276,17 +269,6 @@ static const struct reset_control_ops aspeed_reset_ops = {
 	.status = aspeed_reset_status,
 };
 
-void ast2700_reset1_init(struct aspeed_reset *reset)
-{
-	/*
-	 * AST2700-scu1 A0 workaround:
-	 * I3C reset should assert all of the I3C controllers simultaneously.
-	 * Otherwise, it may lead to failure in accessing I3C registers.
-	 */
-	if (!FIELD_GET(GENMASK(23, 16), readl(reset->base)))
-		writel(0xffff0000, reset->base + SCU1_RESET_CTRL1);
-}
-
 static int aspeed_reset_probe(struct auxiliary_device *adev,
 			      const struct auxiliary_device_id *id)
 {
@@ -308,60 +290,8 @@ static int aspeed_reset_probe(struct auxiliary_device *adev,
 	reset->rcdev.of_reset_n_cells = 1;
 	reset->base = (void __iomem *)adev->dev.platform_data;
 
-	dev_set_drvdata(dev, reset);
-	if (reset->info->reset_init)
-		reset->info->reset_init(reset);
-
 	return devm_reset_controller_register(dev, &reset->rcdev);
 }
-
-static void aspeed_reset_unregister_adev(void *_adev)
-{
-	struct auxiliary_device *adev = _adev;
-
-	auxiliary_device_delete(adev);
-	auxiliary_device_uninit(adev);
-}
-
-static void aspeed_reset_adev_release(struct device *dev)
-{
-	struct auxiliary_device *adev = to_auxiliary_dev(dev);
-
-	kfree(adev);
-}
-
-int aspeed_reset_controller_register(struct device *clk_dev, void __iomem *base,
-				     const char *adev_name)
-{
-	struct auxiliary_device *adev;
-	int ret;
-
-	adev = kzalloc(sizeof(*adev), GFP_KERNEL);
-	if (!adev)
-		return -ENOMEM;
-
-	adev->name = adev_name;
-	adev->dev.parent = clk_dev;
-	adev->dev.release = aspeed_reset_adev_release;
-	adev->id = 666u;
-
-	ret = auxiliary_device_init(adev);
-	if (ret) {
-		kfree(adev);
-		return ret;
-	}
-
-	ret = auxiliary_device_add(adev);
-	if (ret) {
-		auxiliary_device_uninit(adev);
-		return ret;
-	}
-
-	adev->dev.platform_data = (__force void *)base;
-
-	return devm_add_action_or_reset(clk_dev, aspeed_reset_unregister_adev, adev);
-}
-EXPORT_SYMBOL_GPL(aspeed_reset_controller_register);
 
 static const struct aspeed_reset_info ast2700_reset0_info = {
 	.nr_resets = ARRAY_SIZE(ast2700_reset0_signals),
@@ -371,18 +301,17 @@ static const struct aspeed_reset_info ast2700_reset0_info = {
 static const struct aspeed_reset_info ast2700_reset1_info = {
 	.nr_resets = ARRAY_SIZE(ast2700_reset1_signals),
 	.signal = ast2700_reset1_signals,
-	.reset_init = ast2700_reset1_init,
 };
 
-static const struct aspeed_reset_info ast2755_reset1_info = {
-	.nr_resets = ARRAY_SIZE(ast2755_reset1_signals),
-	.signal = ast2755_reset1_signals,
+static const struct aspeed_reset_info ast2705_reset1_info = {
+	.nr_resets = ARRAY_SIZE(ast2705_reset1_signals),
+	.signal = ast2705_reset1_signals,
 };
 
 static const struct auxiliary_device_id aspeed_reset_ids[] = {
-	{ .name = "reset_aspeed.reset0", .driver_data = (kernel_ulong_t)&ast2700_reset0_info },
-	{ .name = "reset_aspeed.reset1", .driver_data = (kernel_ulong_t)&ast2700_reset1_info },
-	{ .name = "reset_aspeed.reset2", .driver_data = (kernel_ulong_t)&ast2755_reset1_info },
+	{ .name = "clk_ast2700.reset0", .driver_data = (kernel_ulong_t)&ast2700_reset0_info },
+	{ .name = "clk_ast2700.reset1", .driver_data = (kernel_ulong_t)&ast2700_reset1_info },
+	{ .name = "clk_ast2705.reset1", .driver_data = (kernel_ulong_t)&ast2705_reset1_info },
 	{ }
 };
 MODULE_DEVICE_TABLE(auxiliary, aspeed_reset_ids);

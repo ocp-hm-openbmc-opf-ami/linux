@@ -114,7 +114,6 @@ struct aspeed_adc_data {
 	struct device		*dev;
 	int			id;
 	const struct aspeed_adc_model_data *model_data;
-	struct regulator	*regulator;
 	void __iomem		*base;
 	spinlock_t		clk_lock;
 	struct clk_hw		*fixed_div_clk;
@@ -443,7 +442,7 @@ static int aspeed_adc_write_event_config(struct iio_dev *indio_dev,
 					 const struct iio_chan_spec *chan,
 					 enum iio_event_type type,
 					 enum iio_event_direction dir,
-					 int state)
+					 bool state)
 {
 	struct aspeed_adc_data *data = iio_priv(indio_dev);
 
@@ -536,7 +535,7 @@ static void aspeed_adc_ida_remove(void *data)
 {
 	struct aspeed_adc_data *priv_data = data;
 
-	ida_simple_remove(&aspeed_adc_ida, priv_data->id);
+	ida_free(&aspeed_adc_ida, priv_data->id);
 }
 
 static void aspeed_adc_reset_assert(void *data)
@@ -561,13 +560,6 @@ static void aspeed_adc_power_down(void *data)
 	       priv_data->base + ASPEED_REG_ENGINE_CONTROL);
 }
 
-static void aspeed_adc_reg_disable(void *data)
-{
-	struct regulator *reg = data;
-
-	regulator_disable(reg);
-}
-
 static int aspeed_adc_vref_config(struct iio_dev *indio_dev)
 {
 	struct aspeed_adc_data *data = iio_priv(indio_dev);
@@ -582,18 +574,13 @@ static int aspeed_adc_vref_config(struct iio_dev *indio_dev)
 		readl(data->base + ASPEED_REG_ENGINE_CONTROL);
 	adc_engine_control_reg_val &= ~ASPEED_ADC_REF_VOLTAGE;
 
-	data->regulator = devm_regulator_get_optional(data->dev, "vref");
-	if (!IS_ERR(data->regulator)) {
-		ret = regulator_enable(data->regulator);
-		if (ret)
-			return ret;
-		ret = devm_add_action_or_reset(
-			data->dev, aspeed_adc_reg_disable, data->regulator);
-		if (ret)
-			return ret;
-		data->vref_mv = regulator_get_voltage(data->regulator);
-		/* Conversion from uV to mV */
-		data->vref_mv /= 1000;
+	ret = devm_regulator_get_enable_read_voltage(data->dev, "vref");
+	if (ret < 0 && ret != -ENODEV)
+		return ret;
+
+	if (ret != -ENODEV) {
+		data->vref_mv = ret / 1000;
+
 		if ((data->vref_mv >= 1550) && (data->vref_mv <= 2700))
 			writel(adc_engine_control_reg_val |
 				FIELD_PREP(
@@ -612,8 +599,6 @@ static int aspeed_adc_vref_config(struct iio_dev *indio_dev)
 			return -EOPNOTSUPP;
 		}
 	} else {
-		if (PTR_ERR(data->regulator) != -ENODEV)
-			return PTR_ERR(data->regulator);
 		data->vref_mv = 2500000;
 		of_property_read_u32(data->dev->of_node,
 				     "aspeed,int-vref-microvolt",
@@ -686,7 +671,7 @@ static int aspeed_adc_probe(struct platform_device *pdev)
 				      GFP_KERNEL);
 	if (!data->lower_en)
 		return -ENOMEM;
-	data->id = ida_simple_get(&aspeed_adc_ida, 0, 0, GFP_KERNEL);
+	data->id = ida_alloc(&aspeed_adc_ida, GFP_KERNEL);
 	if (data->id < 0)
 		return data->id;
 	ret = devm_add_action_or_reset(data->dev, aspeed_adc_ida_remove, data);
@@ -761,8 +746,7 @@ static int aspeed_adc_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
-	if (of_find_property(data->dev->of_node, "aspeed,battery-sensing",
-			     NULL)) {
+	if (of_property_present(data->dev->of_node, "aspeed,battery-sensing")) {
 		if (data->model_data->bat_sense_sup) {
 			data->battery_sensing = 1;
 			if (readl(data->base + ASPEED_REG_ENGINE_CONTROL) &
@@ -951,7 +935,7 @@ static const struct of_device_id aspeed_adc_matches[] = {
 	{ .compatible = "aspeed,ast2600-adc1", .data = &ast2600_adc1_model_data },
 	{ .compatible = "aspeed,ast2700-adc0", .data = &ast2700_adc0_model_data },
 	{ .compatible = "aspeed,ast2700-adc1", .data = &ast2700_adc1_model_data },
-	{},
+	{ }
 };
 MODULE_DEVICE_TABLE(of, aspeed_adc_matches);
 

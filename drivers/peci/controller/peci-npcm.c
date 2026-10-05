@@ -221,10 +221,9 @@ static const struct regmap_config npcm_peci_regmap_config = {
 	.reg_bits = 8,
 	.val_bits = 8,
 	.max_register = NPCM_PECI_MAX_REG,
-	.fast_io = true,
 };
 
-static struct peci_controller_ops npcm_ops = {
+static const struct peci_controller_ops npcm_ops = {
 	.xfer = npcm_peci_xfer,
 };
 
@@ -253,6 +252,13 @@ static int npcm_peci_probe(struct platform_device *pdev)
 	priv->irq = platform_get_irq(pdev, 0);
 	if (priv->irq < 0)
 		return priv->irq;
+
+	/* Clear status */
+	regmap_write_bits(priv->regmap, NPCM_PECI_CTL_STS,
+			  NPCM_PECI_INT_MASK, NPCM_PECI_INT_MASK);
+	/* Disable PECI interrupt */
+	regmap_update_bits(priv->regmap, NPCM_PECI_CTL_STS,
+			   NPCM_PECI_CTRL_DONE_INT_EN, 0);
 
 	ret = devm_request_irq(&pdev->dev, priv->irq, npcm_peci_irq_handler,
 			       0, "peci-npcm-irq", priv);
@@ -295,4 +301,4 @@ module_platform_driver(npcm_peci_driver);
 MODULE_AUTHOR("Tomer Maimon <tomer.maimon@nuvoton.com>");
 MODULE_DESCRIPTION("NPCM PECI driver");
 MODULE_LICENSE("GPL");
-MODULE_IMPORT_NS(PECI);
+MODULE_IMPORT_NS("PECI");

@@ -21,7 +21,6 @@
 /* Flash opcodes. */
 #define SPINOR_OP_WRDI		0x04	/* Write disable */
 #define SPINOR_OP_WREN		0x06	/* Write enable */
-#define SPINOR_OP_VSR_WREN	0x50	/* Write enable for volatile register */
 #define SPINOR_OP_RDSR		0x05	/* Read status register */
 #define SPINOR_OP_WRSR		0x01	/* Write status register 1 byte */
 #define SPINOR_OP_RDSR2		0x3f	/* Read status register 2 */
@@ -424,7 +423,6 @@ struct spi_nor {
 	} dirmap;
 
 	void *priv;
-	struct notifier_block spi_nor_remove_nb;
 };
 
 static inline void spi_nor_set_flash_node(struct spi_nor *nor,
@@ -454,7 +452,5 @@ static inline struct device_node *spi_nor_get_flash_node(struct spi_nor *nor)
  */
 int spi_nor_scan(struct spi_nor *nor, const char *name,
 		 const struct spi_nor_hwcaps *hwcaps);
-
-u32 spi_nor_convert_addr(struct spi_nor *nor, loff_t addr);
 
 #endif

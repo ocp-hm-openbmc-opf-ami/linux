@@ -162,6 +162,7 @@ static int aspeed_aead_transfer_sg(struct aspeed_hace_dev *hace_dev)
 	struct aead_request *req = hace_dev->crypto_engine.aead_req;
 
 	aspeed_hace_aead_sg_unmap(hace_dev, req);
+	up(&hace_dev->lock);
 
 	return aspeed_aead_complete(hace_dev, 0);
 }
@@ -174,6 +175,7 @@ static void aspeed_hace_trigger(struct aspeed_hace_dev *hace_dev)
 
 	CIPHER_DBG(hace_dev, "\n");
 
+	down(&hace_dev->lock);
 	ast_hace_write(hace_dev, crypto_engine->cipher_ctx_dma,
 		       ASPEED_HACE_CONTEXT);
 	ast_hace_write(hace_dev, crypto_engine->tag_dma_addr,

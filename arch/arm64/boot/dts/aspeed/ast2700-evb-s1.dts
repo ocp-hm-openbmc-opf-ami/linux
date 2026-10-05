@@ -106,12 +106,6 @@
 &espi1 {
 	status = "okay";
 	perif-dma-mode;
-#if 0 // TODO: No enough memory for espi1 MMBI
-	perif-mmbi-enable;
-	perif-mmbi-src-addr = <0x0 0xa8000000>;
-	perif-mmbi-tgt-memory = <&espi1_mmbi_memory>;
-	perif-mmbi-instance-num = <0x1>;
-#endif
 	perif-mcyc-enable;
 	perif-mcyc-src-addr = <0x0 0x98000000>;
 	perif-mcyc-size = <0x0 0x10000>;
@@ -130,6 +124,7 @@
 	status = "okay";
 	multi-master;
 	mctp-controller;
+	aspeed,transfer-mode = "buff";
 	mctp@12 {
 		compatible = "mctp-i2c-controller";
 		reg = <(0x12 | I2C_OWN_SLAVE_ADDRESS)>;
@@ -142,6 +137,7 @@
 	status = "okay";
 	multi-master;
 	mctp-controller;
+	aspeed,transfer-mode = "buff";
 	mctp@12 {
 		compatible = "mctp-i2c-controller";
 		reg = <(0x12 | I2C_OWN_SLAVE_ADDRESS)>;
@@ -154,6 +150,7 @@
 	status = "okay";
 	multi-master;
 	mctp-controller;
+	aspeed,transfer-mode = "buff";
 	mctp@12 {
 		compatible = "mctp-i2c-controller";
 		reg = <(0x12 | I2C_OWN_SLAVE_ADDRESS)>;
@@ -166,6 +163,7 @@
 	status = "okay";
 	multi-master;
 	mctp-controller;
+	aspeed,transfer-mode = "buff";
 	mctp@12 {
 		compatible = "mctp-i2c-controller";
 		reg = <(0x12 | I2C_OWN_SLAVE_ADDRESS)>;
@@ -178,6 +176,7 @@
 	status = "okay";
 	multi-master;
 	mctp-controller;
+	aspeed,transfer-mode = "buff";
 	mctp@12 {
 		compatible = "mctp-i2c-controller";
 		reg = <(0x12 | I2C_OWN_SLAVE_ADDRESS)>;
@@ -190,6 +189,7 @@
 	status = "okay";
 	multi-master;
 	mctp-controller;
+	aspeed,transfer-mode = "buff";
 	mctp@12 {
 		compatible = "mctp-i2c-controller";
 		reg = <(0x12 | I2C_OWN_SLAVE_ADDRESS)>;
@@ -202,6 +202,7 @@
 	status = "okay";
 	multi-master;
 	mctp-controller;
+	aspeed,transfer-mode = "buff";
 	mctp@12 {
 		compatible = "mctp-i2c-controller";
 		reg = <(0x12 | I2C_OWN_SLAVE_ADDRESS)>;
@@ -210,10 +211,11 @@
 
 &i2c7 {
 	clock-frequency = <1000000>;
-	debounce-level = <4>;
+	debounce-level = <8>;
 	status = "okay";
 	multi-master;
 	mctp-controller;
+	aspeed,transfer-mode = "buff";
 	mctp@12 {
 		compatible = "mctp-i2c-controller";
 		reg = <(0x12 | I2C_OWN_SLAVE_ADDRESS)>;
@@ -226,6 +228,7 @@
 	status = "okay";
 	multi-master;
 	mctp-controller;
+	aspeed,transfer-mode = "buff";
 	mctp@12 {
 		compatible = "mctp-i2c-controller";
 		reg = <(0x12 | I2C_OWN_SLAVE_ADDRESS)>;
@@ -238,6 +241,7 @@
 	status = "okay";
 	multi-master;
 	mctp-controller;
+	aspeed,transfer-mode = "buff";
 	mctp@12 {
 		compatible = "mctp-i2c-controller";
 		reg = <(0x12 | I2C_OWN_SLAVE_ADDRESS)>;
@@ -246,10 +250,11 @@
 
 &i2c10 {
 	clock-frequency = <1000000>;
-	debounce-level = <4>;
+	debounce-level = <8>;
 	status = "okay";
 	multi-master;
 	mctp-controller;
+	aspeed,transfer-mode = "buff";
 	mctp@12 {
 		compatible = "mctp-i2c-controller";
 		reg = <(0x12 | I2C_OWN_SLAVE_ADDRESS)>;
@@ -262,6 +267,7 @@
 	status = "okay";
 	multi-master;
 	mctp-controller;
+	aspeed,transfer-mode = "buff";
 	mctp@12 {
 		compatible = "mctp-i2c-controller";
 		reg = <(0x12 | I2C_OWN_SLAVE_ADDRESS)>;
@@ -274,6 +280,7 @@
 	status = "okay";
 	multi-master;
 	mctp-controller;
+	aspeed,transfer-mode = "buff";
 	mctp@12 {
 		compatible = "mctp-i2c-controller";
 		reg = <(0x12 | I2C_OWN_SLAVE_ADDRESS)>;
@@ -286,6 +293,7 @@
 	status = "okay";
 	multi-master;
 	mctp-controller;
+	aspeed,transfer-mode = "buff";
 	mctp@12 {
 		compatible = "mctp-i2c-controller";
 		reg = <(0x12 | I2C_OWN_SLAVE_ADDRESS)>;
@@ -298,6 +306,7 @@
 	status = "okay";
 	multi-master;
 	mctp-controller;
+	aspeed,transfer-mode = "buff";
 	mctp@12 {
 		compatible = "mctp-i2c-controller";
 		reg = <(0x12 | I2C_OWN_SLAVE_ADDRESS)>;
@@ -306,10 +315,11 @@
 
 &i2c15 {
 	clock-frequency = <1000000>;
-	debounce-level = <4>;
+	debounce-level = <8>;
 	status = "okay";
 	multi-master;
 	mctp-controller;
+	aspeed,transfer-mode = "buff";
 	mctp@12 {
 		compatible = "mctp-i2c-controller";
 		reg = <(0x12 | I2C_OWN_SLAVE_ADDRESS)>;
@@ -433,10 +443,6 @@
 	mac1-clk-delay = <0 0
 			  0 0
 			  0 0>;
-	assigned-clocks = <&syscon1 SCU1_CLK_MACHCLK>,
-			  <&syscon1 SCU1_CLK_RGMII>,
-			  <&syscon1 SCU1_CLK_RMII>;
-	assigned-clock-rates = <200000000>, <125000000>, <50000000>;
 };
 
 &vhuba0 {
@@ -446,8 +452,29 @@
 
 &vhubb0 {
 	status = "okay";
+	pinctrl-0 = <&pinctrl_usb2bd0_default>;
 };
 
 &vhubb1 {
 	status = "disabled";
+};
+
+&vhubc {
+	status = "disabled";
+};
+
+&vhubd {
+	status = "okay";
+};
+
+&ehci2 {
+	status = "okay";
+};
+
+&ehci3 {
+	status = "disabled";
+};
+
+&pcie2 {
+	status = "okay";
 };

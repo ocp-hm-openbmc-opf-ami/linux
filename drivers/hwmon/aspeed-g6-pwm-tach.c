@@ -137,7 +137,6 @@ struct aspeed_pwm_tach_data {
 	struct clk *clk;
 	struct reset_control *reset;
 	unsigned long clk_rate;
-	struct pwm_chip chip;
 	bool tach_present[TACH_ASPEED_NR_TACHS];
 	u32 tach_divisor[TACH_ASPEED_NR_TACHS];
 };
@@ -145,7 +144,7 @@ struct aspeed_pwm_tach_data {
 static inline struct aspeed_pwm_tach_data *
 aspeed_pwm_chip_to_data(struct pwm_chip *chip)
 {
-	return container_of(chip, struct aspeed_pwm_tach_data, chip);
+	return pwmchip_get_drvdata(chip);
 }
 
 static int aspeed_pwm_get_state(struct pwm_chip *chip, struct pwm_device *pwm,
@@ -196,7 +195,7 @@ static int aspeed_pwm_apply(struct pwm_chip *chip, struct pwm_device *pwm,
 
 	expect_period = div64_u64(ULLONG_MAX, (u64)priv->clk_rate);
 	expect_period = min(expect_period, state->period);
-	dev_dbg(chip->dev, "expect period: %lldns, duty_cycle: %lldns",
+	dev_dbg(pwmchip_parent(chip), "expect period: %lldns, duty_cycle: %lldns",
 		expect_period, state->duty_cycle);
 	/*
 	 * Pick the smallest value for div_h so that div_l can be the biggest
@@ -219,12 +218,12 @@ static int aspeed_pwm_apply(struct pwm_chip *chip, struct pwm_device *pwm,
 	if (div_l > 255)
 		div_l = 255;
 
-	dev_dbg(chip->dev, "clk source: %ld div_h %lld, div_l : %lld\n",
+	dev_dbg(pwmchip_parent(chip), "clk source: %ld div_h %lld, div_l : %lld\n",
 		priv->clk_rate, div_h, div_l);
 	/* duty_pt = duty_cycle * (PERIOD + 1) / period */
 	duty_pt = div64_u64(state->duty_cycle * priv->clk_rate,
 			    (u64)NSEC_PER_SEC * (div_l + 1) << div_h);
-	dev_dbg(chip->dev, "duty_cycle = %lld, duty_pt = %d\n",
+	dev_dbg(pwmchip_parent(chip), "duty_cycle = %lld, duty_pt = %d\n",
 		state->duty_cycle, duty_pt);
 
 	/*
@@ -479,32 +478,24 @@ aspeed_pwm_xlate(struct pwm_chip *chip, const struct of_phandle_args *args)
 {
 	struct pwm_device *pwm;
 
-	if (chip->of_pwm_n_cells < 3)
-		return ERR_PTR(-EINVAL);
-
-	/* flags in the fourth cell are optional */
-	if (args->args_count < 3)
-		return ERR_PTR(-EINVAL);
-
-	if (args->args[0] >= chip->npwm)
+	/* period in the second cell and flags in the third cell are optional */
+	if (args->args_count < 1)
 		return ERR_PTR(-EINVAL);
 
 	pwm = pwm_request_from_chip(chip, args->args[0], NULL);
 	if (IS_ERR(pwm))
 		return pwm;
 
-	pwm->args.period = args->args[1];
+	if (args->args_count > 1)
+		pwm->args.period = args->args[1];
+
 	pwm->args.polarity = PWM_POLARITY_NORMAL;
+	if (args->args_count > 2 && args->args[2] & PWM_POLARITY_INVERTED)
+		pwm->args.polarity = PWM_POLARITY_INVERSED;
 
-	if (chip->of_pwm_n_cells >= 3) {
-		if (args->args_count > 2 && args->args[2] & PWM_POLARITY_INVERTED)
-			pwm->args.polarity = PWM_POLARITY_INVERSED;
-	}
+	if (args->args_count > 3 && args->args[3] < U8_MAX)
+		aspeed_pwm_set_wdt_reload(chip, pwm, args->args[3]);
 
-	if (chip->of_pwm_n_cells >= 4) {
-		if (args->args_count > 3 && args->args[3] < U8_MAX)
-			aspeed_pwm_set_wdt_reload(chip, pwm, args->args[3]);
-	}
 	return pwm;
 }
 
@@ -512,8 +503,8 @@ static int aspeed_pwm_tach_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev, *hwmon;
 	int ret;
-	struct device_node *child;
 	struct aspeed_pwm_tach_data *priv;
+	struct pwm_chip *chip;
 
 	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
@@ -542,20 +533,22 @@ static int aspeed_pwm_tach_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
-	priv->chip.dev = dev;
-	priv->chip.ops = &aspeed_pwm_ops;
-	priv->chip.npwm = PWM_ASPEED_NR_PWMS;
-	priv->chip.of_xlate = aspeed_pwm_xlate;
-	priv->chip.of_pwm_n_cells = 4;
+	chip = devm_pwmchip_alloc(dev, PWM_ASPEED_NR_PWMS, 0);
+	if (IS_ERR(chip))
+		return PTR_ERR(chip);
 
-	ret = devm_pwmchip_add(dev, &priv->chip);
+	pwmchip_set_drvdata(chip, priv);
+	chip->ops = &aspeed_pwm_ops;
+
+	chip->of_xlate = aspeed_pwm_xlate;
+
+	ret = devm_pwmchip_add(dev, chip);
 	if (ret)
 		return dev_err_probe(dev, ret, "Failed to add PWM chip\n");
 
-	for_each_child_of_node(dev->of_node, child) {
+	for_each_child_of_node_scoped(dev->of_node, child) {
 		ret = aspeed_create_fan_monitor(dev, child, priv);
 		if (ret) {
-			of_node_put(child);
 			dev_warn(dev, "Failed to create fan %d", ret);
 			return 0;
 		}

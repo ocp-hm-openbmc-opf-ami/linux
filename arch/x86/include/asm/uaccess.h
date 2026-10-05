@@ -378,7 +378,7 @@ do {									\
 	asm_goto_output("\n"						\
 		     "1: " LOCK_PREFIX "cmpxchg"itype" %[new], %[ptr]\n"\
 		     _ASM_EXTABLE_UA(1b, %l[label])			\
-		     : CC_OUT(z) (success),				\
+		     : "=@ccz" (success),				\
 		       [ptr] "+m" (*_ptr),				\
 		       [old] "+a" (__old)				\
 		     : [new] ltype (__new)				\
@@ -397,7 +397,7 @@ do {									\
 	asm_goto_output("\n"						\
 		     "1: " LOCK_PREFIX "cmpxchg8b %[ptr]\n"		\
 		     _ASM_EXTABLE_UA(1b, %l[label])			\
-		     : CC_OUT(z) (success),				\
+		     : "=@ccz" (success),				\
 		       "+A" (__old),					\
 		       [ptr] "+m" (*_ptr)				\
 		     : "b" ((u32)__new),				\
@@ -417,11 +417,10 @@ do {									\
 	__typeof__(*(_ptr)) __new = (_new);				\
 	asm volatile("\n"						\
 		     "1: " LOCK_PREFIX "cmpxchg"itype" %[new], %[ptr]\n"\
-		     CC_SET(z)						\
 		     "2:\n"						\
 		     _ASM_EXTABLE_TYPE_REG(1b, 2b, EX_TYPE_EFAULT_REG,	\
 					   %[errout])			\
-		     : CC_OUT(z) (success),				\
+		     : "=@ccz" (success),				\
 		       [errout] "+r" (__err),				\
 		       [ptr] "+m" (*_ptr),				\
 		       [old] "+a" (__old)				\
@@ -508,7 +507,7 @@ extern struct movsl_mask {
 } ____cacheline_aligned_in_smp movsl_mask;
 #endif
 
-#define ARCH_HAS_NOCACHE_UACCESS 1
+#define ARCH_HAS_NONTEMPORAL_UACCESS 1
 
 /*
  * The "unsafe" user accesses aren't really "unsafe", but the naming

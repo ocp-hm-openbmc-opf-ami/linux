@@ -95,6 +95,7 @@ struct i3c_priv_xfer {
 /**
  * enum i3c_dcr - I3C DCR values
  * @I3C_DCR_GENERIC_DEVICE: generic I3C device
+ * @I3C_DCR_HUB: I3C HUB device
  */
 enum i3c_dcr {
 	I3C_DCR_GENERIC_DEVICE = 0,
@@ -220,10 +221,7 @@ struct i3c_driver {
 	bool target;
 };
 
-static inline struct i3c_driver *drv_to_i3cdrv(struct device_driver *drv)
-{
-	return container_of(drv, struct i3c_driver, driver);
-}
+#define drv_to_i3cdrv(__drv)	container_of_const(__drv, struct i3c_driver, driver)
 
 struct device *i3cdev_to_dev(struct i3c_device *i3cdev);
 
@@ -285,7 +283,7 @@ void i3c_driver_unregister(struct i3c_driver *drv);
  *
  * Return: 0 if both registrations succeeds, a negative error code otherwise.
  */
-static inline int i3c_i2c_driver_register(struct i3c_driver *i3cdrv,
+static __always_inline int i3c_i2c_driver_register(struct i3c_driver *i3cdrv,
 					  struct i2c_driver *i2cdrv)
 {
 	int ret;
@@ -310,7 +308,7 @@ static inline int i3c_i2c_driver_register(struct i3c_driver *i3cdrv,
  * Note that when CONFIG_I3C is not enabled, this function only unregisters the
  * @i2cdrv.
  */
-static inline void i3c_i2c_driver_unregister(struct i3c_driver *i3cdrv,
+static __always_inline void i3c_i2c_driver_unregister(struct i3c_driver *i3cdrv,
 					     struct i2c_driver *i2cdrv)
 {
 	if (IS_ENABLED(CONFIG_I3C))
@@ -323,7 +321,7 @@ static inline void i3c_i2c_driver_unregister(struct i3c_driver *i3cdrv,
  * module_i3c_i2c_driver() - Register a module providing an I3C and an I2C
  *			     driver
  * @__i3cdrv: the I3C driver to register
- * @__i2cdrv: the I3C driver to register
+ * @__i2cdrv: the I2C driver to register
  *
  * Provide generic init/exit functions that simply register/unregister an I3C
  * and an I2C driver.
@@ -343,6 +341,8 @@ int i3c_device_do_priv_xfers(struct i3c_device *dev,
 
 int i3c_device_do_setdasa(struct i3c_device *dev);
 
+void i3c_device_get_info(const struct i3c_device *dev, struct i3c_device_info *info);
+
 int i3c_device_getstatus_ccc(struct i3c_device *dev, struct i3c_device_info *info);
 
 int i3c_device_send_hdr_cmds(struct i3c_device *dev, struct i3c_hdr_cmd *cmds,
@@ -355,8 +355,6 @@ int i3c_device_pending_read_notify(struct i3c_device *dev,
 				   struct i3c_priv_xfer *ibi_notify);
 
 bool i3c_device_is_ibi_enabled(struct i3c_device *dev);
-
-void i3c_device_get_info(const struct i3c_device *dev, struct i3c_device_info *info);
 
 struct i3c_ibi_payload {
 	unsigned int len;

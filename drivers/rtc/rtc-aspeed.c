@@ -8,7 +8,6 @@
 #include <linux/io.h>
 
 struct aspeed_rtc {
-	struct rtc_device *rtc_dev;
 	void __iomem *base;
 	spinlock_t irq_lock; /* interrupt enable register lock */
 	struct mutex write_mutex; /* serialize registers write */
@@ -255,6 +254,7 @@ static irqreturn_t aspeed_rtc_irq(int irq, void *dev_id)
 static int aspeed_rtc_probe(struct platform_device *pdev)
 {
 	struct aspeed_rtc *rtc;
+	struct rtc_device *rtc_dev;
 	unsigned int irq;
 	int rc;
 	u32 ctrl;
@@ -269,9 +269,15 @@ static int aspeed_rtc_probe(struct platform_device *pdev)
 		return PTR_ERR(rtc->base);
 	}
 
-	rtc->rtc_dev = devm_rtc_allocate_device(&pdev->dev);
-	if (IS_ERR(rtc->rtc_dev))
-		return PTR_ERR(rtc->rtc_dev);
+	rtc_dev = devm_rtc_allocate_device(&pdev->dev);
+	if (IS_ERR(rtc_dev))
+		return PTR_ERR(rtc_dev);
+
+	platform_set_drvdata(pdev, rtc);
+
+	rtc_dev->ops = &aspeed_rtc_ops;
+	rtc_dev->range_min = RTC_TIMESTAMP_BEGIN_1900;
+	rtc_dev->range_max = 38814989399LL; /* 3199-12-31 23:59:59 */
 
 	spin_lock_init(&rtc->irq_lock);
 	mutex_init(&rtc->write_mutex);
@@ -291,9 +297,9 @@ static int aspeed_rtc_probe(struct platform_device *pdev)
 
 	device_init_wakeup(&pdev->dev, true);
 
-	rtc->rtc_dev->ops = &aspeed_rtc_ops;
-	rtc->rtc_dev->range_min = RTC_TIMESTAMP_BEGIN_1900;
-	rtc->rtc_dev->range_max = 38814989399LL; /* 3199-12-31 23:59:59 */
+	rtc_dev->ops = &aspeed_rtc_ops;
+	rtc_dev->range_min = RTC_TIMESTAMP_BEGIN_1900;
+	rtc_dev->range_max = 38814989399LL; /* 3199-12-31 23:59:59 */
 
 	/*
 	 * In devm_rtc_register_device,
@@ -321,7 +327,7 @@ static int aspeed_rtc_probe(struct platform_device *pdev)
 		writel(ctrl | RTC_ENABLE, rtc->base + RTC_CTRL);
 	}
 
-	rc = devm_rtc_register_device(rtc->rtc_dev);
+	rc = devm_rtc_register_device(rtc_dev);
 	if (rc) {
 		dev_err(&pdev->dev, "can't register rtc device\n");
 		goto err;

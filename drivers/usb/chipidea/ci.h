@@ -18,9 +18,6 @@
 #include <linux/usb/otg.h>
 #include <linux/usb/role.h>
 #include <linux/ulpi/interface.h>
-#ifdef CONFIG_NPCM_CHIPIDEA_SRAM_ALLOC
-#include <linux/mempool.h>
-#endif
 
 /******************************************************************************
  * DEFINE
@@ -105,11 +102,7 @@ struct ci_hw_ep {
 	/* global resources */
 	struct ci_hdrc				*ci;
 	spinlock_t				*lock;
-#ifdef CONFIG_NPCM_CHIPIDEA_SRAM_ALLOC
-	mempool_t				*td_pool;
-#else
 	struct dma_pool				*td_pool;
-#endif
 	struct td_node				*pending_td;
 };
 
@@ -238,12 +231,8 @@ struct ci_hdrc {
 	struct work_struct		power_lost_work;
 	struct workqueue_struct		*wq;
 
-#ifdef CONFIG_NPCM_CHIPIDEA_SRAM_ALLOC
-	mempool_t			*td_pool;
-#else
 	struct dma_pool			*qh_pool;
 	struct dma_pool			*td_pool;
-#endif
 
 	struct usb_gadget		gadget;
 	struct usb_gadget_driver	*driver;
@@ -278,17 +267,6 @@ struct ci_hdrc {
 	bool				wakeup_int;
 	enum ci_revision		rev;
 	struct mutex                    mutex;
-#ifdef CONFIG_NPCM_CHIPIDEA_SRAM_ALLOC
-	resource_size_t 		td_start;
-	void __iomem			*td_baseram;
-	size_t 				td_blocksize;
-	int 				td_offset;
-
-	resource_size_t 		qh_start;
-	void __iomem			*qh_baseram;
-	size_t 				qh_blocksize;
-	int 				qh_offset;
-#endif
 };
 
 static inline struct ci_role_driver *ci_role(struct ci_hdrc *ci)

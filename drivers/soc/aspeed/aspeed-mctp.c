@@ -14,7 +14,6 @@
 #include <linux/miscdevice.h>
 #include <linux/mm.h>
 #include <linux/module.h>
-#include <linux/netdevice.h>
 #include <linux/mutex.h>
 #include <linux/of_platform.h>
 #include <linux/pci.h>
@@ -440,6 +439,9 @@ static int _get_bdf(struct aspeed_mctp *priv)
 		devfn = GET_PCI_DEV_NUM(reg) << 3;
 		bdf = PCI_DEVID(GET_PCI_BUS_NUM(reg), devfn);
 	}
+
+	if (!priv->rc_f && bdf == 0)
+		return -ENODEV;
 
 	return bdf;
 }
@@ -1968,7 +1970,7 @@ static int aspeed_mctp_pcie_vdm_op_send_pkt(struct device *dev,
 
 	rc = aspeed_mctp_send_packet(priv->default_client, packet);
 	if (rc) {
-		dev_dbg(priv->dev, "failed to send packet\n");
+		dev_err(priv->dev, "failed to send packet\n");
 		aspeed_mctp_packet_free(packet);
 		return rc;
 	}
@@ -2029,13 +2031,9 @@ static void aspeed_mctp_pcie_vdm_register(struct aspeed_mctp *priv)
 
 	snprintf(ifname, IFNAMSIZ, "mctppci%d", priv->dev_id);
 	ndev = mctp_pcie_vdm_add_dev(priv->dev, &aspeed_mctp_pcie_vdm_ops, ifname);
-	if (IS_ERR(ndev)) {
+	if (IS_ERR(ndev))
 		dev_err(priv->dev, "Failed to add mctp pcie vdm device Err %ld\n", PTR_ERR(ndev));
-		priv->ndev = NULL;
-		return;
-	}
 	priv->ndev = ndev;
-	netif_carrier_on(ndev);
 }
 
 #endif
@@ -2133,29 +2131,17 @@ static void aspeed_mctp_pcie_setup(struct aspeed_mctp *priv)
 				schedule_delayed_work(&priv->rx_det_dwork,
 						      usecs_to_jiffies(priv->rx_det_period_us));
 		}
-#if IS_ENABLED(CONFIG_MCTP_TRANSPORT_PCIE_VDM)
-		if (!priv->pcie_vdm_enabled) {
-			aspeed_mctp_pcie_vdm_register(priv);
-			priv->pcie_vdm_enabled = true;
-		} else if (priv->ndev) {
-			netif_carrier_on(priv->ndev);
-		}
-#endif
 		aspeed_mctp_rx_trigger(&priv->rx);
 		aspeed_mctp_send_pcie_uevent(kobj, true);
-	} else {
 #if IS_ENABLED(CONFIG_MCTP_TRANSPORT_PCIE_VDM)
-		/* Do NOT unregister the netdev on link down — open sockets still
-		 * hold references and mctp_unregister_netdev() would stall with
-		 * "waiting for mctppci0 to become free. Usage count = N".
-		 * Just signal carrier-off so the tx path stops queuing packets.
-		 * The device is unregistered only in aspeed_mctp_remove().
-		 */
-		if (priv->pcie_vdm_enabled && priv->ndev)
-			netif_carrier_off(priv->ndev);
+		mctp_pcie_vdm_set_carrier(priv->ndev, true);
 #endif
+	} else {
 		schedule_delayed_work(&priv->pcie.rst_dwork,
 				      msecs_to_jiffies(1000));
+#if IS_ENABLED(CONFIG_MCTP_TRANSPORT_PCIE_VDM)
+		mctp_pcie_vdm_set_carrier(priv->ndev, false);
+#endif
 	}
 }
 
@@ -2236,14 +2222,6 @@ static irqreturn_t aspeed_mctp_pcie_rst_irq_handler(int irq, void *arg)
 {
 	struct aspeed_mctp *priv = arg;
 
-	/* Immediately signal link-down so the netdev tx path stops sending
-	 * before the DMA channels are reset, preventing TX into a reset channel.
-	 */
-#if IS_ENABLED(CONFIG_MCTP_TRANSPORT_PCIE_VDM)
-	if (priv->pcie_vdm_enabled && priv->ndev)
-		netif_carrier_off(priv->ndev);
-#endif
-
 	aspeed_mctp_channels_init(priv);
 
 	priv->pcie.need_uevent = true;
@@ -2309,11 +2287,15 @@ static int aspeed_mctp_resources_init(struct aspeed_mctp *priv)
 		return PTR_ERR(priv->reset);
 	}
 
-	if (priv->rc_f) {
-		priv->reset_dma = devm_reset_control_get_shared_by_index(priv->dev, 1);
-		if (IS_ERR(priv->reset_dma)) {
-			dev_err(priv->dev, "Failed to get ep reset!\n");
-			return PTR_ERR(priv->reset_dma);
+	if (priv->match_data->dma_need_64bits_width) {
+		priv->reset_dma = NULL;
+	} else {
+		if (priv->rc_f) {
+			priv->reset_dma = devm_reset_control_get_shared_by_index(priv->dev, 1);
+			if (IS_ERR(priv->reset_dma)) {
+				dev_err(priv->dev, "Failed to get ep reset!\n");
+				return PTR_ERR(priv->reset_dma);
+			}
 		}
 	}
 	priv->pcie.map =
@@ -2474,7 +2456,7 @@ static int aspeed_mctp_hw_reset(struct aspeed_mctp *priv)
 		return ret;
 	}
 
-	if (priv->rc_f) {
+	if (priv->rc_f && priv->reset_dma) {
 		ret = reset_control_deassert(priv->reset_dma);
 		if (ret) {
 			dev_warn(priv->dev, "Failed to deassert ep reset\n");
@@ -2559,7 +2541,6 @@ static int aspeed_mctp_probe(struct platform_device *pdev)
 	}
 
 	priv->dev_id = id;
-
 	priv->mctp_miscdev.parent = priv->dev;
 	priv->mctp_miscdev.minor = MISC_DYNAMIC_MINOR;
 	priv->mctp_miscdev.name = devm_kasprintf(priv->dev, GFP_KERNEL, "aspeed-mctp%d", id);
@@ -2570,6 +2551,13 @@ static int aspeed_mctp_probe(struct platform_device *pdev)
 		goto out_dma;
 	}
 	priv->mctp_miscdev.this_device->type = &aspeed_mctp_type;
+
+#if IS_ENABLED(CONFIG_MCTP_TRANSPORT_PCIE_VDM)
+	if (!priv->pcie_vdm_enabled) {
+		aspeed_mctp_pcie_vdm_register(priv);
+		priv->pcie_vdm_enabled = true;
+	}
+#endif
 
 	ret = aspeed_mctp_irq_init(priv);
 	if (ret) {
@@ -2587,9 +2575,6 @@ static int aspeed_mctp_probe(struct platform_device *pdev)
 	return 0;
 out_irq:
 	misc_deregister(&priv->mctp_miscdev);
-#ifdef CONFIG_MCTP_TRANSPORT_PCIE_VDM
-	mctp_pcie_vdm_remove_dev(priv->ndev);
-#endif
 out_dma:
 	aspeed_mctp_dma_fini(priv);
 out_drv:
@@ -2599,20 +2584,12 @@ out:
 	return ret;
 }
 
-static int aspeed_mctp_remove(struct platform_device *pdev)
+static void aspeed_mctp_remove(struct platform_device *pdev)
 {
 	struct aspeed_mctp *priv = platform_get_drvdata(pdev);
 
-	/* Disable IRQs and drain pending reset work before touching the netdev
-	 * to prevent the reset work or PCIe reset IRQ from calling
-	 * netif_carrier_*() on a freed ndev.
-	 */
-	aspeed_mctp_irq_disable(priv);
-	cancel_delayed_work_sync(&priv->pcie.rst_dwork);
-
 #if IS_ENABLED(CONFIG_MCTP_TRANSPORT_PCIE_VDM)
 	if (priv->pcie_vdm_enabled) {
-		netif_carrier_off(priv->ndev);
 		mctp_pcie_vdm_remove_dev(priv->ndev);
 		priv->pcie_vdm_enabled = false;
 	}
@@ -2622,11 +2599,11 @@ static int aspeed_mctp_remove(struct platform_device *pdev)
 
 	misc_deregister(&priv->mctp_miscdev);
 
+	aspeed_mctp_irq_disable(priv);
+
 	aspeed_mctp_dma_fini(priv);
 
 	aspeed_mctp_drv_fini(priv);
-	
-	return 0;
 }
 
 static const struct aspeed_mctp_match_data ast2500_mctp_match_data = {

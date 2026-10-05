@@ -1759,7 +1759,7 @@ static void video_engine_init(struct AstRVAS *pAstRVAS)
 	enable_video_interrupt(pAstRVAS);
 }
 
-static int video_drv_remove(struct platform_device *pdev)
+static void video_drv_remove(struct platform_device *pdev)
 {
 	struct AstRVAS *pAstRVAS = NULL;
 
@@ -1780,7 +1780,6 @@ static int video_drv_remove(struct platform_device *pdev)
 
 	free_video_engine_memory(pAstRVAS);
 	pr_info("RVAS: driver successfully unloaded.\n");
-	return 0;
 }
 
 static const u64 ast2400_dram_table[] = {

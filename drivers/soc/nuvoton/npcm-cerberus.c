@@ -267,15 +267,13 @@ fail_free_resources:
 	return ret;
 }
 
-static int cerberus_remove(struct platform_device *pdev)
+static void cerberus_remove(struct platform_device *pdev)
 {
 	struct cerberus_drvinfo *cerberus = platform_get_drvdata(pdev);
 
 	mbox_free_channel(cerberus->chan);
 	kfifo_free(&cerberus->mq);
 	misc_deregister(&cerberus->miscdev);
-
-	return 0;
 }
 
 static const struct of_device_id cerberus_ids[] = {
@@ -288,7 +286,7 @@ MODULE_DEVICE_TABLE(of, cerberus_ids);
 
 static struct platform_driver cerberus_mbox_client_driver = {
     .probe    =  cerberus_probe,
-    .remove   =  cerberus_remove,
+    .remove =  cerberus_remove,
     .driver   = {
         .name  = "cerberus",
         .of_match_table = cerberus_ids,

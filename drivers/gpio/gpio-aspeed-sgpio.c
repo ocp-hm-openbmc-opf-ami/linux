@@ -56,6 +56,8 @@
 #define ASPEED_SGPIO_ENABLE		BIT(0)
 #define ASPEED_SGPIO_PINS_SHIFT		6
 
+#define ASPEED_SGPIO_G7_SERIAL_OUT_LOCK BIT(12)
+
 struct aspeed_sgpio_pdata {
 	const u32 pin_mask;
 	const struct aspeed_sgpio_llops *llops;
@@ -272,14 +274,13 @@ static int sgpio_set_value(struct gpio_chip *gc, unsigned int offset, int val)
 	return 0;
 }
 
-static void aspeed_sgpio_set(struct gpio_chip *gc, unsigned int offset, int val)
+static int aspeed_sgpio_set(struct gpio_chip *gc, unsigned int offset, int val)
 {
 	struct aspeed_sgpio *gpio = gpiochip_get_data(gc);
 
 	guard(raw_spinlock_irqsave)(&gpio->lock);
-	sgpio_set_value(gc, offset, val);
 
-	return;
+	return sgpio_set_value(gc, offset, val);
 }
 
 static int aspeed_sgpio_dir_in(struct gpio_chip *gc, unsigned int offset)
@@ -570,11 +571,24 @@ static const struct aspeed_sgpio_pdata ast2600_sgpiom_pdata = {
 	.cfg_offset = ASPEED_SGPIO_G4_CFG_OFFSET,
 };
 
+static void aspeed_sgpio_g7_serial_out_lock(struct aspeed_sgpio *gpio, bool lock)
+{
+	void __iomem *cfg = gpio->base + gpio->pdata->cfg_offset;
+	u32 val = ioread32(cfg);
+
+	if (lock)
+		val |= ASPEED_SGPIO_G7_SERIAL_OUT_LOCK;
+	else
+		val &= ~ASPEED_SGPIO_G7_SERIAL_OUT_LOCK;
+	iowrite32(val, cfg);
+}
+
 static void aspeed_sgpio_g7_reg_bit_set(struct aspeed_sgpio *gpio, unsigned int offset,
 					const enum aspeed_sgpio_reg reg, bool val)
 {
 	u32 mask = aspeed_sgpio_g7_reg_mask(reg);
 	void __iomem *addr = gpio->base + SGPIO_G7_CTRL_REG_OFFSET(offset >> 1);
+	bool serial_out = false;
 	u32 write_val;
 
 	if (reg == reg_val || reg == reg_rdata) {
@@ -588,12 +602,22 @@ static void aspeed_sgpio_g7_reg_bit_set(struct aspeed_sgpio *gpio, unsigned int 
 			gpio->pdata->llops->reg_bank_set(gpio, offset, reg_serial_out_sel,
 							 SELECT_FROM_CSR);
 			mask = SGPIO_G7_OUT_DATA;
+			serial_out = (reg == reg_val);
 		}
 	}
 
 	if (mask) {
+		/*
+		 * Freeze the serial-out shifter across the value update so a
+		 * half-written level can never be clocked out mid-waveform,
+		 * then release it once the new value is in place.
+		 */
+		if (serial_out)
+			aspeed_sgpio_g7_serial_out_lock(gpio, true);
 		write_val = (ioread32(addr) & ~(mask)) | field_prep(mask, val);
 		iowrite32(write_val, addr);
+		if (serial_out)
+			aspeed_sgpio_g7_serial_out_lock(gpio, false);
 	}
 }
 
@@ -605,10 +629,22 @@ static bool aspeed_sgpio_g7_reg_bit_get(struct aspeed_sgpio *gpio, unsigned int 
 
 	addr = gpio->base + SGPIO_G7_CTRL_REG_OFFSET(offset >> 1);
 	if (reg == reg_val) {
-		if (gpio->pdata->slave && !aspeed_sgpios_ctrl_by_csr(offset))
-			mask = SGPIO_G7_PARALLEL_IN_DATA;
-		else
+		if (gpio->pdata->slave && !aspeed_sgpios_ctrl_by_csr(offset)) {
+			unsigned int pin = offset >> 1;
+
+			/*
+			 * Slave pins 15:0 split their input source: data[3:0]
+			 * (pins 0..3) come from the parallel-in pads, while
+			 * data[15:4] (pins 4..15) are sampled from the serial
+			 * input stream driven by the master.
+			 */
+			if (pin >= 4 && pin <= 15)
+				mask = SGPIO_G7_IN_DATA;
+			else
+				mask = SGPIO_G7_PARALLEL_IN_DATA;
+		} else {
 			mask = SGPIO_G7_IN_DATA;
+		}
 	}
 
 	if (reg == reg_rdata) {

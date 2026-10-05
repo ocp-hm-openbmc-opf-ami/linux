@@ -145,8 +145,8 @@ static int nisttrng_platform_driver_read(struct platform_device *pdev,
 	return max;
 }
 
-int nisttrng_hwrng_driver_read(struct hwrng *rng, void *buf, size_t max,
-			       bool wait)
+static int nisttrng_hwrng_driver_read(struct hwrng *rng, void *buf, size_t max,
+				      bool wait)
 {
 	struct platform_device *pdev = 0;
 
@@ -2129,7 +2129,7 @@ static int nisttrng_driver_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int nisttrng_driver_remove(struct platform_device *pdev)
+static void nisttrng_driver_remove(struct platform_device *pdev)
 {
 	struct synopsys_nisttrng_driver *data = platform_get_drvdata(pdev);
 	struct hwrng *hwrng_driver_info = (struct hwrng *)data->hwrng_drv;
@@ -2140,7 +2140,6 @@ static int nisttrng_driver_remove(struct platform_device *pdev)
 	devm_kfree(&pdev->dev, (void *)hwrng_driver_info->name);
 	devm_kfree(&pdev->dev, hwrng_driver_info);
 	devm_kfree(&pdev->dev, data);
-	return 0;
 }
 
 static struct platform_driver s_nisttrng_platform_driver_info = {

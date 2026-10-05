@@ -170,14 +170,12 @@ static int npcm_rng_tip_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int npcm_rng_tip_remove(struct platform_device *pdev)
+static void npcm_rng_tip_remove(struct platform_device *pdev)
 {
 	struct npcm_rng_tip *priv = platform_get_drvdata(pdev);
 
 	devm_hwrng_unregister(&pdev->dev, &priv->rng);
 	mbox_free_channel(priv->chan);
-
-	return 0;
 }
 
 static const struct of_device_id npcm_rng_tip_of_table[] __maybe_unused = {
@@ -187,8 +185,8 @@ static const struct of_device_id npcm_rng_tip_of_table[] __maybe_unused = {
 MODULE_DEVICE_TABLE(of, npcm_rng_tip_of_table);
 
 static struct platform_driver npcm_rng_tip_driver = {
-	.probe    =  npcm_rng_tip_probe,
-	.remove   =  npcm_rng_tip_remove,
+	.probe		=  npcm_rng_tip_probe,
+	.remove =  npcm_rng_tip_remove,
 	.driver   = {
 	    .name  = "npcm_rng_tip",
 	    .of_match_table = npcm_rng_tip_of_table,

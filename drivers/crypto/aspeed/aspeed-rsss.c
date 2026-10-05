@@ -161,15 +161,13 @@ static int aspeed_rsss_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int aspeed_rsss_remove(struct platform_device *pdev)
+static void aspeed_rsss_remove(struct platform_device *pdev)
 {
 	struct aspeed_rsss_dev *rsss_dev = platform_get_drvdata(pdev);
 
 	aspeed_rsss_unregister(rsss_dev);
 	aspeed_rsss_rsa_exit(rsss_dev);
 	aspeed_rsss_sha3_exit(rsss_dev);
-
-	return 0;
 }
 
 MODULE_DEVICE_TABLE(of, aspeed_rsss_of_matches);

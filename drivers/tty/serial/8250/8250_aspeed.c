@@ -483,7 +483,6 @@ static int ast8250_probe(struct platform_device *pdev)
 	port->shutdown = ast8250_shutdown;
 	port->private_data = data;
 	if (IS_ENABLED(CONFIG_SERIAL_8250_ASPEED_RS485)) {
-		/* TXRACE is a VUART-only workaround; restrict it when RS-485 is built in. */
 		if (data->is_vuart)
 			uart.bugs |= UART_BUG_TXRACE;
 	} else {

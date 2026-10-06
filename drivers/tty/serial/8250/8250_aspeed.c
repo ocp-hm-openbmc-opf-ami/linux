@@ -482,7 +482,9 @@ static int ast8250_probe(struct platform_device *pdev)
 	port->startup = ast8250_startup;
 	port->shutdown = ast8250_shutdown;
 	port->private_data = data;
-	uart.bugs |= UART_BUG_TXRACE;
+	/* UART_BUG_TXRACE is a BMC virtual-UART APB quirk; do not apply to physical ports. */
+	if (data->is_vuart)
+		uart.bugs |= UART_BUG_TXRACE;
 
 	rc = uart_read_port_properties(port);
 	if (rc)

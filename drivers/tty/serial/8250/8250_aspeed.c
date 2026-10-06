@@ -482,12 +482,7 @@ static int ast8250_probe(struct platform_device *pdev)
 	port->startup = ast8250_startup;
 	port->shutdown = ast8250_shutdown;
 	port->private_data = data;
-	if (IS_ENABLED(CONFIG_SERIAL_8250_ASPEED_RS485)) {
-		if (data->is_vuart)
-			uart.bugs |= UART_BUG_TXRACE;
-	} else {
-		uart.bugs |= UART_BUG_TXRACE;
-	}
+	uart.bugs |= UART_BUG_TXRACE;
 
 	rc = uart_read_port_properties(port);
 	if (rc)

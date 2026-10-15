@@ -36,6 +36,7 @@
 
 #define ASPEED_SDHCI_TAP_PARAM_INVERT_CLK	BIT(4)
 #define ASPEED_SDHCI_NR_TAPS		15
+#define ASPEED_SDHCI_MAX_SWEEPS		10
 
 /* SDIO{10,20} */
 #define ASPEED_SDC_CAP1_1_8V	       (0 * 32 + 26)
@@ -203,117 +204,207 @@ static void aspeed_sdhci_reset(struct sdhci_host *host, u8 mask)
 	sdhci_reset(host, mask);
 }
 
+/*
+ * aspeed_sdhci_find_center_tap - find the midpoint of the widest passing window
+ * @pass:  boolean array [0..total-1], true = tuning passed at this position
+ * @total: number of phase positions (ASPEED_SDHCI_NR_TAPS * 2 = 30)
+ *
+ * Phase space layout (15 taps = half cycle at 200 MHz, ~167 ps/tap):
+ *   pos [0..14]  - rising  edge, tap delay 0..14  (  0° .. ~168°)
+ *   pos [15..29] - falling edge, tap delay 0..14  (180° .. ~348°)
+ *
+ * The array is treated as circular so windows that wrap across the
+ * rising/falling boundary (around 0°/360°) are detected correctly.
+ *
+ * Returns a 5-bit phase_bits value:
+ *   bits [3:0] = tap index
+ *   bit  [4]   = ASPEED_SDHCI_TAP_PARAM_INVERT_CLK (set for falling edge)
+ */
+static u32 aspeed_sdhci_find_center_tap(const bool *pass, int total)
+{
+	int pos, cur_start = -1, cur_len = 0, best_start = 0, best_len = 0;
+	int center_pos;
+
+	/*
+	 * Double-scan the circular buffer: the second pass detects windows
+	 * that straddle the index-0 wrap-around boundary.  The window length
+	 * is capped at 'total' so a full-circle window is counted only once.
+	 */
+	for (pos = 0; pos < total * 2; pos++) {
+		if (pass[pos % total]) {
+			if (cur_start < 0)
+				cur_start = pos;
+			if (++cur_len > total)
+				cur_len = total;
+			if (cur_len > best_len) {
+				best_len = cur_len;
+				best_start = cur_start;
+			}
+		} else {
+			cur_start = -1;
+			cur_len = 0;
+		}
+	}
+
+	if (!best_len)
+		return 0;
+
+	center_pos = (best_start + best_len / 2) % total;
+
+	if (center_pos < ASPEED_SDHCI_NR_TAPS)
+		return (u32)center_pos;
+
+	return (u32)(center_pos - ASPEED_SDHCI_NR_TAPS) | ASPEED_SDHCI_TAP_PARAM_INVERT_CLK;
+}
+
 static int aspeed_sdhci_execute_tuning(struct sdhci_host *host, u32 opcode)
 {
 	struct sdhci_pltfm_host *pltfm_priv;
 	struct aspeed_sdhci *sdhci;
 	struct aspeed_sdc *sdc;
 	struct device *dev;
-
-	u32 val, left, right, edge;
-	u32 window, oldwindow = 0, center;
-	u32 in_phase, out_phase, enable_mask, inverted = 0;
+	/*
+	 * 15 taps cover half a 200 MHz clock cycle (2.5 ns ≈ 167 ps/tap).
+	 * Rising and falling edges together span a full cycle: 30 positions.
+	 */
+	const int total = ASPEED_SDHCI_NR_TAPS * 2;
+	bool pass[ASPEED_SDHCI_NR_TAPS * 2];
+	u32 enable_mask, base, val, phase_bits;
+	int pos, pass_count, sweep;
 
 	dev = mmc_dev(host->mmc);
 	pltfm_priv = sdhci_priv(host);
 	sdhci = sdhci_pltfm_priv(pltfm_priv);
 	sdc = sdhci->parent;
 
-	out_phase = readl(sdc->regs + ASPEED_SDC_PHASE) & ASPEED_SDC_S0_PHASE_OUT;
-
 	enable_mask = ASPEED_SDC_S0_PHASE_OUT_EN | ASPEED_SDC_S0_PHASE_IN_EN;
+	base = readl(sdc->regs + ASPEED_SDC_PHASE) & ASPEED_SDC_S0_PHASE_OUT;
 
 	/*
-	 * There are two window upon clock rising and falling edge.
-	 * Iterate each tap delay to find the valid window and choose the
-	 * bigger one, set the tap delay at the middle of window.
+	 * For each phase direction (input then output), sweep all 30
+	 * positions.  If every position passes, the result is
+	 * untrustworthy — all phases are not really reliable but we
+	 * cannot detect where the unreliable ones are.  Re-run the
+	 * sweep up to ASPEED_SDHCI_MAX_SWEEPS times, skipping
+	 * already-failed taps, until some fail and reveal the true
+	 * window.
 	 */
-	for (edge = 0; edge < 2; edge++) {
-		if (edge == 1)
-			inverted = ASPEED_SDHCI_TAP_PARAM_INVERT_CLK;
 
-		val = (out_phase | enable_mask | (inverted << ASPEED_SDC_S0_PHASE_IN_SHIFT));
+	/* -------- Step 1: scan all input-phase positions -------- */
+	for (pos = 0; pos < total; pos++)
+		pass[pos] = true;
 
-		/* find the left boundary */
-		for (left = 0; left < ASPEED_SDHCI_NR_TAPS + 1; left++) {
-			in_phase = val | (left << ASPEED_SDC_S0_PHASE_IN_SHIFT);
-			writel(in_phase, sdc->regs + ASPEED_SDC_PHASE);
+	for (sweep = 0; sweep < ASPEED_SDHCI_MAX_SWEEPS; sweep++) {
+		for (pos = 0; pos < total; pos++) {
+			if (!pass[pos])
+				continue;
 
-			if (!mmc_send_tuning(host->mmc, opcode, NULL))
-				break;
-		}
+			phase_bits = (pos < ASPEED_SDHCI_NR_TAPS)
+				? (u32)pos
+				: (u32)(pos - ASPEED_SDHCI_NR_TAPS) |
+				  ASPEED_SDHCI_TAP_PARAM_INVERT_CLK;
 
-		/* find the right boundary */
-		for (right = left + 1; right < ASPEED_SDHCI_NR_TAPS + 1; right++) {
-			in_phase = val | (right << ASPEED_SDC_S0_PHASE_IN_SHIFT);
-			writel(in_phase, sdc->regs + ASPEED_SDC_PHASE);
+			val = base | enable_mask | (phase_bits << ASPEED_SDC_S0_PHASE_IN_SHIFT);
+			writel(val, sdc->regs + ASPEED_SDC_PHASE);
 
 			if (mmc_send_tuning(host->mmc, opcode, NULL))
-				break;
+				pass[pos] = false;
+
+			dev_dbg(dev, "in  pos=%2d (%s tap%2u) %s\n", pos,
+				pos < ASPEED_SDHCI_NR_TAPS ? "rise" : "fall",
+				pos % ASPEED_SDHCI_NR_TAPS,
+				pass[pos] ? "pass" : "fail");
 		}
 
-		window = right - left;
-		pr_debug("tuning window[%d][%d~%d] = %d\n", edge, left, right, window);
+		for (pos = 0, pass_count = 0; pos < total; pos++)
+			if (pass[pos])
+				pass_count++;
 
-		if (window > oldwindow) {
-			oldwindow = window;
-			center = (((right - 1) + left) / 2) | inverted;
-		}
+		dev_dbg(dev, "input  phase: sweep %d, %d/%d passed\n",
+			sweep, pass_count, total);
+
+		if (pass_count < total || !pass_count)
+			break;
 	}
 
-	val = (out_phase | enable_mask | (center << ASPEED_SDC_S0_PHASE_IN_SHIFT));
+	if (!pass_count)
+		dev_warn(dev, "input  phase: no positions passed tuning\n");
+
+	phase_bits = aspeed_sdhci_find_center_tap(pass, total);
+	val = base | enable_mask | (phase_bits << ASPEED_SDC_S0_PHASE_IN_SHIFT);
 	writel(val, sdc->regs + ASPEED_SDC_PHASE);
+	dev_dbg(dev, "input  center: phase_bits=0x%02x reg=0x%08x\n", phase_bits, val);
 
-	pr_debug("input tuning result=%x\n", val);
+	/* -------- Step 2: scan all output-phase positions -------- */
+	base = val & ~ASPEED_SDC_S0_PHASE_OUT;
 
-	inverted = 0;
-	out_phase = val & ~ASPEED_SDC_S0_PHASE_OUT;
-	in_phase = out_phase;
-	oldwindow = 0;
+	for (pos = 0; pos < total; pos++)
+		pass[pos] = true;
 
-	for (edge = 0; edge < 2; edge++) {
-		if (edge == 1)
-			inverted = ASPEED_SDHCI_TAP_PARAM_INVERT_CLK;
+	for (sweep = 0; sweep < ASPEED_SDHCI_MAX_SWEEPS; sweep++) {
+		for (pos = 0; pos < total; pos++) {
+			if (!pass[pos])
+				continue;
 
-		val = (in_phase | enable_mask | (inverted << ASPEED_SDC_S0_PHASE_OUT_SHIFT));
+			phase_bits = (pos < ASPEED_SDHCI_NR_TAPS)
+				? (u32)pos
+				: (u32)(pos - ASPEED_SDHCI_NR_TAPS) |
+				  ASPEED_SDHCI_TAP_PARAM_INVERT_CLK;
 
-		/* find the left boundary */
-		for (left = 0; left < ASPEED_SDHCI_NR_TAPS + 1; left++) {
-			out_phase = val | (left << ASPEED_SDC_S0_PHASE_OUT_SHIFT);
-			writel(out_phase, sdc->regs + ASPEED_SDC_PHASE);
-
-			if (!mmc_send_tuning(host->mmc, opcode, NULL))
-				break;
-		}
-
-		/* find the right boundary */
-		for (right = left + 1; right < ASPEED_SDHCI_NR_TAPS + 1; right++) {
-			out_phase = val | (right << ASPEED_SDC_S0_PHASE_OUT_SHIFT);
-			writel(out_phase, sdc->regs + ASPEED_SDC_PHASE);
+			val = base | enable_mask | (phase_bits << ASPEED_SDC_S0_PHASE_OUT_SHIFT);
+			writel(val, sdc->regs + ASPEED_SDC_PHASE);
 
 			if (mmc_send_tuning(host->mmc, opcode, NULL))
-				break;
+				pass[pos] = false;
+
+			dev_dbg(dev, "out pos=%2d (%s tap%2u) %s\n", pos,
+				pos < ASPEED_SDHCI_NR_TAPS ? "rise" : "fall",
+				pos % ASPEED_SDHCI_NR_TAPS,
+				pass[pos] ? "pass" : "fail");
 		}
 
-		window = right - left;
-		pr_debug("tuning window[%d][%d~%d] = %d\n", edge, left, right, window);
+		for (pos = 0, pass_count = 0; pos < total; pos++)
+			if (pass[pos])
+				pass_count++;
 
-		if (window > oldwindow) {
-			oldwindow = window;
-			center = (((right - 1) + left) / 2) | inverted;
-		}
+		dev_dbg(dev, "output phase: sweep %d, %d/%d passed\n",
+			sweep, pass_count, total);
+
+		if (pass_count < total || !pass_count)
+			break;
 	}
 
-	val = (in_phase | enable_mask | (center << ASPEED_SDC_S0_PHASE_OUT_SHIFT));
-	writel(val, sdc->regs + ASPEED_SDC_PHASE);
+	if (!pass_count)
+		dev_warn(dev, "output phase: no positions passed tuning\n");
 
-	pr_debug("output tuning result=%x\n", val);
+	phase_bits = aspeed_sdhci_find_center_tap(pass, total);
+	val = base | enable_mask | (phase_bits << ASPEED_SDC_S0_PHASE_OUT_SHIFT);
+	writel(val, sdc->regs + ASPEED_SDC_PHASE);
+	dev_dbg(dev, "output center: phase_bits=0x%02x reg=0x%08x\n", phase_bits, val);
 
 	return mmc_send_tuning(host->mmc, opcode, NULL);
 }
 
 static void aspeed_sdhci_voltage_switch(struct sdhci_host *host)
 {
+	struct sdhci_pltfm_host *pltfm_priv;
+	struct aspeed_sdhci *sdhci;
+	struct aspeed_sdc *sdc;
+	u32 out_phase, enable_mask, inverted = 1;
+
+	pltfm_priv = sdhci_priv(host);
+	sdhci = sdhci_pltfm_priv(pltfm_priv);
+	sdc = sdhci->parent;
+
+	enable_mask = ASPEED_SDC_S0_PHASE_OUT_EN | ASPEED_SDC_S0_PHASE_IN_EN;
+
+	inverted = ASPEED_SDHCI_TAP_PARAM_INVERT_CLK;
+	out_phase = readl(sdc->regs + ASPEED_SDC_PHASE) & ASPEED_SDC_S0_PHASE_OUT;
+	out_phase |= (inverted << ASPEED_SDC_S0_PHASE_OUT_SHIFT);
+
+	/* output inverse */
+	writel(out_phase | enable_mask, sdc->regs + ASPEED_SDC_PHASE);
+
 	mdelay(30);
 }
 

@@ -2230,6 +2230,7 @@ static int ast2600_i2c_setup_buff_rx(u32 cmd, struct ast2600_i2c_bus *i2c_bus)
 	} else if (i2c_bus->msgs_index + 1 == i2c_bus->msgs_count) {
 		cmd |= CONTROLLER_TRIGGER_LAST_STOP;
 	}
+
 	writel(AST2600_I2CC_SET_RX_BUF_LEN(xfer_len), i2c_bus->reg_base + AST2600_I2CC_BUFF_CTRL);
 
 	writel(cmd, i2c_bus->reg_base + AST2600_I2CM_CMD_STS);
@@ -2422,8 +2423,15 @@ static void ast2600_i2c_controller_packet_irq(struct ast2600_i2c_bus *i2c_bus, u
 		}
 
 		if (msg->flags & I2C_M_RECV_LEN) {
-			u8 recv_len = AST2600_I2CC_GET_RX_BUFF(readl(i2c_bus->reg_base
-							+ AST2600_I2CC_STS_AND_BUFF));
+			u8 recv_len = 0;
+
+			if (i2c_bus->version == AST2700) {
+				recv_len = AST2700_I2CC_GET_BUFF(readl(i2c_bus->reg_base
+											   + BYTE_DATA_LOG));
+			} else {
+				recv_len = AST2600_I2CC_GET_RX_BUFF(readl(i2c_bus->reg_base
+											   + AST2600_I2CC_STS_AND_BUFF));
+			}
 
 			msg->len = min_t(unsigned int, recv_len, I2C_SMBUS_BLOCK_MAX);
 			msg->len += ((msg->flags & I2C_CLIENT_PEC) ? 2 : 1);
@@ -2858,6 +2866,10 @@ static const struct i2c_algorithm i2c_ast2600_algorithm = {
 #endif
 };
 
+static const struct i2c_adapter_quirks ast2600_i2c_quirks = {
+	.flags = I2C_AQ_NO_ZERO_LEN_READ,
+};
+
 static int ast2600_i2c_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
@@ -2907,17 +2919,14 @@ static int ast2600_i2c_probe(struct platform_device *pdev)
 		i2c_bus->ac_timing_config = ast2700_i2c_ac_timing_config;
 		i2c_bus->irq_err_to_errno = ast2700_i2c_irq_err_to_errno;
 		i2c_bus->irq_clear = ast2700_i2c_irq_clear;
-
-		/* AST2700: default DMA, allow override */
-		i2c_bus->mode = DMA_MODE;
 	} else {
 		i2c_bus->ac_timing_config = ast2600_i2c_ac_timing_config;
 		i2c_bus->irq_err_to_errno = ast2600_i2c_irq_err_to_errno;
 		i2c_bus->irq_clear = ast2600_i2c_irq_clear;
-
-		/* AST2600: default BUFF, allow override */
-		i2c_bus->mode = BUFF_MODE;
 	}
+
+	/* Default BUFF mode, allow override */
+	i2c_bus->mode = BUFF_MODE;
 
 	/* override the transfer mode */
 		if (!device_property_read_string(dev, "aspeed,transfer-mode", &xfer_mode)) {
@@ -2939,11 +2948,17 @@ static int ast2600_i2c_probe(struct platform_device *pdev)
 	i2c_bus->multi_master = device_property_read_bool(dev, "multi-master");
 
 	if (i2c_bus->version == AST2700) {
+		/* select the transfer method*/
+		u32 xfer_type = readl(i2c_bus->reg_base + I2CC_VERSION_CTRL);
+
 		/* AST2700 would not allow byte mode */
 		if (i2c_bus->mode == BYTE_MODE)
 			i2c_bus->mode = DMA_MODE;
 
-		if (i2c_bus->mode == BUFF_MODE) {
+		if (i2c_bus->mode == DMA_MODE) {
+			/* ast2700 cfg enable dma */
+			xfer_type |= FUNC_CFG_DMA_EN;
+		} else if (i2c_bus->mode == BUFF_MODE) {
 			i2c_bus->buf_base = devm_platform_get_and_ioremap_resource(pdev, 1, &res);
 			if (IS_ERR(i2c_bus->buf_base)) {
 				i2c_bus->mode = DMA_MODE;
@@ -2951,10 +2966,10 @@ static int ast2600_i2c_probe(struct platform_device *pdev)
 				i2c_bus->buf_size = resource_size(res) / 4;
 
 				/* ast2700 cfg disable dma */
-				writel(readl(i2c_bus->reg_base + I2CC_VERSION_CTRL) & ~FUNC_CFG_DMA_EN,
-					   i2c_bus->reg_base + I2CC_VERSION_CTRL);
+				xfer_type &= ~FUNC_CFG_DMA_EN;
 			}
 		}
+		writel(xfer_type, i2c_bus->reg_base + I2CC_VERSION_CTRL);
 	} else {
 		if (i2c_bus->mode == BUFF_MODE) {
 			i2c_bus->buf_base = devm_platform_get_and_ioremap_resource(pdev, 1, &res);
@@ -3036,6 +3051,7 @@ static int ast2600_i2c_probe(struct platform_device *pdev)
 	/* Initialize the I2C adapter */
 	i2c_bus->adap.owner = THIS_MODULE;
 	i2c_bus->adap.algo = &i2c_ast2600_algorithm;
+	i2c_bus->adap.quirks = &ast2600_i2c_quirks;
 	i2c_bus->adap.retries = 0;
 	i2c_bus->adap.dev.parent = i2c_bus->dev;
 	device_set_node(&i2c_bus->adap.dev, dev_fwnode(dev));

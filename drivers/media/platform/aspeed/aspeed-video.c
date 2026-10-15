@@ -1658,7 +1658,8 @@ static void aspeed_video_set_resolution(struct aspeed_video *video)
 {
 	struct v4l2_bt_timings *act = &video->active_timings;
 	unsigned int size = act->width * ALIGN(act->height, 8);
-	bool is_sync_mode_ok = (video->version != 7);
+	bool is_sync_mode_ok = (video->version != 7) ||
+			       (video->version == 7 && video->id == 0);
 
 	/* Set capture/compression frame sizes */
 	aspeed_video_calc_compressed_size(video, size);
@@ -1781,6 +1782,15 @@ static void aspeed_video_update_regs(struct aspeed_video *video)
 	if (video->input == VIDEO_INPUT_DVI)
 		ctrl |= VE_CTRL_SOURCE;
 
+	if (video->version == 7) {
+		if (video->input == VIDEO_INPUT_DVI)
+			ctrl |= FIELD_PREP(VE_CTRL_CLK_DELAY, VIDEO_CLK_CRT2);
+		else if (video->input == VIDEO_INPUT_VGA && video->id == 0)
+			ctrl |= FIELD_PREP(VE_CTRL_CLK_DELAY, VIDEO_CLK_D1);
+		else
+			ctrl |= FIELD_PREP(VE_CTRL_CLK_DELAY, VIDEO_CLK_48MHz);
+	}
+
 	if (video->frame_rate)
 		ctrl |= FIELD_PREP(VE_CTRL_FRC, video->frame_rate);
 
@@ -1807,7 +1817,7 @@ static void aspeed_video_update_regs(struct aspeed_video *video)
 			    seq_ctrl);
 	aspeed_video_update(video, VE_CTRL,
 			    VE_CTRL_FRC | VE_CTRL_AUTO_OR_CURSOR |
-			    VE_CTRL_SOURCE, ctrl);
+			    VE_CTRL_SOURCE | VE_CTRL_CLK_DELAY, ctrl);
 	aspeed_video_update(video, VE_COMP_CTRL,
 			    VE_COMP_CTRL_DCT_LUM | VE_COMP_CTRL_DCT_CHR |
 			    VE_COMP_CTRL_EN_HQ | VE_COMP_CTRL_HQ_DCT_LUM |
@@ -1839,10 +1849,10 @@ static void aspeed_video_init_regs(struct aspeed_video *video)
 	val = VE_CTRL_AUTO_OR_CURSOR |
 	      FIELD_PREP(VE_CTRL_CAPTURE_FMT, VIDEO_CAP_FMT_YUV_FULL_SWING);
 	if (video->version == 7) {
-		if (video->input == VIDEO_INPUT_VGA)
-			val |= FIELD_PREP(VE_CTRL_CLK_DELAY, VIDEO_CLK_48MHz);
-		else if (video->input == VIDEO_INPUT_DVI)
+		if (video->input == VIDEO_INPUT_DVI)
 			val |= FIELD_PREP(VE_CTRL_CLK_DELAY, VIDEO_CLK_CRT2);
+		else if (video->input == VIDEO_INPUT_VGA && video->id == 0)
+			val |= FIELD_PREP(VE_CTRL_CLK_DELAY, VIDEO_CLK_D1);
 		else
 			val |= FIELD_PREP(VE_CTRL_CLK_DELAY, VIDEO_CLK_48MHz);
 	}
@@ -1888,6 +1898,8 @@ static void aspeed_video_init_regs(struct aspeed_video *video)
 
 static void aspeed_video_start(struct aspeed_video *video)
 {
+	aspeed_video_set_vga_on(video, true);
+
 	aspeed_video_on(video);
 
 	aspeed_video_init_regs(video);
@@ -1901,6 +1913,8 @@ static void aspeed_video_start(struct aspeed_video *video)
 
 static void aspeed_video_stop(struct aspeed_video *video)
 {
+	aspeed_video_set_vga_on(video, false);
+
 	set_bit(VIDEO_STOPPED, &video->flags);
 	cancel_delayed_work_sync(&video->res_work);
 
@@ -2566,8 +2580,6 @@ static int aspeed_video_start_streaming(struct vb2_queue *q,
 	int rc;
 	struct aspeed_video *video = vb2_get_drv_priv(q);
 
-	aspeed_video_set_vga_on(video, true);
-
 	video->sequence = 0;
 	video->perf.duration_max = 0;
 	video->perf.duration_min = 0xffffffff;
@@ -2592,8 +2604,6 @@ static void aspeed_video_stop_streaming(struct vb2_queue *q)
 {
 	int rc;
 	struct aspeed_video *video = vb2_get_drv_priv(q);
-
-	aspeed_video_set_vga_on(video, false);
 
 	clear_bit(VIDEO_STREAMING, &video->flags);
 

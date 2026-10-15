@@ -24,8 +24,9 @@
 #include <linux/mctp.h>
 #include <net/mctp.h>
 #include <net/pkt_sched.h>
-
-#include "aspeed-pcie-mmbi.h"
+#if IS_ENABLED(CONFIG_ASPEED_MMBI)
+#include "mmbi/aspeed-mmbi.h"
+#endif
 
 #define PCI_BMC_HOST2BMC_Q1		0x30000
 #define PCI_BMC_HOST2BMC_Q2		0x30010
@@ -59,15 +60,9 @@
 
 static DEFINE_IDA(bmc_device_ida);
 
-#define MMBI_MAX_INST		6
 #define VUART_MAX_PARMS		2
 #define ASPEED_QUEUE_NUM	2
 #define MAX_MSI_NUM		8
-
-enum aspeed_platform_id {
-	ASPEED,
-	ASPEED_AST2700_SOC1,
-};
 
 enum queue_index {
 	QUEUE1 = 0,
@@ -79,17 +74,11 @@ enum msi_index {
 	MBX_MSI,
 	VUART0_MSI,
 	VUART1_MSI,
-	MMBI0_MSI,
-	MMBI1_MSI,
-	MMBI2_MSI,
-	MMBI3_MSI,
 };
 
 /* Match msi_index */
 static int ast2600_msi_idx_table[MAX_MSI_NUM] = { 4, 21, 16, 15 };
-static int ast2700_soc0_msi_idx_table[MAX_MSI_NUM] = { 0, 11, 6, 5, 28, 29, 30, 31 };
-/* ARRAY = MMIB0_MSI, MMBI1_MSI, MMBI2_MSI, MMBI3_MSI, MMBI4_MSI, MMBI5_MSI */
-static int ast2700_soc1_msi_idx_table[MAX_MSI_NUM] = { 1, 2, 3, 4, 5, 6 };
+static int ast2700_soc0_msi_idx_table[MAX_MSI_NUM] = { 0, 11, 6, 5};
 
 struct aspeed_platform {
 	int (*setup)(struct pci_dev *pdev);
@@ -104,16 +93,46 @@ struct aspeed_queue_message {
 	struct aspeed_pci_bmc_dev *pci_bmc_device;
 };
 
-struct aspeed_pcie_mmbi {
-	resource_size_t base;
-	resource_size_t mem_size;
-	void __iomem *mem;
-	u32 segment_size;
+#if IS_ENABLED(CONFIG_ASPEED_MMBI)
+struct aspeed_host_pcie_mmbi_ins {
+	struct mmbi_ins_desc mmbi_desc;
 	int irq;
-	int id;
-	struct aspeed_mmbi_channel chan;
+	int msi_index;
+	int instance_index;
+	int bar_index;
 	const char *dev_name;
+	bool valid;
 };
+
+struct aspeed_host_pcie_mmbi {
+	struct device *dev;
+	struct aspeed_host_pcie_mmbi_ins instances[PCI_STD_NUM_BARS];
+	int msi_nums;
+};
+
+/*
+ * app_interface: per-channel application interface selection.
+ *   0 = ioctl  (MMBI_APP_INTF_IOCTL)
+ *   1 = mctp-netdev  (MMBI_APP_INTF_MCTP_NETDEV)
+ *
+ * One value applies to every channel. Multiple values map by channel index,
+ * and omitted channels keep their defaults.
+ * Examples:
+ *   app_interface=1          -> all channels use mctp-netdev
+ *   app_interface=1,0,0,0,1  -> ch0/ch4 use mctp-netdev
+ * Invalid values fall back to the default map.
+ */
+static const uint app_interface_defaults[MMBI_MAX_CHANNELS] = {
+	[0] = MMBI_APP_INTF_MCTP_NETDEV,
+};
+
+static uint app_interface[MMBI_MAX_CHANNELS] = { [0] = MMBI_APP_INTF_MCTP_NETDEV };
+static int app_interface_count;
+module_param_array(app_interface, uint, &app_interface_count, 0444);
+MODULE_PARM_DESC(app_interface,
+		 "App interface per channel: 0=ioctl, 1=mctp-netdev; one value applies to all channels");
+
+#endif
 
 struct aspeed_pci_bmc_dev {
 	struct device *dev;
@@ -142,477 +161,15 @@ struct aspeed_pci_bmc_dev {
 	 * The index of array is using to enum msi_index
 	 */
 	int *msi_idx_table;
-
-	bool ast2700_soc1;
-
-	/* AST2700 MMBI */
-	struct aspeed_pcie_mmbi mmbi[MMBI_MAX_INST];
-	int mmbi_start_msi;
+#if IS_ENABLED(CONFIG_ASPEED_MMBI)
+	struct aspeed_host_pcie_mmbi mmbi;
+#endif
 };
 
 #define PCIE_DEVICE_SIO_ADDR	(0x2E * 4)
 #define BMC_MULTI_MSI		32
 
 #define DRIVER_NAME "aspeed-host-bmc-dev"
-
-static int mmbi_desc_init(struct aspeed_mmbi_channel *chan);
-
-static u8 mmbi_get_bmc_rdy(struct aspeed_mmbi_channel *chan)
-{
-	struct host_ros hros;
-
-	memcpy_fromio(&hros, chan->hros_vmem, sizeof(hros));
-
-	return hros.b_rdy;
-}
-
-static u8 mmbi_get_bmc_up(struct aspeed_mmbi_channel *chan)
-{
-	struct host_ros hros;
-
-	memcpy_fromio(&hros, chan->hros_vmem, sizeof(hros));
-
-	return hros.b_up;
-}
-
-static u8 mmbi_get_bmc_rst(struct aspeed_mmbi_channel *chan)
-{
-	struct host_ros hros;
-
-	memcpy_fromio(&hros, chan->hros_vmem, sizeof(hros));
-
-	return hros.b_rst;
-}
-
-static u8 mmbi_get_host_rst(struct aspeed_mmbi_channel *chan)
-{
-	struct host_rws hrws;
-
-	memcpy_fromio(&hrws, chan->hrws_vmem, sizeof(hrws));
-
-	return hrws.h_rst;
-}
-
-static u8 mmbi_get_host_up(struct aspeed_mmbi_channel *chan)
-{
-	struct host_rws hrws;
-
-	memcpy_fromio(&hrws, chan->hrws_vmem, sizeof(hrws));
-
-	return hrws.h_up;
-}
-
-static void mmbi_set_host_rst(struct aspeed_mmbi_channel *chan, bool set)
-{
-	struct host_rws hrws;
-
-	memcpy_fromio(&hrws, chan->hrws_vmem, sizeof(hrws));
-	hrws.h_rst = set;
-	memcpy_toio(chan->hrws_vmem, &hrws, sizeof(hrws));
-}
-
-static void mmbi_set_host_rdy(struct aspeed_mmbi_channel *chan, bool set)
-{
-	struct host_rws hrws;
-
-	memcpy_fromio(&hrws, chan->hrws_vmem, sizeof(hrws));
-	hrws.h_rdy = set;
-	memcpy_toio(chan->hrws_vmem, &hrws, sizeof(hrws));
-}
-
-static void mmbi_set_host_up(struct aspeed_mmbi_channel *chan, bool set)
-{
-	struct host_rws hrws;
-
-	memcpy_fromio(&hrws, chan->hrws_vmem, sizeof(hrws));
-	hrws.h_up = set;
-	memcpy_toio(chan->hrws_vmem, &hrws, sizeof(hrws));
-}
-
-static void get_h2b_avail_buf_len(struct aspeed_mmbi_channel *chan, ssize_t *avail_buf_len)
-{
-	struct device *dev = chan->dev;
-	u32 h2b_rp, h2b_wp;
-
-	h2b_rp = GET_H2B_READ_POINTER(chan);
-	h2b_wp = GET_H2B_WRITE_POINTER(chan);
-	dev_dbg(dev, "MMBI HRWS - h2b_rp: 0x%0x, h2b_wp: 0x%0x\n", h2b_rp, h2b_wp);
-
-	if (h2b_wp >= h2b_rp)
-		*avail_buf_len = chan->h2b_cb_size - h2b_wp + h2b_rp;
-	else
-		*avail_buf_len = h2b_rp - h2b_wp;
-}
-
-static u8 mmbi_get_state(struct aspeed_mmbi_channel *chan)
-{
-	u8 state = 0;
-
-	state = mmbi_get_bmc_up(chan) << 3;
-	state |= mmbi_get_bmc_rst(chan) << 2;
-	state |= mmbi_get_host_up(chan) << 1;
-	state |= mmbi_get_host_rst(chan);
-
-	dev_dbg(chan->dev, "MMBI state: 0x%x\n", state);
-
-	return state;
-}
-
-static void raise_h2b_interrupt(struct aspeed_mmbi_channel *chan)
-{
-	if (!chan->bmc_int_en)
-		return;
-
-	writeb(chan->bmc_int_value, chan->desc_vmem + chan->bmc_int_location);
-}
-
-static int mmbi_state_check(struct aspeed_mmbi_channel *chan)
-{
-	enum mmbi_state current_state = mmbi_get_state(chan);
-	struct device *dev = chan->dev;
-	int ret;
-
-	switch (current_state) {
-	case INIT_COMPLETED:
-		dev_dbg(dev, "Get INIT_COMPLETED state from BMC");
-
-		ret = mmbi_desc_init(chan);
-		if (ret) {
-			dev_warn(dev, "Check MMBI signature timeout\n");
-			raise_h2b_interrupt(chan);
-		}
-		return 1;
-	case RESET_REQ_BY_BMC:
-		dev_dbg(dev, "Get RESET_REQ_BY_BMC state from BMC");
-
-		/* Change state to RESET_ACKED */
-		mmbi_set_host_rst(chan, 1);
-
-		dev_dbg(dev, "Change state to RESET_ACKED to BMC");
-		raise_h2b_interrupt(chan);
-	default:
-		break;
-	}
-
-	return 0;
-}
-
-static int mmbi_bmc_up_check(struct aspeed_mmbi_channel *chan)
-{
-	u64 __timeout_us = 1000;
-	ktime_t __timeout = ktime_add_us(ktime_get(), __timeout_us);
-
-	for (;;) {
-		enum mmbi_state current_state = mmbi_get_state(chan);
-
-		if (current_state == INIT_COMPLETED)
-			break;
-		if (__timeout_us && ktime_compare(ktime_get(), __timeout) > 0)
-			return -EAGAIN;
-	}
-
-	return 0;
-}
-
-static void update_host_rws(struct aspeed_mmbi_channel *chan, unsigned int w_len,
-			    unsigned int r_len)
-{
-	struct device *dev = chan->dev;
-	struct host_rws hrws;
-	u32 h2b_wp, b2h_rp;
-
-	h2b_wp = GET_H2B_WRITE_POINTER(chan);
-	b2h_rp = GET_B2H_READ_POINTER(chan);
-
-	dev_dbg(dev, "MMBI HRWS - b2h_rp: 0x%0x, h2b_wp: 0x%0x\n", b2h_rp, h2b_wp);
-
-	/* Advance the H2B CB offset for next write */
-	if ((h2b_wp + w_len) <= chan->h2b_cb_size)
-		h2b_wp += w_len;
-	else
-		h2b_wp = h2b_wp + w_len - chan->h2b_cb_size;
-
-	/* Advance the B2H CB offset till where BMC read data */
-	if ((b2h_rp + r_len) <= chan->b2h_cb_size)
-		b2h_rp += r_len;
-	else
-		b2h_rp = b2h_rp + r_len - chan->b2h_cb_size;
-
-	memcpy_fromio(&hrws, chan->hrws_vmem, sizeof(hrws));
-
-	hrws.h2b_wp = FIELD_GET(H2B_WRITE_POINTER_MASK, h2b_wp);
-	hrws.b2h_rp = FIELD_GET(B2H_READ_POINTER_MASK, b2h_rp);
-	memcpy_toio(chan->hrws_vmem, &hrws, sizeof(hrws));
-	dev_dbg(dev, "Updating HRWS - b2h_rp: 0x%0x, h2b_wp: 0x%0x\n", b2h_rp, h2b_wp);
-
-	if (w_len != 0)
-		raise_h2b_interrupt(chan);
-}
-
-static int get_mmbi_header(struct aspeed_mmbi_channel *chan, u32 *data_length, u8 *type,
-			   u32 *unread_data_len, u8 *padding)
-{
-	u32 h2b_wp, h2b_rp, b2h_wp, b2h_rp;
-	struct mmbi_header header;
-
-	h2b_wp = GET_H2B_WRITE_POINTER(chan);
-	h2b_rp = GET_H2B_READ_POINTER(chan);
-	b2h_wp = GET_B2H_WRITE_POINTER(chan);
-	b2h_rp = GET_B2H_READ_POINTER(chan);
-	dev_dbg(chan->dev, "MMBI HRWS - h2b_wp: 0x%0x, b2h_rp: 0x%0x\n", h2b_wp, b2h_rp);
-	dev_dbg(chan->dev, "MMBI HROS - b2h_wp: 0x%0x, h2b_rp: 0x%0x\n", b2h_wp, h2b_rp);
-
-	if (b2h_wp >= b2h_rp)
-		*unread_data_len = b2h_wp - b2h_rp;
-	else
-		*unread_data_len = chan->b2h_cb_size - b2h_rp + b2h_wp;
-
-	if (*unread_data_len < sizeof(struct mmbi_header)) {
-		dev_dbg(chan->dev, "No data to read(%d - %d)\n", b2h_wp, b2h_rp);
-		return -EAGAIN;
-	}
-
-	dev_dbg(chan->dev, "READ MMBI header from: %p\n", chan->b2h_cb_vmem + b2h_rp);
-
-	/* Extract MMBI protocol - protocol type and length */
-	if ((b2h_rp + sizeof(header)) <= chan->b2h_cb_size) {
-		memcpy_fromio(&header, chan->b2h_cb_vmem + b2h_rp, sizeof(header));
-	} else {
-		ssize_t chunk_len = chan->b2h_cb_size - b2h_rp;
-
-		memcpy_fromio(&header, chan->b2h_cb_vmem + b2h_rp, chunk_len);
-		memcpy_fromio(((u8 *)&header) + chunk_len, chan->b2h_cb_vmem,
-			      sizeof(header) - chunk_len);
-	}
-
-	*data_length = (header.pkt_len << 2) - sizeof(header) - header.pkt_pad;
-	*padding = header.pkt_pad;
-	*type = header.pkt_type;
-
-	return 0;
-}
-
-static int aspeed_mmbi_write(struct aspeed_mmbi_channel *chan, const char *buffer, size_t len,
-			     protocol_type type)
-{
-	struct device *dev = chan->dev;
-	struct mmbi_header header = {0};
-	ssize_t avail_buf_len;
-	ssize_t total_len;
-	ssize_t wt_offset;
-	ssize_t chunk_len;
-	ssize_t end_offset;
-	u8 padding = 0;
-
-	/* If BMC READY bit is not set, Just discard the write. */
-	if (!GET_BMC_READY_BIT(chan)) {
-		dev_dbg(dev, "Host not ready, discarding request...\n");
-		return -EAGAIN;
-	}
-
-	get_h2b_avail_buf_len(chan, &avail_buf_len);
-
-	dev_dbg(dev, "H2B buffer empty space: %zd\n", avail_buf_len);
-
-	/* Header size */
-	total_len = len + 4;
-
-	padding = total_len & 0x3;
-	if (padding)
-		padding = 4 - padding;
-	total_len += padding;
-
-	/* Empty space should be more than write request data size */
-	if (avail_buf_len <= sizeof(header) || (total_len > (avail_buf_len - sizeof(header))))
-		return -ENOSPC;
-
-	/* Fill multi-protocol header */
-	header.pkt_type = type;
-	header.pkt_len = total_len >> 2;
-	header.pkt_pad = padding;
-
-	wt_offset = GET_H2B_WRITE_POINTER(chan);
-	end_offset = chan->h2b_cb_size;
-
-	/* Copy Header */
-	if ((end_offset - wt_offset) >= sizeof(header)) {
-		memcpy_toio(chan->h2b_cb_vmem + wt_offset, &header, sizeof(header));
-		wt_offset += sizeof(header);
-	} else {
-		chunk_len = end_offset - wt_offset;
-		dev_dbg(dev, "Write header chunk_len: %zd\n", chunk_len);
-		memcpy_toio(chan->h2b_cb_vmem + wt_offset, &header, chunk_len);
-		memcpy_toio(chan->h2b_cb_vmem, (u8 *)&header + chunk_len,
-			    (sizeof(header) - chunk_len));
-		wt_offset = (sizeof(header) - chunk_len);
-	}
-
-	/* Write the data */
-	if ((end_offset - wt_offset) >= len) {
-		memcpy_toio(&chan->h2b_cb_vmem[wt_offset], buffer, len);
-		wt_offset += len;
-	} else {
-		chunk_len = end_offset - wt_offset;
-		dev_dbg(dev, "Write data chunk_len: %zd\n", chunk_len);
-		memcpy_toio(&chan->h2b_cb_vmem[wt_offset], buffer, chunk_len);
-		wt_offset = 0;
-		memcpy_toio(&chan->h2b_cb_vmem[wt_offset], buffer + chunk_len, len - chunk_len);
-		wt_offset += len - chunk_len;
-	}
-
-	update_host_rws(chan, total_len, 0);
-
-	return 0;
-}
-
-static void aspeed_mmbi_read(struct aspeed_mmbi_channel *chan, char *buffer, size_t len, u8 padding)
-{
-	struct device *dev = chan->dev;
-	ssize_t rd_offset;
-	u32 b2h_rp;
-
-	b2h_rp = GET_B2H_READ_POINTER(chan);
-	if ((b2h_rp + sizeof(struct mmbi_header)) <= chan->b2h_cb_size)
-		rd_offset = b2h_rp + sizeof(struct mmbi_header);
-	else
-		rd_offset = b2h_rp + sizeof(struct mmbi_header) - chan->b2h_cb_size;
-
-	/* Extract data and copy to user space application */
-	dev_dbg(dev, "READ MMBI Data from: %p and length: %zd\n",
-		chan->b2h_cb_vmem + rd_offset, len);
-
-	if ((chan->b2h_cb_size - rd_offset) >= len) {
-		memcpy_fromio(buffer, chan->b2h_cb_vmem + rd_offset, len);
-		rd_offset += len;
-	} else {
-		ssize_t chunk_len;
-
-		chunk_len = chan->b2h_cb_size - rd_offset;
-		dev_dbg(dev, "Read data chunk_len: %zd\n", chunk_len);
-		memcpy_fromio(buffer, chan->b2h_cb_vmem + rd_offset, chunk_len);
-
-		rd_offset = 0;
-		memcpy_fromio(buffer + chunk_len, chan->b2h_cb_vmem + rd_offset,
-			      len - chunk_len);
-	}
-
-	update_host_rws(chan, 0, len + sizeof(struct mmbi_header) + padding);
-}
-
-static void mctp_mmbi_rx(struct aspeed_mmbi_channel *chan)
-{
-	struct net_device *ndev;
-	struct sk_buff *skb;
-	struct mctp_skb_cb *cb;
-	u32 req_data_len, unread_data_len;
-	u8 type, padding;
-	int status;
-
-	if (get_mmbi_header(chan, &req_data_len, &type, &unread_data_len, &padding) != 0)
-		return;
-
-	dev_dbg(chan->dev, "%s: Length: 0x%0x, Protocol Type: %d, Unread data: %d\n", __func__,
-		req_data_len, type, unread_data_len);
-
-	ndev = chan->ndev;
-
-	skb = netdev_alloc_skb(ndev, req_data_len);
-	if (!skb) {
-		ndev->stats.rx_dropped++;
-		update_host_rws(chan, 0, req_data_len + sizeof(struct mmbi_header));
-		return;
-	}
-
-	skb->protocol = htons(ETH_P_MCTP);
-	aspeed_mmbi_read(chan, skb_put(skb, req_data_len), req_data_len, padding);
-	skb_reset_network_header(skb);
-
-	cb = __mctp_cb(skb);
-	cb->halen = 0;
-
-	status = netif_rx(skb);
-	if (status == NET_RX_SUCCESS) {
-		ndev->stats.rx_packets++;
-		ndev->stats.rx_bytes += req_data_len;
-	} else {
-		ndev->stats.rx_dropped++;
-	}
-}
-
-static netdev_tx_t mctp_mmbi_tx(struct sk_buff *skb, struct net_device *ndev)
-{
-	struct aspeed_mmbi_mctp *mctp = netdev_priv(ndev);
-	int ret;
-
-	if (!mmbi_get_bmc_rdy(&mctp->mmbi->chan) || skb->len > MCTP_MMBI_MTU_MAX) {
-		ndev->stats.tx_dropped++;
-		goto out;
-	}
-
-	ret = aspeed_mmbi_write(&mctp->mmbi->chan, skb->data, skb->len, MMBI_PROTOCOL_MCTP);
-	if (ret) {
-		netif_stop_queue(ndev);
-		return NETDEV_TX_BUSY;
-	}
-
-	ndev->stats.tx_packets++;
-	ndev->stats.tx_bytes += skb->len;
-out:
-	kfree_skb(skb);
-	return NETDEV_TX_OK;
-}
-
-static const struct net_device_ops mctp_mmbi_netdev_ops = {
-	.ndo_start_xmit = mctp_mmbi_tx,
-};
-
-static void aspeed_mctp_mmbi_setup(struct net_device *ndev)
-{
-	ndev->type = ARPHRD_MCTP;
-
-	/* we limit at the fixed MTU, which is also the MCTP-standard
-	 * baseline MTU, so is also our minimum
-	 */
-	ndev->mtu = MCTP_MMBI_MTU;
-	ndev->max_mtu = MCTP_MMBI_MTU_MAX;
-	ndev->min_mtu = MCTP_MMBI_MTU_MIN;
-
-	ndev->hard_header_len = 0;
-	ndev->addr_len = 0;
-	ndev->tx_queue_len = DEFAULT_TX_QUEUE_LEN;
-	ndev->flags = IFF_NOARP;
-	ndev->netdev_ops = &mctp_mmbi_netdev_ops;
-	ndev->needs_free_netdev = true;
-}
-
-static int aspeed_mmbi_mctp_init(struct aspeed_mmbi_channel *chan)
-{
-	struct aspeed_mmbi_mctp *mctp;
-	struct net_device *ndev;
-	char name[32];
-	int ret;
-
-	snprintf(name, sizeof(name), "mctpmmbi%d", chan->mmbi->id);
-	ndev = alloc_netdev(sizeof(*mctp), name, NET_NAME_ENUM, aspeed_mctp_mmbi_setup);
-	if (!ndev)
-		return -ENOMEM;
-	mctp = netdev_priv(ndev);
-	mctp->ndev = ndev;
-	mctp->mmbi = chan->mmbi;
-
-	chan->ndev = ndev;
-
-	ret = register_netdev(ndev);
-	if (ret)
-		goto free_netdev;
-
-	return 0;
-
-free_netdev:
-	free_netdev(ndev);
-
-	return ret;
-}
 
 static struct aspeed_pci_bmc_dev *file_aspeed_bmc_device(struct file *file)
 {
@@ -740,67 +297,13 @@ static irqreturn_t aspeed_pci_host_mbox_interrupt(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
-static void aspeed_mmbi_work_func(struct work_struct *workq)
-{
-	struct aspeed_mmbi_channel *chan = container_of(workq, struct aspeed_mmbi_channel, work);
-	u32 weight = 256, req_data_len, unread_data_len;
-	u8 type, padding;
-	int i;
-
-	for (i = 0; i < weight; i++) {
-		if (get_mmbi_header(chan, &req_data_len, &type, &unread_data_len, &padding) != 0)
-			return;
-
-		dev_dbg(chan->dev, "%s: Length: 0x%0x, Protocol Type: %d\n",
-			__func__, req_data_len, type);
-
-		if (type == MMBI_PROTOCOL_MCTP)
-			mctp_mmbi_rx(chan);
-		else
-			/* Discard data and advance the hrws */
-			update_host_rws(chan, 0, req_data_len + sizeof(struct mmbi_header) + padding);
-
-		raise_h2b_interrupt(chan);
-	}
-
-	if (get_mmbi_header(chan, &req_data_len, &type, &unread_data_len, &padding) != 0)
-		queue_work(system_unbound_wq, &chan->work);
-}
-
-static irqreturn_t aspeed_pci_mmbi_isr(int irq, void *dev_id)
-{
-	struct aspeed_pcie_mmbi *mmbi = dev_id;
-	struct aspeed_mmbi_channel *chan = &mmbi->chan;
-	ssize_t avail_buf_len;
-
-	get_h2b_avail_buf_len(chan, &avail_buf_len);
-	if (avail_buf_len > MCTP_MMBI_MTU_MAX) {
-		if (netif_queue_stopped(chan->ndev)) {
-			dev_dbg(chan->dev, "Wake up mctp net device\n");
-			netif_wake_queue(chan->ndev);
-		}
-	}
-
-	if (mmbi_state_check(chan))
-		return IRQ_HANDLED;
-
-	queue_work(system_unbound_wq, &chan->work);
-
-	return IRQ_HANDLED;
-}
-
 static void aspeed_pci_setup_irq_resource(struct pci_dev *pdev)
 {
 	struct aspeed_pci_bmc_dev *pci_bmc_dev = pci_get_drvdata(pdev);
 
 	/* Assign static msi index table by platform */
 	if (pdev->revision == 0x27) {
-		if (pci_bmc_dev->driver_data == ASPEED) {
-			pci_bmc_dev->msi_idx_table = ast2700_soc0_msi_idx_table;
-		} else {
-			pci_bmc_dev->msi_idx_table = ast2700_soc1_msi_idx_table;
-			pci_bmc_dev->ast2700_soc1 = true;
-		}
+		pci_bmc_dev->msi_idx_table = ast2700_soc0_msi_idx_table;
 	} else {
 		pci_bmc_dev->msi_idx_table = ast2600_msi_idx_table;
 	}
@@ -946,231 +449,6 @@ static int aspeed_pci_bmc_device_setup_mbox(struct pci_dev *pdev)
 	return 0;
 }
 
-static int mmbi_signature_check(struct aspeed_mmbi_channel *chan)
-{
-	u8 signature[6];
-	u64 __timeout_us = 1000;
-	ktime_t __timeout = ktime_add_us(ktime_get(), __timeout_us);
-
-	for (;;) {
-		memcpy_fromio(signature, chan->desc_vmem, 6);
-		if (!memcmp(MMBI_SIGNATURE, signature, 6))
-			break;
-		if (__timeout_us && ktime_compare(ktime_get(), __timeout) > 0)
-			return -ETIMEDOUT;
-	}
-	return 0;
-}
-
-static int mmbi_desc_init(struct aspeed_mmbi_channel *chan)
-{
-	struct aspeed_pcie_mmbi *mmbi = chan->mmbi;
-	struct device *dev = chan->dev;
-	struct mmbi_cap_desc desc;
-	u8 __iomem *desc_base = chan->desc_vmem;
-	int ret;
-
-	/* First, check mmbi signature "#MMBI$" */
-	ret = mmbi_signature_check(chan);
-	if (ret) {
-		dev_warn(dev, "Check MMBI signature timeout\n");
-		return ret;
-	}
-
-	memcpy_fromio(&desc, chan->desc_vmem, sizeof(desc));
-
-	/* HROS */
-	if (((desc.bt_desc.h_ros_p << 3) + sizeof(struct host_ros)) >= mmbi->mem_size) {
-		dev_warn(dev, "HROS is out of range");
-		return -EINVAL;
-	}
-	chan->hros_vmem = desc_base + (desc.bt_desc.h_ros_p << 3);
-
-	/* HRWS */
-	if (((desc.bt_desc.h_rws_p << 3) + sizeof(struct host_rws)) >= mmbi->mem_size) {
-		dev_warn(dev, "HRWS is out of range");
-		return -EINVAL;
-	}
-	chan->hrws_vmem = desc_base + (desc.bt_desc.h_rws_p << 3);
-
-	ret = mmbi_bmc_up_check(chan);
-	if (ret) {
-		dev_warn(dev, "Check BMC up timeout\n");
-		return ret;
-	}
-
-	/* Implementations of MMBI described in this document shall indicate version 1 of MMBI */
-	if (desc.version != 1) {
-		dev_warn(dev, "MMBI version must be 1");
-		goto err_mismatch;
-	}
-
-	/* This MMBI interface is intended for OS use */
-	if (desc.os_use != 1) {
-		dev_warn(dev, "This MMBI does not provide for OS");
-		goto err_mismatch;
-	}
-
-	/* Current application is only MMBI Variable Packet Size Circular Buffers (VPSCB) v1 */
-	if (desc.buffer_type != 1) {
-		dev_warn(dev, "The buffer type is not VPSCB: (%d)", desc.buffer_type);
-		goto err_mismatch;
-	}
-
-	/* B2H Buffer */
-	if (((desc.b2h_ba << 3) + desc.b2h_l) > mmbi->mem_size) {
-		dev_warn(dev, "B2H buffer is out of range");
-		goto err_mismatch;
-	}
-	chan->b2h_cb_vmem = desc_base + (desc.b2h_ba << 3);
-	chan->b2h_cb_size = desc.b2h_l;
-
-	/* H2B Buffer */
-	if (((desc.h2b_ba << 3) + desc.h2b_l) > mmbi->mem_size) {
-		dev_warn(dev, "H2B buffer is out of range");
-		goto err_mismatch;
-	}
-	chan->h2b_cb_vmem = desc_base + (desc.h2b_ba << 3);
-	chan->h2b_cb_size = desc.h2b_l;
-
-	dev_dbg(dev, "B2H mapped addr - desc: %p, hros: %p, b2h_cb: %p\n",
-		chan->desc_vmem, chan->hros_vmem, chan->b2h_cb_vmem);
-	dev_dbg(dev, "H2B mapped addr - hrws: %p, h2b_cb: %p\n", chan->hrws_vmem,
-		chan->h2b_cb_vmem);
-
-	dev_dbg(dev, "B2H buffer size: 0x%0x\n", chan->b2h_cb_size);
-	dev_dbg(dev, "H2B buffer size: 0x%0x\n", chan->h2b_cb_size);
-
-	/* Host Interrupt */
-	chan->host_int_en = !!desc.bt_desc.h_int_t;
-	if (chan->host_int_en) {
-		/* 1 for PCIe */
-		if (desc.bt_desc.h_int_t != 1)
-			chan->host_int_en = 0;
-		else
-			chan->host_int_location = desc.bt_desc.h_int_l;
-	}
-
-	/* BMC Interrupt */
-	chan->bmc_int_en = !!desc.bt_desc.bmc_int_t;
-	if (chan->bmc_int_en) {
-		if (desc.bt_desc.bmc_int_t != 1) {
-			chan->bmc_int_en = 0;
-		} else {
-			chan->bmc_int_location = desc.bt_desc.bmc_int_l;
-			chan->bmc_int_vmem = desc_base + chan->bmc_int_location;
-			chan->bmc_int_value = desc.bt_desc.bmc_int_v;
-		}
-	}
-
-	INIT_WORK(&chan->work, aspeed_mmbi_work_func);
-
-	return 0;
-err_mismatch:
-	/* Change state to INIT_MISMATCH */
-	mmbi_set_host_rst(chan, 1);
-	return -EINVAL;
-}
-
-static int aspeed_pci_mmbi_init(struct aspeed_pcie_mmbi *mmbi)
-{
-	struct aspeed_mmbi_channel *chan = &mmbi->chan;
-	struct device *dev = chan->dev;
-	int ret;
-
-	chan->desc_vmem = mmbi->mem;
-	chan->mmbi = mmbi;
-
-	ret = mmbi_desc_init(chan);
-	if (ret) {
-		dev_err(dev, "Unable to init mmbi desc\n");
-		return ret;
-	}
-
-	/* Initialize MTCP function */
-	ret = aspeed_mmbi_mctp_init(chan);
-	if (ret) {
-		dev_err(dev, "Unable to init mctp\n");
-		return ret;
-	}
-
-	/* Change state to NORMAL_RUNTIME */
-	mmbi_set_host_up(chan, 1);
-	mmbi_set_host_rdy(chan, 1);
-	/* Trigger BMC to finish normal runtime state */
-	raise_h2b_interrupt(chan);
-
-	return 0;
-}
-
-/* AST2700 PCIe MMBI
- * SoC : |  0          |  1                |
- * BAR : |  2  3  4  5 |  0  1  2  3  4  5 |
- * MMBI: |  0  1  2  3 |  0  1  2  3  4  5 |
- */
-static void aspeed_pci_bmc_device_setup_mmbi(struct pci_dev *pdev)
-{
-	struct aspeed_pci_bmc_dev *pci_bmc_dev = pci_get_drvdata(pdev);
-	struct aspeed_pcie_mmbi *mmbi;
-	u32 start_bar = 2, mmbi_max_inst = 4, start_msi = MMBI0_MSI;	/* AST2700 SoC0 */
-	int i, rc = 0;
-
-	/* AST2700 A1 supports MMBI */
-	if (pdev->revision != 0x27)
-		return;
-
-	if (pci_bmc_dev->ast2700_soc1) {
-		/* AST2700 SoC1 */
-		start_bar = 0;
-		mmbi_max_inst = 6;
-		start_msi = 0;
-	}
-
-	for (i = 0; i < mmbi_max_inst; i++) {
-		mmbi = &pci_bmc_dev->mmbi[i];
-
-		/* Get MMBI BAR resource */
-		mmbi->base = pci_resource_start(pdev, start_bar + i);
-		mmbi->mem_size = pci_resource_len(pdev, start_bar + i);
-
-		/* Check if there is bar */
-		if (!mmbi->mem_size)
-			continue;
-
-		mmbi->mem = pci_ioremap_bar(pdev, start_bar + i);
-		if (!mmbi->mem) {
-			mmbi->mem_size = 0;
-			continue;
-		}
-
-		mmbi->chan.dev = &pdev->dev;
-		mmbi->dev_name = devm_kasprintf(mmbi->chan.dev, GFP_KERNEL, "pci-mmbi%d", i);
-		mmbi->id = i;
-		rc = aspeed_pci_mmbi_init(mmbi);
-		if (rc < 0) {
-			pr_err("Initialize MMBI device failed.\n");
-			goto free_ioremap;
-		}
-
-		if (mmbi->chan.host_int_en) {
-			mmbi->irq = pci_irq_vector(pdev, pci_bmc_dev->msi_idx_table[start_msi + i]);
-			rc = devm_request_irq(&pdev->dev, mmbi->irq, aspeed_pci_mmbi_isr,
-					      IRQF_SHARED, mmbi->dev_name, mmbi);
-			if (rc) {
-				pr_err("MMBI device %s unable to get IRQ %d\n", mmbi->dev_name, rc);
-				mmbi->irq = 0;
-				goto free_ioremap;
-			}
-		} else {
-			mmbi->irq = 0;
-		}
-		continue;
-free_ioremap:
-		mmbi->mem_size = 0;
-		pci_iounmap(pdev, mmbi->mem);
-	}
-}
-
 static void aspeed_pci_host_bmc_device_release_queue(struct pci_dev *pdev)
 {
 	struct aspeed_pci_bmc_dev *pci_bmc_dev = pci_get_drvdata(pdev);
@@ -1197,35 +475,6 @@ static void aspeed_pci_host_bmc_device_release_memory_mapping(struct pci_dev *pd
 
 	if (!list_empty(&pci_bmc_dev->miscdev.list))
 		misc_deregister(&pci_bmc_dev->miscdev);
-}
-
-static void aspeed_pci_release_mmbi(struct pci_dev *pdev)
-{
-	struct aspeed_pci_bmc_dev *pci_bmc_dev = pci_get_drvdata(pdev);
-	struct aspeed_pcie_mmbi *mmbi;
-	int i;
-
-	if (pdev->revision != 0x27)
-		return;
-
-	for (i = 0; i < MMBI_MAX_INST; i++) {
-		mmbi = &pci_bmc_dev->mmbi[i];
-
-		if (mmbi->mem_size == 0)
-			continue;
-
-		cancel_work_sync(&mmbi->chan.work);
-
-		mmbi_set_host_rdy(&mmbi->chan, 0);
-		mmbi_set_host_up(&mmbi->chan, 0);
-
-		unregister_netdev(mmbi->chan.ndev);
-
-		if (mmbi->mem)
-			pci_iounmap(pdev, mmbi->mem);
-		if (mmbi->irq != 0)
-			devm_free_irq(&pdev->dev, mmbi->irq, mmbi);
-	}
 }
 
 static int aspeed_pci_host_setup(struct pci_dev *pdev)
@@ -1285,9 +534,6 @@ static int aspeed_pci_host_setup(struct pci_dev *pdev)
 		goto out_free_uart;
 	}
 
-	/* Setup AST2700 PCIe MMBI device */
-	aspeed_pci_bmc_device_setup_mmbi(pdev);
-
 	return 0;
 
 out_free_uart:
@@ -1308,17 +554,149 @@ out_free0:
 	return rc;
 }
 
-static int aspeed_pci_host_mmbi_device_setup(struct pci_dev *pdev)
+static struct aspeed_platform aspeed_pcie_host[] = {
+	{ .setup = aspeed_pci_host_setup },
+	{ 0 }
+};
+
+#if IS_ENABLED(CONFIG_ASPEED_MMBI)
+static const char *
+aspeed_host_pcie_mmbi_app_interface_name(enum mmbi_app_interface intf)
 {
-	aspeed_pci_bmc_device_setup_mmbi(pdev);
+	switch (intf) {
+	case MMBI_APP_INTF_MCTP_NETDEV:
+		return "mctp-netdev";
+	case MMBI_APP_INTF_IOCTL:
+	default:
+		return "ioctl";
+	}
+}
+
+static int aspeed_host_pcie_mmbi_validate_app_interface(struct device *dev)
+{
+	int i;
+
+	for (i = 0; i < app_interface_count; i++) {
+		if (app_interface[i] > MMBI_APP_INTF_MCTP_NETDEV) {
+			dev_warn(dev,
+				 "invalid app_interface[%d]=%u, using defaults\n",
+				 i, app_interface[i]);
+			return -EINVAL;
+		}
+	}
+
 	return 0;
 }
 
-static struct aspeed_platform aspeed_pcie_host[] = {
-	{ .setup = aspeed_pci_host_setup },
-	{ .setup = aspeed_pci_host_mmbi_device_setup },
-	{ 0 }
-};
+static enum mmbi_app_interface
+aspeed_host_pcie_mmbi_get_app_interface(int channel, bool use_defaults)
+{
+	if (use_defaults)
+		return app_interface_defaults[channel];
+
+	if (app_interface_count == 1)
+		return app_interface[0];
+
+	if (channel < app_interface_count)
+		return app_interface[channel];
+
+	return app_interface_defaults[channel];
+}
+
+static void
+aspeed_host_pcie_mmbi_init_app_interfaces(struct mmbi_ins_desc *mmbi_desc,
+					  bool use_defaults)
+{
+	int i;
+
+	for (i = 0; i < MMBI_MAX_CHANNELS; i++)
+		mmbi_desc->chan_desc[i].app_interface =
+			aspeed_host_pcie_mmbi_get_app_interface(i,
+								use_defaults);
+}
+
+static void aspeed_host_pcie_mmbi_log_app_interfaces(struct device *dev,
+						     struct mmbi_ins_desc *mmbi_desc,
+						     int bar)
+{
+	struct mmbi_chan_desc *chan_desc;
+	const char *interface;
+	int i;
+
+	for (i = 0; i < mmbi_desc->num_of_channels; i++) {
+		chan_desc = &mmbi_desc->chan_desc[i];
+		interface = aspeed_host_pcie_mmbi_app_interface_name(chan_desc->app_interface);
+		dev_info(dev, "BAR %d channel %d application interface: %s\n",
+			 bar, i, interface);
+	}
+}
+
+static int aspeed_pci_host_mmbi_setup(struct pci_dev *pdev)
+{
+	struct aspeed_pci_bmc_dev *pci_bmc_dev = pci_get_drvdata(pdev);
+	struct aspeed_host_pcie_mmbi *mmbi = &pci_bmc_dev->mmbi;
+	struct aspeed_host_pcie_mmbi_ins *ins;
+	struct device *dev = &pdev->dev;
+	struct mmbi_ins_desc *mmbi_desc;
+	int i, ret, instance_id;
+	int last_ret = -ENODEV;
+	bool use_default_app_interfaces;
+	resource_size_t start, size;
+
+	ret = aspeed_host_pcie_mmbi_validate_app_interface(dev);
+	use_default_app_interfaces = ret != 0;
+
+	instance_id = 0;
+	for (i = 2; i < PCI_STD_NUM_BARS; i++) {
+		ins = &mmbi->instances[i];
+		mmbi_desc = &ins->mmbi_desc;
+		start = pci_resource_start(pdev, i);
+		size = pci_resource_len(pdev, i);
+
+		if (!start || !size) {
+			dev_err(dev,
+				"Invalid BAR %d with start 0x%llx and size 0x%llx\n",
+				i, (unsigned long long)start,
+				(unsigned long long)size);
+			continue;
+		}
+
+		mmbi_desc->desc_virt = pci_ioremap_bar(pdev, i);
+		if (!mmbi_desc->desc_virt) {
+			dev_err(dev, "Failed to ioremap BAR %d\n", i);
+			continue;
+		}
+		mmbi_desc->dev = dev;
+		mmbi_desc->role = MMBI_ROLE_HOST;
+
+		aspeed_host_pcie_mmbi_init_app_interfaces(mmbi_desc,
+							  use_default_app_interfaces);
+		ret = mmbi_instance_init(mmbi_desc);
+		if (ret) {
+			dev_info(dev,
+				 "Failed to initialize MMBI at bar %d, error %d\n",
+				 i, ret);
+			pci_iounmap(pdev, mmbi_desc->desc_virt);
+			last_ret = ret;
+		} else {
+			ins->instance_index = instance_id++;
+			ins->bar_index = i;
+			ins->valid = true;
+			ins->dev_name = devm_kasprintf(dev, GFP_KERNEL,
+						       "mmbi_host_ins%d",
+						       ins->instance_index);
+			aspeed_host_pcie_mmbi_log_app_interfaces(dev, mmbi_desc, i);
+
+			ins->msi_index = mmbi_desc->host_int_location;
+		}
+	}
+
+	if (!instance_id)
+		return last_ret;
+
+	return 0;
+}
+#endif
 
 static int aspeed_pci_host_bmc_device_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
@@ -1360,25 +738,44 @@ static int aspeed_pci_host_bmc_device_probe(struct pci_dev *pdev, const struct p
 		return rc;
 	}
 
+#if IS_ENABLED(CONFIG_ASPEED_MMBI)
+	pci_bmc_dev->mmbi.dev = &pdev->dev;
+	rc = aspeed_pci_host_mmbi_setup(pdev);
+	if (rc) {
+		dev_err(&pdev->dev, "Failed to setup MMBI instances\n");
+		return rc;
+	}
+#endif
+
 	return 0;
 }
 
 static void aspeed_pci_host_bmc_device_remove(struct pci_dev *pdev)
 {
 	struct aspeed_pci_bmc_dev *pci_bmc_dev = pci_get_drvdata(pdev);
+#if IS_ENABLED(CONFIG_ASPEED_MMBI)
+	struct aspeed_host_pcie_mmbi *mmbi = &pci_bmc_dev->mmbi;
+	struct aspeed_host_pcie_mmbi_ins *ins;
+	int i;
 
-	if (pci_bmc_dev->driver_data == ASPEED) {
-		aspeed_pci_host_bmc_device_release_queue(pdev);
-		aspeed_pci_host_bmc_device_release_memory_mapping(pdev);
-		aspeed_pci_host_bmc_device_release_vuart(pdev);
-
-		devm_free_irq(&pdev->dev, pci_irq_vector(pdev, pci_bmc_dev->msi_idx_table[BMC_MSI]),
-			      pci_bmc_dev);
-		devm_free_irq(&pdev->dev, pci_irq_vector(pdev, pci_bmc_dev->msi_idx_table[MBX_MSI]),
-			      pci_bmc_dev);
+	for (i = 2; i < PCI_STD_NUM_BARS; i++) {
+		ins = &mmbi->instances[i];
+		if (ins->valid) {
+			mmbi_instance_remove(&ins->mmbi_desc);
+			pci_iounmap(pdev, ins->mmbi_desc.desc_virt);
+		}
 	}
+#endif
+	aspeed_pci_host_bmc_device_release_queue(pdev);
+	aspeed_pci_host_bmc_device_release_memory_mapping(pdev);
+	aspeed_pci_host_bmc_device_release_vuart(pdev);
 
-	aspeed_pci_release_mmbi(pdev);
+	devm_free_irq(&pdev->dev,
+		      pci_irq_vector(pdev, pci_bmc_dev->msi_idx_table[BMC_MSI]),
+		      pci_bmc_dev);
+	devm_free_irq(&pdev->dev,
+		      pci_irq_vector(pdev, pci_bmc_dev->msi_idx_table[MBX_MSI]),
+		      pci_bmc_dev);
 
 	ida_simple_remove(&bmc_device_ida, pci_bmc_dev->id);
 
@@ -1395,12 +792,8 @@ static void aspeed_pci_host_bmc_device_remove(struct pci_dev *pdev)
  *
  */
 static struct pci_device_id aspeed_host_bmc_dev_pci_ids[] = {
-	/* ASPEED BMC Device */
-	{ PCI_DEVICE(0x1A03, 0x2402), .class = 0xFF0000, .class_mask = 0xFFFF00,
-	  .driver_data = ASPEED },
-	/* AST2700 SoC1 MMBI device */
-	{ PCI_DEVICE(0x1A03, 0x2402), .class = 0x0C0C00, .class_mask = (0xFFFF00),
-	  .driver_data = ASPEED_AST2700_SOC1 },
+	{ PCI_DEVICE(0x1A03, 0x2402), .class = 0xFF0000, .class_mask = 0xFFFF00 },
+	{ PCI_DEVICE(0x1A03, 0x2402), .class = 0x0C0C00, .class_mask = 0xFFFF00 },
 	{
 		0,
 	}

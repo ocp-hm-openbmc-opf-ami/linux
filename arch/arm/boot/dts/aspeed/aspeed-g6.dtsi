@@ -305,7 +305,6 @@
 			reg = <0x1e660000 0x180>;
 			interrupts = <GIC_SPI 2 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&syscon ASPEED_CLK_GATE_MAC1CLK>;
-			aspeed,scu = <&syscon>;
 			resets = <&syscon ASPEED_RESET_MAC1>;
 			status = "disabled";
 		};
@@ -315,7 +314,6 @@
 			reg = <0x1e680000 0x180>;
 			interrupts = <GIC_SPI 3 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&syscon ASPEED_CLK_GATE_MAC2CLK>;
-			aspeed,scu = <&syscon>;
 			resets = <&syscon ASPEED_RESET_MAC2>;
 			status = "disabled";
 		};
@@ -325,7 +323,6 @@
 			reg = <0x1e670000 0x180>;
 			interrupts = <GIC_SPI 32 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&syscon ASPEED_CLK_GATE_MAC3CLK>;
-			aspeed,scu = <&syscon>;
 			resets = <&syscon ASPEED_RESET_MAC3>;
 			status = "disabled";
 		};
@@ -335,7 +332,6 @@
 			reg = <0x1e690000 0x180>;
 			interrupts = <GIC_SPI 33 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&syscon ASPEED_CLK_GATE_MAC4CLK>;
-			aspeed,scu = <&syscon>;
 			resets = <&syscon ASPEED_RESET_MAC4>;
 			status = "disabled";
 		};
@@ -553,18 +549,6 @@
 				status = "disabled";
 			};
 
-			mctp1: mctp@1e6f9000 {
-				compatible = "aspeed,ast2600-mctp";
-				reg = <0x1e6f9000 0x30>;
-				interrupts-extended = <&scu_ic0 ASPEED_AST2600_SCU_IC0_PCIE_RCRST_LO_TO_HI>;
-				interrupt-names = "pcie";
-				pcie_rc;
-				resets = <&syscon ASPEED_RESET_RC_MCTP>, <&syscon ASPEED_RESET_DEV_MCTP>;
-				aspeed,scu = <&syscon>;
-				aspeed,pcieh = <&pcie_phy1>;
-				status = "disabled";
-			};
-
 			adc0: adc@1e6e9000 {
 				compatible = "aspeed,ast2600-adc0";
 				reg = <0x1e6e9000 0x100>;
@@ -663,8 +647,20 @@
 
 			sbc: secure-boot-controller@1e6f2000 {
 				compatible = "aspeed,ast2600-sbc";
-				reg = <0x1e6f2000 0x1000>;
+				reg = <0x1e6f2000 0x800>;
 				aspeed,scu = <&syscon>;
+			};
+
+			mctp1: mctp@1e6f9000 {
+				compatible = "aspeed,ast2600-mctp";
+				reg = <0x1e6f9000 0x30>;
+				interrupts-extended = <&scu_ic0 ASPEED_AST2600_SCU_IC0_PCIE_RCRST_LO_TO_HI>;
+				interrupt-names = "pcie";
+				pcie_rc;
+				resets = <&syscon ASPEED_RESET_RC_MCTP>, <&syscon ASPEED_RESET_DEV_MCTP>;
+				aspeed,scu = <&syscon>;
+				aspeed,pcieh = <&pcie_phy1>;
+				status = "disabled";
 			};
 
 			acry: crypto@1e6fa000 {

@@ -129,9 +129,12 @@ static u32 aspeed_i3c_get_sdr_phy_reg(struct i3c_hci *hci)
 		return PHY_I3C_SDR1_CTRL0;
 	if (bus->scl_rate.i3c > 4000000)
 		return PHY_I3C_SDR2_CTRL0;
-	if (bus->scl_rate.i3c > 2000000)
-		return PHY_I3C_SDR3_CTRL0;
-	return PHY_I3C_SDR4_CTRL0;
+	/*
+	 * SDR4 is permanently reserved as the slow-CCC slot (~1MHz) for JESD403
+	 * SETHID/DEVCTRL (see aspeed_i3c_phy_init()), so normal transfers never
+	 * use it — buses at or below 2MHz share SDR3. Pair with get_i3c_mode().
+	 */
+	return PHY_I3C_SDR3_CTRL0;
 }
 
 static void aspeed_i3c_phy_init(struct i3c_hci *hci)
@@ -175,14 +178,33 @@ static void aspeed_i3c_phy_init(struct i3c_hci *hci)
 	ast_phy_write(PHY_I2C_FMP_CTRL3, FIELD_PREP(PHY_I2C_FMP_CTRL3_HD_DAT, hcnt) |
 						 FIELD_PREP(PHY_I2C_FMP_CTRL3_AHD_DAT, lcnt));
 
+	/*
+	 * Reserve the SDR4 PHY slot for slow CCCs (SETHID/DEVCTRL/SETAASA).
+	 * Program its SCL/T-bit timing to match I2C FMP (~1MHz) so that
+	 * hci_cmd_v1_prep_ccc() can downgrade those commands by routing them
+	 * through MODE=SDR4. aspeed_i3c_get_sdr_phy_reg() and get_i3c_mode()
+	 * never select SDR4 for normal transfers, keeping the slot dedicated.
+	 * This is unconditional: SETHID/DEVCTRL may be issued through a hub
+	 * proxy where the JESD403 bus context is not visible on this controller.
+	 */
+	hcnt = DIV_ROUND_CLOSEST(PHY_I2C_FMP_DEFAULT_SCL_H_NS, core_period) - 1;
+	lcnt = DIV_ROUND_CLOSEST(PHY_I2C_FMP_DEFAULT_SCL_L_NS, core_period) - 1;
+	ast_phy_write(PHY_I3C_SDR4_CTRL0,
+		      FIELD_PREP(PHY_I3C_SDR4_CTRL0_SCL_H, hcnt) |
+		      FIELD_PREP(PHY_I3C_SDR4_CTRL0_SCL_L, lcnt));
+	ast_phy_write(PHY_I3C_SDR4_CTRL1,
+		      FIELD_PREP(PHY_I3C_SDR4_CTRL1_TBIT_H, hcnt) |
+		      FIELD_PREP(PHY_I3C_SDR4_CTRL1_TBIT_L, lcnt));
+
 	ast_phy_write(PHY_PULLUP_EN, 0x0);
 }
 
 static void aspeed_i3c_of_populate_bus_timing(struct i3c_hci *hci, struct device_node *np)
 {
-	u16 hcnt, lcnt, total_cnt, min_tbit_cnt;
+	u16 hcnt, lcnt, total_cnt, min_tbit_cnt, cas_lcnt = 0, cas_cnt, cbp_cnt;
 	unsigned long core_rate, core_period;
 	u32 val, pp_high = 0, pp_low = 0, od_high = 0, od_low = 0, thd_dat = 0, internal_pu = 0;
+	u32 cas_period = 0, cbp_period = 0, sr_p_low_period = 0;
 	u32 ctrl0, ctrl1, ctrl2, sr_p_prepare_ctrl;
 	u32 sdr_ctrl0_reg = aspeed_i3c_get_sdr_phy_reg(hci);
 
@@ -216,6 +238,15 @@ static void aspeed_i3c_of_populate_bus_timing(struct i3c_hci *hci, struct device
 	if (!of_property_read_u32(np, "internal-pullup", &val))
 		internal_pu = val;
 
+	if (!of_property_read_u32(np, "i3c-cas-period-ns", &val))
+		cas_period = val;
+
+	if (!of_property_read_u32(np, "i3c-cbp-period-ns", &val))
+		cbp_period = val;
+
+	if (!of_property_read_u32(np, "i3c-sr-p-scl-lo-period-ns", &val))
+		sr_p_low_period = val;
+
 	if (pp_high && pp_low) {
 		hcnt = DIV_ROUND_CLOSEST(pp_high, core_period) - 1;
 		lcnt = DIV_ROUND_CLOSEST(pp_low, core_period) - 1;
@@ -240,13 +271,60 @@ static void aspeed_i3c_of_populate_bus_timing(struct i3c_hci *hci, struct device
 	ast_phy_write(PHY_I3C_SDR0_CTRL1, ctrl1);
 	ast_phy_write(PHY_I3C_DDR_CTRL1, ctrl1);
 
-	/* The push-pull high count is used as both tCAS and tCBP. */
-	ast_phy_write(PHY_I3C_OD_CTRL0, FIELD_PREP(PHY_I3C_OD_CTRL0_CAS, hcnt) |
-						FIELD_PREP(PHY_I3C_OD_CTRL0_CBP, hcnt));
 	/*
-	 * The SR_P hold time uses the default value, and the SR_P low count is
-	 * the same as the push-pull low count.
+	 * tCAS and tCBP can be set independently through the "i3c-cas-period-ns"
+	 * and "i3c-cbp-period-ns" device tree properties. When a property is
+	 * absent, the value is derived from the SCL low count, mirroring the
+	 * dw-i3c-master driver (dw_i3c_bus_clk_cfg()). The applicable SCL low
+	 * period depends on the bus context:
+	 *   JESD403            : I3C OD SCL low period
+	 *   MIPI I3C, pure bus : I3C PP SCL low period
+	 *   MIPI I3C, mixed bus: I2C FM SCL low period
 	 */
+	if (!cas_period || !cbp_period) {
+		if (hci->master.bus.context == I3C_BUS_CONTEXT_JESD403) {
+			if (od_high && od_low)
+				cas_lcnt = DIV_ROUND_CLOSEST(od_low, core_period) - 1;
+			else
+				cas_lcnt = DIV_ROUND_CLOSEST(PHY_I3C_OD_DEFAULT_SCL_L_NS,
+							     core_period) - 1;
+		} else if (hci->master.bus.mode == I3C_BUS_MODE_PURE) {
+			cas_lcnt = lcnt;
+		} else {
+			cas_lcnt = DIV_ROUND_CLOSEST(PHY_I2C_FM_DEFAULT_SCL_L_NS,
+						     core_period) - 1;
+		}
+	}
+
+	/*
+	 * Use the explicit period when provided; otherwise derive from the SCL
+	 * low count and clamp to the MIPI I3C minimums (tCAS >= 38.4ns,
+	 * tCBP >= 19.2ns), which the derived value never enforced.
+	 */
+	if (cas_period)
+		cas_cnt = DIV_ROUND_CLOSEST(cas_period, core_period) - 1;
+	else
+		cas_cnt = max_t(u16, cas_lcnt,
+				DIV_ROUND_UP(PHY_I3C_OD_MIN_CAS_NS_X10, core_period * 10) - 1);
+
+	if (cbp_period)
+		cbp_cnt = DIV_ROUND_CLOSEST(cbp_period, core_period) - 1;
+	else
+		cbp_cnt = max_t(u16, cas_lcnt,
+				DIV_ROUND_UP(PHY_I3C_OD_MIN_CBP_NS_X10, core_period * 10) - 1);
+	ast_phy_write(PHY_I3C_OD_CTRL0, FIELD_PREP(PHY_I3C_OD_CTRL0_CAS, cas_cnt) |
+						FIELD_PREP(PHY_I3C_OD_CTRL0_CBP, cbp_cnt));
+	/*
+	 * The SR_P hold time uses the default value. The SR_P low count is kept
+	 * separate from the per-SDR-slot SCL low count so it can satisfy the
+	 * MIPI I3C Controller Clock Stalling requirement (Figure 19: Clock
+	 * Stalling in T-Bit Before STOP, and Figure 20: Clock Stalling in Low
+	 * T-Bit Before Repeated START). It can be set with the
+	 * "i3c-sr-p-scl-lo-period-ns" device tree property; when absent it
+	 * defaults to the push-pull low count.
+	 */
+	if (sr_p_low_period)
+		lcnt = DIV_ROUND_CLOSEST(sr_p_low_period, core_period) - 1;
 	hcnt = DIV_ROUND_CLOSEST(PHY_I3C_SR_P_DEFAULT_HD_NS, core_period);
 	sr_p_prepare_ctrl = FIELD_PREP(PHY_I3C_SR_P_PREPARE_CTRL_HD, hcnt) |
 			    FIELD_PREP(PHY_I3C_SR_P_PREPARE_CTRL_SCL_L, lcnt);
@@ -306,8 +384,14 @@ static int i3c_hci_bus_init(struct i3c_master_controller *m)
 	dev_info(&hci->master.dev, "Master Mode");
 
 #ifdef CONFIG_ARCH_ASPEED
+	/*
+	 * Enable master clock stall: when the controller cannot keep the
+	 * data pipeline fed it holds SCL low instead of underrunning, so a
+	 * transfer pauses and resumes cleanly rather than aborting.
+	 */
 	ast_inhouse_write(ASPEED_I3C_CTRL,
-			  ASPEED_I3C_CTRL_INIT |
+			  ASPEED_I3C_CTRL_CLOCK_STALL_EN |
+				  ASPEED_I3C_CTRL_INIT |
 				  FIELD_PREP(ASPEED_I3C_CTRL_INIT_MODE,
 					     INIT_MST_MODE));
 	aspeed_i3c_phy_init(hci);

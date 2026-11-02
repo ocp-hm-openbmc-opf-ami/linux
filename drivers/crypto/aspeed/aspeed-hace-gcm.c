@@ -420,7 +420,8 @@ static int aspeed_crypto_aead_init(struct crypto_aead *aead)
 		return PTR_ERR(ctx->fallback_aead_tfm);
 	}
 
-	crypto_aead_set_reqsize(aead, sizeof(struct aead_request) +
+	/* Allocate full reqctx size for GCM fallback context */
+	crypto_aead_set_reqsize(aead, sizeof(struct aspeed_cipher_reqctx) +
 			      crypto_aead_reqsize(ctx->fallback_aead_tfm));
 
 	return 0;

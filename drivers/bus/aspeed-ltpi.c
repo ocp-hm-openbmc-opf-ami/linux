@@ -48,7 +48,8 @@
 
 #define SCU_IO_PINS_TRAP1			0x10
 #define SCU_IO_PINS_TRAP1_CLEAR			0x14
-#define   SCU_IO_PINS_TRAP_LTPI			GENMASK(2, 0)
+// 0: LTPI mode, 2: LTPI index, [15:14]: LTPI IO Driving
+#define   SCU_IO_PINS_TRAP_LTPI			(BIT(0) | BIT(2) | GENMASK(15, 14))
 #define SCU_IO_OTP_TRAP1			0xa00
 #define SCU_IO_OTP_TRAP1_CLEAR			0xa04
 #define SCU_IO_OTP_TRAP2			0xa20
@@ -223,7 +224,6 @@ static irqreturn_t aspeed_ltpi_irq_handler(int irq, void *dev_id)
 
 	if (status & LTPI_INTR_EN_OP_LINK_LOST) {
 		writel(0, priv->regs + LTPI_INTR_EN);
-		writel(status, priv->regs + LTPI_INTR_STATUS);
 		if (ltpi_get_link_partner(priv))
 			panic("LTPI link lost!\n");
 		/* Will not return */
@@ -231,7 +231,15 @@ static irqreturn_t aspeed_ltpi_irq_handler(int irq, void *dev_id)
 			dev_err(priv->dev, "LTPI link lost!\n");
 	}
 
-	writel(status, priv->regs + LTPI_INTR_STATUS);
+	/*
+	 * Never clear the link-lost status bit: the hardware relies on it
+	 * staying set to return dummy data on OEM address accesses instead
+	 * of hanging the bus. Clear every other status bit so unrelated
+	 * sources don't keep re-triggering the (level-sensitive) IRQ.
+	 */
+	status &= ~LTPI_INTR_EN_OP_LINK_LOST;
+	if (status)
+		writel(status, priv->regs + LTPI_INTR_STATUS);
 
 	return IRQ_HANDLED;
 }
@@ -914,8 +922,6 @@ static ssize_t rescan_store(struct device *dev, struct device_attribute *attr,
 			dev_err(priv->dev, "LTPI rescan failed\n");
 			return -EIO;
 		}
-		writel(LTPI_INTR_EN_OP_LINK_LOST,
-		       priv->regs + LTPI_INTR_STATUS);
 		writel(LTPI_INTR_EN_OP_LINK_LOST, priv->regs + LTPI_INTR_EN);
 		aspeed_ltpi_init_mux(priv);
 		if (ltpi_get_link_partner(priv)) {
@@ -1116,8 +1122,6 @@ static int aspeed_ltpi_probe(struct platform_device *pdev)
 			return ret;
 		}
 
-		writel(LTPI_INTR_EN_OP_LINK_LOST,
-		       priv->regs + LTPI_INTR_STATUS);
 		writel(LTPI_INTR_EN_OP_LINK_LOST, priv->regs + LTPI_INTR_EN);
 	}
 

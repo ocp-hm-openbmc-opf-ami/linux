@@ -84,21 +84,56 @@ struct ast8250_data {
 	struct ast8250_udma dma;
 };
 
+static void ast8250_dma_kick_tx(struct uart_port *port)
+{
+	struct ast8250_data *data = port->private_data;
+	struct ast8250_udma *dma = &data->dma;
+	typeof(dma->tport->xmit_fifo) *tmp = &dma->tport->xmit_fifo;
+	struct __kfifo *tx_rb = &tmp->kfifo;
+	u32 queued = tx_rb->in - tx_rb->out;
+	u32 wptr = tx_rb->in;
+
+	if (!queued)
+		return;
+
+	dma_sync_single_for_device(port->dev,
+				   dma->tx_addr, dma->tx_rbsz, DMA_TO_DEVICE);
+
+	/*
+	 * The UDMA engine can't tell "ring completely full" from "ring
+	 * empty" when wptr and rptr land on the same ring phase, so never
+	 * hand it a full ring in one go -- hold back the last byte and let
+	 * it go out on the next kick.
+	 */
+	if (queued >= dma->tx_rbsz)
+		wptr = tx_rb->in - 1;
+
+	aspeed_udma_set_tx_wptr(dma->ch, wptr % dma->tx_rbsz);
+}
+
 static void ast8250_dma_tx_complete(int tx_rb_rptr, void *id)
 {
 	unsigned long flags;
 	struct uart_port *port = id;
 	struct ast8250_data *data = port->private_data;
-	unsigned int count, tail;
+	unsigned int count, tail, queued;
 
 	uart_port_lock_irqsave(port, &flags);
 
+	queued = kfifo_len(&data->dma.tport->xmit_fifo);
 	count = kfifo_out_linear(&data->dma.tport->xmit_fifo, &tail, data->dma.tx_rbsz);
 	count = CIRC_CNT(tx_rb_rptr, tail, data->dma.tx_rbsz);
-	if (!count)
+	if (!count && queued == data->dma.tx_rbsz)
 		count = data->dma.tx_rbsz;
+
+	if (count > queued)
+		count = queued;
+
 	kfifo_dma_out_finish(&data->dma.tport->xmit_fifo, count);
 	port->icount.tx += count;
+
+	if (kfifo_len(&data->dma.tport->xmit_fifo))
+		ast8250_dma_kick_tx(port);
 
 	if (kfifo_len(&data->dma.tport->xmit_fifo) < WAKEUP_CHARS)
 		uart_write_wakeup(port);
@@ -125,14 +160,19 @@ static void ast8250_dma_rx_complete(int rx_rb_wptr, void *id)
 			dma->rx_addr, dma->rx_rbsz, DMA_FROM_DEVICE);
 
 	while (CIRC_CNT(rx_rb->head, rx_rb->tail, rx_rbsz)) {
-		count = CIRC_CNT_TO_END(rx_rb->head, rx_rb->tail, rx_rbsz);
+		u32 chunk = CIRC_CNT_TO_END(rx_rb->head, rx_rb->tail, rx_rbsz);
+		size_t inserted;
 
-		tty_insert_flip_string(tp, rx_rb->buf + rx_rb->tail, count);
+		inserted = tty_insert_flip_string(tp, rx_rb->buf + rx_rb->tail, chunk);
 
-		rx_rb->tail += count;
+		rx_rb->tail += inserted;
 		rx_rb->tail %= rx_rbsz;
 
-		up->icount.rx += count;
+		count += inserted;
+		up->icount.rx += inserted;
+
+		if (inserted < chunk)
+			break;
 	}
 
 	if (count) {
@@ -145,15 +185,47 @@ static void ast8250_dma_rx_complete(int rx_rb_wptr, void *id)
 
 static void ast8250_dma_start_tx(struct uart_port *port)
 {
+	ast8250_dma_kick_tx(port);
+}
+
+static void ast8250_dma_flush_buffer(struct uart_port *port)
+{
 	struct ast8250_data *data = port->private_data;
 	struct ast8250_udma *dma = &data->dma;
-	typeof(&dma->tport->xmit_fifo) tmp = &dma->tport->xmit_fifo;
+	typeof(dma->tport->xmit_fifo) *tmp = &dma->tport->xmit_fifo;
 	struct __kfifo *tx_rb = &tmp->kfifo;
+	u32 rptr = aspeed_udma_get_tx_rptr(dma->ch);
 
-	dma_sync_single_for_device(port->dev,
-			dma->tx_addr, dma->tx_rbsz, DMA_TO_DEVICE);
+	tx_rb->in = rptr;
+	tx_rb->out = rptr;
+	aspeed_udma_set_tx_wptr(dma->ch, rptr);
+}
 
-	aspeed_udma_set_tx_wptr(dma->ch, tx_rb->in);
+static void ast8250_dma_set_termios(struct uart_port *port,
+				    struct ktermios *termios,
+				    const struct ktermios *old)
+{
+	struct ast8250_data *data = port->private_data;
+	struct ast8250_udma *dma = &data->dma;
+	unsigned long flags;
+	u32 wptr;
+
+	serial8250_do_set_termios(port, termios, old);
+
+	if (!data->use_dma)
+		return;
+
+	uart_port_lock_irqsave(port, &flags);
+
+	wptr = aspeed_udma_get_rx_wptr(dma->ch);
+
+	dma->rx_rb->head = wptr;
+	dma->rx_rb->tail = wptr;
+	aspeed_udma_set_rx_rptr(dma->ch, wptr);
+
+	uart_port_unlock_irqrestore(port, flags);
+
+	aspeed_udma_rx_chan_ctrl(dma->ch, ASPEED_UDMA_OP_ENABLE);
 }
 
 static void ast8250_dma_pops_hook(struct uart_port *port)
@@ -163,6 +235,8 @@ static void ast8250_dma_pops_hook(struct uart_port *port)
 	if (first) {
 		ast8250_pops = *port->ops;
 		ast8250_pops.start_tx = ast8250_dma_start_tx;
+		ast8250_pops.flush_buffer = ast8250_dma_flush_buffer;
+		ast8250_pops.set_termios = ast8250_dma_set_termios;
 	}
 
 	first = 0;
@@ -271,7 +345,7 @@ static int ast8250_startup(struct uart_port *port)
 		if (dma_mapping_error(port->dev, dma->tx_addr)) {
 			dev_err(port->dev, "failed to map streaming TX DMA region\n");
 			rc = -ENOMEM;
-			goto free_dma_n_out;
+			goto free_buf;
 		}
 
 		dma->rx_addr = dma_map_single(port->dev, dma->rx_rb->buf,
@@ -279,21 +353,21 @@ static int ast8250_startup(struct uart_port *port)
 		if (dma_mapping_error(port->dev, dma->rx_addr)) {
 			dev_err(port->dev, "failed to map streaming RX DMA region\n");
 			rc = -ENOMEM;
-			goto free_dma_n_out;
+			goto unmap_tx;
 		}
 
 		rc = aspeed_udma_request_tx_chan(dma->ch, dma->tx_addr,
 				dma->tx_rbsz, ast8250_dma_tx_complete, port, dma->tx_tmout_dis);
 		if (rc) {
 			dev_err(port->dev, "failed to request DMA TX channel\n");
-			goto free_dma_n_out;
+			goto unmap_rx;
 		}
 
 		rc = aspeed_udma_request_rx_chan(dma->ch, dma->rx_addr,
 				dma->rx_rbsz, ast8250_dma_rx_complete, port, dma->rx_tmout_dis);
 		if (rc) {
 			dev_err(port->dev, "failed to request DMA RX channel\n");
-			goto free_dma_n_out;
+			goto free_tx_chan;
 		}
 
 		ast8250_dma_pops_hook(port);
@@ -305,7 +379,13 @@ static int ast8250_startup(struct uart_port *port)
 	memset(&port->icount, 0, sizeof(port->icount));
 	return serial8250_do_startup(port);
 
-free_dma_n_out:
+free_tx_chan:
+	aspeed_udma_free_tx_chan(dma->ch);
+unmap_rx:
+	dma_unmap_single(port->dev, dma->rx_addr, dma->rx_rbsz, DMA_FROM_DEVICE);
+unmap_tx:
+	dma_unmap_single(port->dev, dma->tx_addr, dma->tx_rbsz, DMA_TO_DEVICE);
+free_buf:
 	kfree(dma->rx_rb->buf);
 out:
 	return rc;
@@ -450,7 +530,7 @@ static int ast8250_probe(struct platform_device *pdev)
 	if (!data)
 		return -ENOMEM;
 
-	data->dma.rx_rb = devm_kzalloc(dev, sizeof(data->dma.rx_rb), GFP_KERNEL);
+	data->dma.rx_rb = devm_kzalloc(dev, sizeof(*data->dma.rx_rb), GFP_KERNEL);
 	if (!data->dma.rx_rb)
 		return -ENOMEM;
 
@@ -482,7 +562,9 @@ static int ast8250_probe(struct platform_device *pdev)
 	port->startup = ast8250_startup;
 	port->shutdown = ast8250_shutdown;
 	port->private_data = data;
-	uart.bugs |= UART_BUG_TXRACE;
+	/* UART_BUG_TXRACE is a BMC virtual-UART APB quirk; do not apply to physical ports. */
+	if (data->is_vuart)
+		uart.bugs |= UART_BUG_TXRACE;
 
 	rc = uart_read_port_properties(port);
 	if (rc)
@@ -493,6 +575,15 @@ static int ast8250_probe(struct platform_device *pdev)
 	port->uartclk = clk_get_rate(data->clk);
 
 	uart.capabilities = UART_CAP_FIFO | UART_CAP_AFE;
+
+	if (IS_ENABLED(CONFIG_SERIAL_8250_ASPEED_RS485)) {
+		/* NOTEMT lets __stop_tx() drain the shift register so em485 releases DIR. */
+		uart.capabilities |= UART_CAP_NOTEMT;
+		port->rs485_config    = serial8250_em485_config;
+		port->rs485_supported = serial8250_em485_supported;
+		uart.rs485_start_tx   = serial8250_em485_start_tx;
+		uart.rs485_stop_tx    = serial8250_em485_stop_tx;
+	}
 
 	data->line = serial8250_register_8250_port(&uart);
 	if (data->line < 0) {

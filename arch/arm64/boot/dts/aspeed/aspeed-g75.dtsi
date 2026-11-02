@@ -62,6 +62,33 @@
 			};
 		};
 
+		/*
+		 * SGMII PHY at 0x14c01000 is not present on AST2705; that address
+		 * is used by the AONRTC instead.  Remove the node and drop the
+		 * dangling phy reference from mac2.
+		 */
+		/delete-node/ sgmii;
+
+		mac2: ethernet@14070000 {
+			/delete-property/ phys;
+			/delete-property/ phy-names;
+		};
+
+		aonrtc: rtc@14c01000 {
+			compatible = "aspeed,ast2705-aonrtc";
+			reg = <0 0x14c01000 0 0x100>;
+			resets = <&syscon1 SCU1_RESET_AONRTC>;
+			interrupts-extended = <&intc1_1 24>;
+			status = "disabled";
+		};
+
+		cptra_mci: cptra-mci@14c40000 {
+			compatible = "aspeed,ast2705-cptra-mci";
+			reg = <0x0 0x14c40000 0x0 0x10000>;
+			aspeed,scu1 = <&syscon1>;
+			status = "disabled";
+		};
+
 		syscon1: syscon@14c02000 {
 			compatible = "aspeed,ast2705-scu1", "syscon", "simple-mfd";
 			reg = <0x0 0x14c02000 0x0 0x1000>;
@@ -98,4 +125,85 @@
 			};
 		};
 	};
+};
+
+&rng {
+	aspeed,rng-mode = <1>;
+};
+
+&i2c0 {
+	compatible = "aspeed,ast2705-i2c";
+};
+
+&i2c1 {
+	compatible = "aspeed,ast2705-i2c";
+};
+
+&i2c2 {
+	compatible = "aspeed,ast2705-i2c";
+};
+
+&i2c3 {
+	compatible = "aspeed,ast2705-i2c";
+};
+
+&i2c4 {
+	compatible = "aspeed,ast2705-i2c";
+};
+
+&i2c5 {
+	compatible = "aspeed,ast2705-i2c";
+};
+
+&i2c6 {
+	compatible = "aspeed,ast2705-i2c";
+};
+
+&i2c7 {
+	compatible = "aspeed,ast2705-i2c";
+};
+
+&i2c8 {
+	compatible = "aspeed,ast2705-i2c";
+};
+
+&i2c9 {
+	compatible = "aspeed,ast2705-i2c";
+};
+
+&i2c10 {
+	compatible = "aspeed,ast2705-i2c";
+};
+
+&i2c11 {
+	compatible = "aspeed,ast2705-i2c";
+};
+
+&i2c12 {
+	compatible = "aspeed,ast2705-i2c";
+};
+
+&i2c13 {
+	compatible = "aspeed,ast2705-i2c";
+};
+
+&i2c14 {
+	compatible = "aspeed,ast2705-i2c";
+};
+
+&i2c15 {
+	compatible = "aspeed,ast2705-i2c";
+};
+
+&adc0 {
+	compatible = "aspeed,ast2705-adc0";
+};
+
+&adc1 {
+	compatible = "aspeed,ast2705-adc1";
+};
+
+&uhci1 {
+	/* AST2705 uhci1 has a fixed IP revision, no errata workaround needed */
+	/delete-property/ aspeed,dma-quirk;
 };

@@ -48,7 +48,7 @@
 #define   UDMA_RX_CTRL_BUFSZ		GENMASK(1, 0)
 
 #define UDMA_MAX_CHANNEL	16
-#define UDMA_TMOUT		0x200
+#define UDMA_TMOUT		0x40
 
 enum aspeed_udma_bufsz_code {
 	UDMA_BUFSZ_CODE_1KB,
@@ -97,15 +97,17 @@ static int aspeed_udma_get_bufsz_code(u32 buf_sz)
 	return -1;
 }
 
-static u32 aspeed_udma_get_tx_rptr(u32 ch_no)
+u32 aspeed_udma_get_tx_rptr(u32 ch_no)
 {
 	return readl(udma->regs + UDMA_CHX_TX_RD_PTR(ch_no));
 }
+EXPORT_SYMBOL(aspeed_udma_get_tx_rptr);
 
-static u32 aspeed_udma_get_rx_wptr(u32 ch_no)
+u32 aspeed_udma_get_rx_wptr(u32 ch_no)
 {
 	return readl(udma->regs + UDMA_CHX_RX_WR_PTR(ch_no));
 }
+EXPORT_SYMBOL(aspeed_udma_get_rx_wptr);
 
 static void aspeed_udma_set_ptr(u32 ch_no, u32 ptr, bool is_tx)
 {
@@ -251,7 +253,7 @@ static void aspeed_udma_chan_ctrl(u32 ch_no, u32 op, bool is_tx)
 	unsigned long flags;
 	u32 reg_en, reg_rst;
 	u32 reg_en_off = (is_tx) ? UDMA_TX_DMA_EN : UDMA_RX_DMA_EN;
-	u32 reg_rst_off = (is_tx) ? UDMA_TX_DMA_RST : UDMA_TX_DMA_RST;
+	u32 reg_rst_off = (is_tx) ? UDMA_TX_DMA_RST : UDMA_RX_DMA_RST;
 
 	if (ch_no > UDMA_MAX_CHANNEL)
 		return;

@@ -266,6 +266,15 @@ config SERIAL_8250_ASPEED
 	  make use of its 16550A-compatible UART devices with DMA support,
 	  say Y to this option. If unsure, say N.
 
+config SERIAL_8250_ASPEED_RS485
+	bool "Aspeed UART RS-485 (em485 software direction control)"
+	depends on SERIAL_8250_ASPEED
+	help
+	  Enable software RS-485 direction control (em485) on Aspeed
+	  physical UARTs. Direction is driven via rts-gpios when the
+	  UART's device-tree node has linux,rs485-enabled-at-boot-time.
+	  If unsure, say N.
+
 config SERIAL_8250_ASPEED_VUART
 	tristate "Aspeed Virtual UART"
 	depends on SERIAL_8250
